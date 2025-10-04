@@ -1,0 +1,17 @@
+#!/bin/bash
+
+echo "Testing Account Tracking Feature..."
+echo ""
+echo "1. Open browser to: http://localhost:5173"
+echo "2. Type: 'Track Lockheed Martin and Raytheon'"
+echo "3. Press Send"
+echo ""
+echo "Expected behavior:"
+echo "  ✅ Agent should call add_tracked_accounts function"
+echo "  ✅ Both companies should be added to database"
+echo "  ✅ Sidebar should update to show 'All (3)' (including Boeing)"
+echo "  ✅ Agent should respond: '✅ Added 2 companies to your tracked accounts...'"
+echo "  ✅ Toast notification should appear"
+echo ""
+echo "Server logs:"
+tail -f /tmp/server-FINAL-TEST.log | grep -E "FUNCTION|PARSED|SUBMIT|ACCOUNTS"
