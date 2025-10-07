@@ -12,6 +12,8 @@ import { Settings } from './pages/Settings';
 import { SignalSettings } from './pages/SignalSettings';
 import { AdminApprovals } from './pages/AdminApprovals';
 import { PendingApproval } from './pages/PendingApproval';
+import { AllSignals } from './pages/AllSignals';
+import { StreamdownRenderTest } from './pages/StreamdownRenderTest';
 
 function App() {
   return (
@@ -39,13 +41,14 @@ function App() {
             }
           />
           <Route
-            path="/settings-agent"
+            path="/profile-coach"
             element={
               <ProtectedRoute>
                 <CompanyProfile />
               </ProtectedRoute>
             }
           />
+          <Route path="/settings-agent" element={<Navigate to="/profile-coach" replace />} />
           <Route
             path="/research"
             element={
@@ -67,6 +70,22 @@ function App() {
             element={
               <ProtectedRoute>
                 <SignalSettings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/signals"
+            element={
+              <ProtectedRoute>
+                <AllSignals />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/render-test"
+            element={
+              <ProtectedRoute>
+                <StreamdownRenderTest />
               </ProtectedRoute>
             }
           />

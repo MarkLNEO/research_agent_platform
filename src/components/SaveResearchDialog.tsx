@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { X, Loader2, Plus, Trash2, Sparkles } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import { Streamdown } from 'streamdown';
 import type { ResearchDraft, ResearchSource } from '../utils/researchOutput';
 import { normalizeSourceEvents } from '../utils/researchOutput';
 
@@ -183,7 +183,7 @@ export function SaveResearchDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm animate-fadeIn">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm animate-fadeIn" data-testid="save-research-dialog">
       <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col animate-slideUp">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-purple-50">
           <div>
@@ -362,11 +362,9 @@ export function SaveResearchDialog({
                 />
               ) : (
                 <div className="border border-gray-200 rounded-lg px-4 py-3 max-h-64 overflow-y-auto bg-gray-50">
-                  <div className="prose prose-sm max-w-none">
-                    <ReactMarkdown>
-                      {draft.markdown_report?.trim() || '_Nothing to preview yet._'}
-                    </ReactMarkdown>
-                  </div>
+                  <Streamdown className="prose prose-sm max-w-none">
+                    {draft.markdown_report?.trim() || '_Nothing to preview yet._'}
+                  </Streamdown>
                 </div>
               )}
               {validationErrors.markdown_report && (

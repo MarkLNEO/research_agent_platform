@@ -66,7 +66,7 @@ function PriorityBadge({ level }: { level?: string }) {
 
 export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchOutputProps) {
   return (
-    <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 space-y-6">
+    <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 space-y-6" data-testid="research-output">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
@@ -100,7 +100,7 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
 
       {/* Executive Summary */}
       {research.executive_summary && (
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
+        <div className="bg-white border border-gray-200 rounded-xl p-4" data-testid="research-section-executive-summary">
           <h4 className="font-semibold text-gray-900 mb-2">Executive Summary</h4>
           <p className="text-gray-700 leading-relaxed">{research.executive_summary}</p>
         </div>
@@ -130,7 +130,7 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
 
       {/* Company Data */}
       {research.company_data && Object.keys(research.company_data).length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="bg-white border border-gray-200 rounded-xl p-5" data-testid="research-section-company-overview">
           <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
             <Users className="w-5 h-5" />
             Company Overview
@@ -177,10 +177,10 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
         </div>
       )}
 
-      {/* Leadership Team */}
+      {/* Decision Makers */}
       {research.leadership_team && research.leadership_team.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <h4 className="font-semibold text-gray-900 mb-4">Leadership Team</h4>
+        <div className="bg-white border border-gray-200 rounded-xl p-5" data-testid="research-section-decision-makers">
+          <h4 className="font-semibold text-gray-900 mb-4">Decision Makers</h4>
           <div className="space-y-3">
             {research.leadership_team.map((leader: any, idx: number) => (
               <div key={idx} className="flex items-start gap-3 pb-3 border-b border-gray-100 last:border-0">
@@ -211,7 +211,7 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
 
       {/* Buying Signals */}
       {research.buying_signals && research.buying_signals.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="bg-white border border-gray-200 rounded-xl p-5" data-testid="research-section-buying-signals">
           <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
             <Zap className="w-5 h-5 text-blue-700" />
             Buying Signals
@@ -241,7 +241,7 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
 
       {/* Custom Criteria Assessment */}
       {research.custom_criteria_assessment && research.custom_criteria_assessment.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="bg-white border border-gray-200 rounded-xl p-5" data-testid="research-section-custom-criteria">
           <h4 className="font-semibold text-gray-900 mb-4">Custom Criteria Assessment</h4>
           <div className="space-y-2">
             {research.custom_criteria_assessment.map((criterion: any, idx: number) => (
@@ -275,7 +275,7 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
 
       {/* Personalization Points */}
       {research.personalization_points && research.personalization_points.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="bg-white border border-gray-200 rounded-xl p-5" data-testid="research-section-personalization">
           <h4 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
             <Lightbulb className="w-5 h-5 text-yellow-600" />
             Personalization Points
@@ -300,7 +300,7 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
 
       {/* Recommended Actions */}
       {research.recommended_actions && Object.keys(research.recommended_actions).length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="bg-white border border-gray-200 rounded-xl p-5" data-testid="research-section-recommended-actions">
           <h4 className="font-semibold text-gray-900 mb-4">Recommended Actions</h4>
           <div className="space-y-3">
             {research.recommended_actions.timing && (
@@ -325,9 +325,29 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
         </div>
       )}
 
+      {Array.isArray(research.sources) && research.sources.length > 0 && (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-5" data-testid="research-section-sources">
+          <h4 className="font-semibold text-gray-900 mb-3">Sources & Citations</h4>
+          <ul className="space-y-2 text-sm">
+            {research.sources.map((source: any, idx: number) => (
+              <li key={idx} className="flex items-start gap-2">
+                <span className="text-gray-400">{idx + 1}.</span>
+                {source?.url ? (
+                  <a href={source.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700 underline">
+                    {source.title || source.url}
+                  </a>
+                ) : (
+                  <span className="text-gray-700">{source?.title || 'Reference'}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Full Report Link */}
       {research.markdown_report && (
-        <div className="text-center pt-4 border-t border-gray-200">
+        <div className="text-center pt-4 border-t border-gray-200" data-testid="research-section-markdown">
           <button className="text-blue-600 hover:text-blue-700 font-medium text-sm">
             View Full Research Report →
           </button>

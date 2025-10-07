@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, Building, Coins, User, CreditCard as Edit2, X, Check, Activity, AlertTriangle, Radar } from 'lucide-react';
+import { ArrowLeft, Building, Coins, User, CreditCard as Edit2, X, Check, Activity, AlertTriangle } from 'lucide-react';
 
 export function Settings() {
   const { user, credits } = useAuth();
@@ -13,6 +13,8 @@ export function Settings() {
   const [editedCompany, setEditedCompany] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [usageLogs, setUsageLogs] = useState<any[]>([]);
+  const [customCriteria, setCustomCriteria] = useState<any[]>([]);
+  const [signalPreferences, setSignalPreferences] = useState<any[]>([]);
   const [usageSearch, setUsageSearch] = useState('');
   const [usageActionFilter, setUsageActionFilter] = useState('all');
   const [usageAgentFilter, setUsageAgentFilter] = useState('all');
@@ -132,7 +134,7 @@ export function Settings() {
   const loadProfile = async () => {
     if (!user) return;
 
-    const [userResult, companyResult, usageResult] = await Promise.all([
+    const [userResult, companyResult, usageResult, criteriaResult, signalsResult] = await Promise.all([
       supabase
         .from('users')
         .select('*')
@@ -148,11 +150,22 @@ export function Settings() {
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
-        .limit(200)
+        .limit(200),
+      supabase
+        .from('user_custom_criteria')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('display_order', { ascending: true }),
+      supabase
+        .from('user_signal_preferences')
+        .select('*')
+        .eq('user_id', user.id)
     ]);
 
     setProfile({ user: userResult.data, company: companyResult.data });
     setUsageLogs(usageResult.data || []);
+    setCustomCriteria(criteriaResult.data || []);
+    setSignalPreferences(signalsResult.data || []);
     setLoading(false);
   };
 
@@ -179,11 +192,11 @@ export function Settings() {
       </div>
 
       <div className="max-w-4xl mx-auto p-6 space-y-6">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-              <User className="w-5 h-5 text-blue-700" />
-            </div>
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+            <User className="w-5 h-5 text-blue-700" />
+          </div>
             <h2 className="text-xl font-semibold text-gray-900">Account Information</h2>
           </div>
 
@@ -203,8 +216,69 @@ export function Settings() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Subscription Tier</label>
               <div className="text-gray-900 capitalize">{profile?.user?.subscription_tier}</div>
-            </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+            <Activity className="w-5 h-5 text-purple-700" />
           </div>
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">What I'm monitoring for you</h2>
+            <p className="text-sm text-gray-600">Adjust these in the Profile Coach at any time.</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-gray-800 mb-2">Custom criteria</h3>
+            {customCriteria.length > 0 ? (
+              <ul className="space-y-2 text-sm text-gray-700">
+                {customCriteria.map((criterion: any, idx) => (
+                  <li key={criterion.id || `${criterion.field_name}-${idx}`} className="flex items-start gap-2">
+                    <span className="mt-0.5 text-xs text-gray-400">{idx + 1}.</span>
+                    <div>
+                      <span className="font-medium text-gray-900">{criterion.field_name}</span>
+                      <span className="ml-2 text-xs text-gray-500">{criterion.field_type} • {criterion.importance}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-gray-500">No custom criteria yet. I’ll default to your ICP until you add more.</p>
+            )}
+          </div>
+
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-gray-800 mb-2">Signal alerts</h3>
+            {signalPreferences.length > 0 ? (
+              <ul className="space-y-2 text-sm text-gray-700">
+                {signalPreferences.map((signal: any, idx) => (
+                  <li key={signal.id || `${signal.signal_type}-${idx}`} className="flex items-start gap-2">
+                    <span className="mt-0.5 text-xs text-gray-400">{idx + 1}.</span>
+                    <div>
+                      <span className="font-medium text-gray-900">{signal.signal_type.replace(/_/g, ' ')}</span>
+                      <span className="ml-2 text-xs text-gray-500">{signal.importance} • last {signal.lookback_days} days</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-gray-500">No monitoring rules yet. Set them up to get proactive alerts.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <button
+            onClick={() => navigate('/profile-coach')}
+            className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700"
+          >
+            Tune in Profile Coach →
+          </button>
+        </div>
+      </div>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">

@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 import { Search } from 'lucide-react';
 
 export function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
   const { signIn } = useAuth();
   const navigate = useNavigate();
@@ -33,16 +35,20 @@ export function Login() {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4">
             <Search className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">Research Agent</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Rebar Research Agent</h1>
           <p className="text-gray-600 mt-2">AI-powered sales intelligence platform</p>
+          <div className="mt-4 flex flex-col items-center justify-center gap-1 text-sm text-gray-600">
+            <span className="uppercase tracking-wide text-xs text-gray-500">Powered by</span>
+            <img src="/logo_black.png" alt="Rebar" className="h-8 w-auto drop-shadow-sm" />
+          </div>
         </div>
 
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8">
           <h2 className="text-2xl font-semibold text-gray-900 mb-6">Sign In</h2>
 
-          {error && (
+          {(error || info) && (
             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
-              {error}
+              {error || info}
             </div>
           )}
 
@@ -64,9 +70,31 @@ export function Login() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Password
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Password
+                </label>
+                <button
+                  type="button"
+                  className="text-sm text-blue-600 hover:text-blue-700"
+                  onClick={async () => {
+                    setError('');
+                    setInfo('');
+                    try {
+                      if (!email) { setError('Enter your email above, then click Forgot password.'); return; }
+                      const redirectTo = `${window.location.origin}/login`;
+                      const { error: err } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+                      if (err) throw err;
+                      setInfo('If the email exists, we sent a reset link. Check your inbox.');
+                    } catch (e: any) {
+                      setError(e?.message || 'Failed to send reset link.');
+                    }
+                  }}
+                  aria-label="Forgot password"
+                >
+                  Forgot password?
+                </button>
+              </div>
               <input
                 type="password"
                 value={password}
@@ -101,6 +129,7 @@ export function Login() {
             </Link>
           </div>
         </div>
+        <p className="mt-6 text-center text-xs text-gray-500">© {new Date().getFullYear()} Rebar. All rights reserved.</p>
       </div>
     </div>
   );

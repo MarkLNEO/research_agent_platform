@@ -121,7 +121,7 @@ export function useUserProfile(forceRefresh = false) {
   }, [user?.id, loadProfile]);
 
   const isProfileComplete = useCallback(() => {
-    const { profile, customCriteriaCount, signalPreferencesCount } = profileData;
+    const { profile } = profileData;
     if (!profile) return false;
 
     // If onboarding is explicitly marked as complete, allow access to dashboard

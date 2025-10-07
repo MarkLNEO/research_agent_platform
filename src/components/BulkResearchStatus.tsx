@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Clock, CheckCircle, AlertCircle, Download } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useToast } from './ToastProvider';
@@ -31,16 +31,30 @@ export function BulkResearchStatus({ onJobComplete }: BulkResearchStatusProps) {
   const [jobs, setJobs] = useState<BulkResearchJob[]>([]);
   const [loading, setLoading] = useState(true);
   const { addToast } = useToast();
+  const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const pollModeRef = useRef<'fast' | 'slow' | null>(null);
 
   useEffect(() => {
-    loadJobs();
-    
-    // Poll for updates every 10 seconds
-    const interval = setInterval(loadJobs, 10000);
-    return () => clearInterval(interval);
+    void loadJobs();
+    const triggerReload = () => {
+      void loadJobs();
+    };
+    window.addEventListener('bulk-research:job-started', triggerReload);
+    return () => {
+      window.removeEventListener('bulk-research:job-started', triggerReload);
+      stopPolling();
+    };
   }, []);
 
-  const loadJobs = async () => {
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+      pollModeRef.current = null;
+    }
+  }, []);
+
+  const loadJobs = useCallback(async (isPoll = false) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
@@ -57,48 +71,121 @@ export function BulkResearchStatus({ onJobComplete }: BulkResearchStatusProps) {
         return;
       }
 
-      const previousJobs = jobs;
-      setJobs(data || []);
-
-      // Check for newly completed jobs
-      if (previousJobs.length > 0) {
-        const newlyCompleted = (data || []).filter(job => 
-          job.status === 'completed' && 
-          !previousJobs.find(prev => prev.id === job.id && prev.status === 'completed')
-        );
-
-        newlyCompleted.forEach(job => {
-          addToast({
-            type: 'success',
-            title: 'Bulk research complete',
-            description: `Research finished for ${job.total_count} companies. Check your results below.`,
-          });
-          
-          if (onJobComplete) {
-            onJobComplete(job.id);
-          }
-        });
+      const nextJobs = data || [];
+      const hasActiveJobs = nextJobs.some(job => job.status === 'pending' || job.status === 'running');
+      if (hasActiveJobs) {
+        if (!isPoll || pollModeRef.current !== 'fast') {
+          stopPolling();
+          pollRef.current = setInterval(() => { void loadJobs(true); }, 5000);
+          pollModeRef.current = 'fast';
+        }
+      } else if (!isPoll) {
+        stopPolling();
       }
 
-    } catch (error) {
-      console.error('Error loading bulk research jobs:', error);
+      setJobs(prev => {
+        if (prev.length > 0) {
+          const newlyCompleted = nextJobs.filter(job => job.status === 'completed' && !prev.find(prevJob => prevJob.id === job.id && prevJob.status === 'completed'));
+          newlyCompleted.forEach(job => {
+            addToast({
+              type: 'success',
+              title: 'Bulk research complete',
+              description: `Research finished for ${job.total_count} companies. Check your results below.`,
+            });
+            if (onJobComplete) {
+              onJobComplete(job.id);
+            }
+          });
+        }
+        return nextJobs;
+      });
+
+    } catch (_error) {
+      console.error('Error loading bulk research jobs:', _error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [addToast, onJobComplete, stopPolling]);
+
+  useEffect(() => {
+    void loadJobs();
+    const triggerReload = () => {
+      void loadJobs();
+    };
+    window.addEventListener('bulk-research:job-started', triggerReload);
+    return () => {
+      window.removeEventListener('bulk-research:job-started', triggerReload);
+      stopPolling();
+    };
+  }, [loadJobs, stopPolling]);
 
   const downloadResults = (job: BulkResearchJob) => {
     if (!job.results) return;
 
     const csvContent = [
-      'Company,Status,Research Result,Error,Completed At',
-      ...job.results.map(result => [
-        result.company,
-        result.status,
-        result.result ? `"${result.result.replace(/"/g, '""')}"` : '',
-        result.error || '',
-        result.completed_at
-      ].join(','))
+      'Company,Status,ICP Score,Signal Score,Composite Score,Key Decision Makers,Top Signals,Personalization Points,Completed At',
+      ...job.results.map(result => {
+        const researchContent = {
+          icpScore: '',
+          signalScore: '',
+          compositeScore: '',
+          decisionMakers: '',
+          topSignals: '',
+          personalizationPoints: ''
+        };
+
+        if (result.result) {
+          try {
+            const parsed = JSON.parse(result.result);
+            const content = parsed.content || parsed.output || parsed.message || '';
+
+            // Extract key metrics from the research content
+            const icpMatch = content.match(/ICP Fit Score:?\s*(\d+\/100|\d+%)/i);
+            const signalMatch = content.match(/Signal Score:?\s*(\d+\/100|\d+%)/i);
+            const compositeMatch = content.match(/Composite score[^=]*=\s*[^=]*=\s*(\d+\/100|\d+%)/i);
+
+            researchContent.icpScore = icpMatch ? icpMatch[1] : '';
+            researchContent.signalScore = signalMatch ? signalMatch[1] : '';
+            researchContent.compositeScore = compositeMatch ? compositeMatch[1] : '';
+
+            // Extract decision makers (look for leadership section)
+            const leadershipMatch = content.match(/LEADERSHIP[^]*?(?=\n\d+\)|###|\n\n)/i);
+            if (leadershipMatch) {
+              const leaders = leadershipMatch[0].match(/([A-Z][a-z]+\s+[A-Z][a-z]+)\s*—\s*([^(\n]+)/g) || [];
+              researchContent.decisionMakers = leaders.slice(0, 3).map((l: string) => l.replace(/—/g, '-')).join('; ');
+            }
+
+            // Extract top signals
+            const signalsMatch = content.match(/RECENT ACTIVITY[^]*?(?=\n\d+\)|###|\n\n)/i);
+            if (signalsMatch) {
+              const signals = signalsMatch[0].match(/•\s*([^•\n]+)/g) || [];
+              researchContent.topSignals = signals.slice(0, 3).map((s: string) => s.replace(/[•\n]/g, '').trim()).join('; ');
+            }
+
+            // Extract personalization points (count them)
+            const personalizationMatch = content.match(/PERSONALIZATION POINTS[^]*?(?=\n\d+\)|###|\n\n)/i);
+            if (personalizationMatch) {
+              const points = personalizationMatch[0].match(/•\s*[^•\n]+/g) || [];
+              researchContent.personalizationPoints = `${points.length} actionable points`;
+            }
+          } catch (_e) {
+            // If parsing fails, try to extract what we can from raw text
+            researchContent.topSignals = 'See full research output';
+          }
+        }
+
+        return [
+          result.company,
+          result.status,
+          researchContent.icpScore,
+          researchContent.signalScore,
+          researchContent.compositeScore,
+          `"${researchContent.decisionMakers.replace(/"/g, '""')}"`,
+          `"${researchContent.topSignals.replace(/"/g, '""')}"`,
+          researchContent.personalizationPoints,
+          result.completed_at
+        ].join(',');
+      })
     ].join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv' });

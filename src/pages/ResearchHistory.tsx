@@ -411,65 +411,100 @@ export function ResearchHistory() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-gray-50" data-testid="research-history">
       <Sidebar
         onNewChat={() => navigate('/')}
         userName={getUserInitial()}
         chats={chats}
         currentChatId={null}
         onChatSelect={() => navigate('/')}
-        onCompanyProfile={() => navigate('/settings-agent')}
+        onCompanyProfile={() => navigate('/profile-coach')}
         onSettings={() => navigate('/settings')}
+        onHome={() => navigate('/')}
       />
 
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="bg-white border-b border-gray-200 px-6 py-4">
-          <h1 className="text-2xl font-bold text-gray-900 mb-4">Research History</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Research History</h1>
+          <p className="text-sm text-gray-600 mb-4">
+            This list shows the reports you save from the Company Researcher. Use the “Save to Research” button after a run and it will appear here for later reference or export.
+          </p>
 
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search research..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
+          <div className="space-y-3">
+            <div>
+              <label htmlFor="history-search" className="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">
+                Search all research
+              </label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input
+                  id="history-search"
+                  type="text"
+                  placeholder="Search by company, topic, or keyword"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  data-testid="research-history-search"
+                  autoComplete="off"
+                />
+              </div>
             </div>
 
-            <div className="flex gap-2">
-              <select
-                value={filterType}
-                onChange={(e) => setFilterType(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="all">All Types</option>
-                <option value="company">Company</option>
-                <option value="prospect">Prospect</option>
-                <option value="competitive">Competitive</option>
-                <option value="market">Market</option>
-              </select>
+            <div className="flex flex-wrap gap-2 text-xs" aria-label="Filters and sorting controls">
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500 uppercase tracking-wide">Type</span>
+                <div className="flex gap-1">
+                  {[
+                    { value: 'all', label: 'All' },
+                    { value: 'company', label: 'Company' },
+                    { value: 'prospect', label: 'Prospect' },
+                    { value: 'competitive', label: 'Competitive' },
+                    { value: 'market', label: 'Market' },
+                  ].map(option => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`px-2.5 py-1 rounded-full border ${filterType === option.value ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'}`}
+                      onClick={() => setFilterType(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-              <select
-                value={filterPriority}
-                onChange={(e) => setFilterPriority(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="all">All Priorities</option>
-                <option value="hot">🔥 Hot</option>
-                <option value="warm">⚡ Warm</option>
-                <option value="standard">📍 Standard</option>
-              </select>
+              <div className="flex items-center gap-1">
+                <span className="text-gray-500 uppercase tracking-wide">Priority</span>
+                <div className="flex gap-1">
+                  {[
+                    { value: 'all', label: 'All' },
+                    { value: 'hot', label: '🔥 Hot' },
+                    { value: 'warm', label: '⚡ Warm' },
+                    { value: 'standard', label: '📍 Standard' },
+                  ].map(option => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`px-2.5 py-1 rounded-full border ${filterPriority === option.value ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'}`}
+                      onClick={() => setFilterPriority(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as 'recent' | 'score')}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="recent">Most Recent</option>
-                <option value="score">Highest Score</option>
-              </select>
+              <div className="flex items-center gap-1 ml-auto">
+                <span className="text-gray-500 uppercase tracking-wide">Sort</span>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as 'recent' | 'score')}
+                  className="px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                >
+                  <option value="recent">Most recent</option>
+                  <option value="score">Highest score</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -521,7 +556,7 @@ export function ResearchHistory() {
               <p className="text-gray-600 mb-6">
                 {searchQuery || filterType !== 'all' || filterPriority !== 'all'
                   ? 'Try adjusting your filters or search query.'
-                  : 'Start researching companies to see results here.'}
+                  : 'Run company research and use “Save to Research” to keep the report here for future reference.'}
               </p>
               <button
                 onClick={() => navigate('/')}
@@ -586,6 +621,8 @@ export function ResearchHistory() {
                           ? 'border-blue-400 ring-2 ring-blue-100'
                           : 'border-gray-200 hover:border-blue-300 hover:shadow-md'
                       }`}
+                      data-testid="research-history-card"
+                      data-subject={item.subject}
                     >
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex items-start gap-3 flex-1">

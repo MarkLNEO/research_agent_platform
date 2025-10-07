@@ -1,0 +1,94 @@
+[
+  {
+    "file": "test-artifacts/rubric/onboarding-flow-overview.png",
+    "scores": {
+      "aesthetics": 8,
+      "hierarchy": 7,
+      "clarity": 8,
+      "momentum": 7,
+      "proactive_greeting_fit": 2,
+      "deep_research_fit": 2,
+      "accessibility": 7
+    },
+    "issues": [
+      "No time-of-day or first-name greeting",
+      "Missing hot signal highlights and actionable counts",
+      "No summary stats of tracked accounts or items needing updates",
+      "Lacks smart suggestion chips for next-best actions",
+      "No upcoming meetings or prep section",
+      "No executive summary or recent signals preview",
+      "No decision-maker personalization or ICP fit score",
+      "No citations or sources shown",
+      "Typing indicator leaves an incomplete sentence",
+      "Redundant topics list appears twice",
+      "Use recommended is unclear without rationale",
+      "Checkbox chips may have low contrast",
+      "Keyboard focus and tab order not evident",
+      "Primary CTA lacks clarity on what happens next",
+      "Unclear if selections impact speed or depth"
+    ],
+    "improvements": [
+      "Add personalized time-of-day greeting with the user's name",
+      "Surface hot signals with counts, severity, and quick actions",
+      "Show summary cards for accounts tracked, hot, and needs update",
+      "Add smart suggestion chips for next-best actions",
+      "Include upcoming meetings with prep if calendar is connected",
+      "Provide an executive summary preview with three recent signals",
+      "Show key decision makers with brief personalization",
+      "Add an ICP fit score and a recommended next action",
+      "Attach citations or sources to example insights",
+      "Replace typing indicator with clear, complete confirmation copy",
+      "Remove duplicated static list; keep only the selectable chips",
+      "Explain recommended selections with impact estimates",
+      "Improve color contrast and visible keyboard focus states",
+      "Clarify the Create my agent outcome and ETA",
+      "Display selected count and quick Select/Deselect controls"
+    ],
+    "notes": "Polished onboarding UI with clear topic selection but missing the proactive greeting and deep-research preview elements needed for a high-signal home experience."
+  },
+  {
+    "file": "test-artifacts/rubric/onboarding-step-09-focus.png",
+    "scores": {
+      "aesthetics": 8,
+      "hierarchy": 8,
+      "clarity": 7,
+      "momentum": 8,
+      "proactive_greeting_fit": 2,
+      "deep_research_fit": 3,
+      "accessibility": 7
+    },
+    "issues": [
+      "No personalized time-of-day greeting or first name",
+      "No hot-signal counts or severity",
+      "Missing summary stats of accounts tracked/hot/needs update",
+      "No next-best-action suggestion chips",
+      "No upcoming meetings or prep items",
+      "No executive summary or research preview",
+      "No recent signals listed",
+      "No ICP fit score or recommended next action",
+      "No decision-maker list with personalization",
+      "No citations or source links",
+      "Low contrast on light-blue outline buttons/chips",
+      "Inconsistent use of ampersands and casing in labels",
+      "Unclear why Funding & financials is unchecked when Use recommended is active",
+      "Chat transcript competes with the Final step panel for attention",
+      "No Back/edit link to earlier steps",
+      "No guidance on how many topics should be selected"
+    ],
+    "improvements": [
+      "Add a personalized time-of-day greeting with the user's first name",
+      "Surface hot signals with counts/severity and one-click actions",
+      "Show summary stats: total accounts tracked, hot, and needs update",
+      "Introduce next-best-action chips and a contextual Create agent with X focus CTA",
+      "If calendar is connected, display upcoming meetings with prep checklists",
+      "Provide a compact executive summary preview with three or more recent signals and sources",
+      "Display ICP fit score, at least two decision makers with personalization, and a recommended next action",
+      "Clarify Use recommended logic with Why tooltips and rationale for each preselected topic",
+      "Improve contrast, focus states, and ARIA labels for chips/checkboxes for accessibility",
+      "Add a Preview output link and keep the primary CTA sticky to maintain momentum",
+      "Include a Back to step 8 control and show remaining time",
+      "Normalize label casing and replace ampersands with 'and' for readability"
+    ],
+    "notes": "Clean, modern final-step UI that guides selection well, but it lacks the proactive greeting and deep-research elements (signals, summaries, decision-makers, sources) needed to meet the rubric."
+  }
+]

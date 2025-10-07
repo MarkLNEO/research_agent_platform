@@ -17,6 +17,31 @@ export interface TrackedAccount {
   last_contacted_at?: string;
   notes?: string;
   updated_at: string;
+  signal_count?: number;
+  unviewed_signal_count?: number;
+  recent_signals?: Array<{
+    id: string;
+    signal_type: string;
+    severity: 'critical' | 'high' | 'medium' | 'low';
+    description: string;
+    signal_date: string;
+    viewed: boolean;
+    score?: number;
+  }>;
+  latest_signal?: {
+    id: string;
+    signal_type: string;
+    severity: 'critical' | 'high' | 'medium' | 'low';
+    description: string;
+    signal_date: string;
+    viewed: boolean;
+    score?: number;
+  } | null;
+  latest_signal_detected_at?: string | null;
+  latest_signal_relative?: string | null;
+  latest_signal_summary?: string | null;
+  last_researched_relative?: string | null;
+  last_updated_relative?: string | null;
 }
 
 export interface AccountSignal {
@@ -82,16 +107,12 @@ export async function fetchDashboardGreeting(): Promise<DashboardGreeting> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not authenticated');
 
-  const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/dashboard-greeting`,
-    {
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`,
-        'apikey': `${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    }
-  );
+  const response = await fetch(`/api/dashboard/greeting`, {
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+  });
 
   if (!response.ok) {
     const error = await response.json();
@@ -113,24 +134,20 @@ export async function addTrackedAccount(
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not authenticated');
 
-  const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-accounts`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`,
-        'apikey': `${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        action: 'add',
-        company_name: companyName,
-        company_url: companyUrl,
-        industry,
-        employee_count: employeeCount,
-      }),
-    }
-  );
+  const response = await fetch(`/api/accounts/manage`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      action: 'add',
+      company_name: companyName,
+      company_url: companyUrl,
+      industry,
+      employee_count: employeeCount,
+    }),
+  });
 
   if (!response.ok) {
     const error = await response.json();
@@ -164,21 +181,14 @@ export async function bulkAddAccounts(
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not authenticated');
 
-  const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-accounts`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`,
-        'apikey': `${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        action: 'bulk_add',
-        accounts,
-      }),
-    }
-  );
+  const response = await fetch(`/api/accounts/manage`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ action: 'bulk_add', accounts }),
+  });
 
   if (!response.ok) {
     const error = await response.json();
@@ -200,21 +210,14 @@ export async function listTrackedAccounts(
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not authenticated');
 
-  const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-accounts`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`,
-        'apikey': `${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        action: 'list',
-        filter,
-      }),
-    }
-  );
+  const response = await fetch(`/api/accounts/manage`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ action: 'list', filter }),
+  });
 
   if (!response.ok) {
     const error = await response.json();
@@ -238,22 +241,14 @@ export async function updateTrackedAccount(
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not authenticated');
 
-  const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-accounts`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`,
-        'apikey': `${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        action: 'update',
-        account_id: accountId,
-        updates,
-      }),
-    }
-  );
+  const response = await fetch(`/api/accounts/manage`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ action: 'update', account_id: accountId, updates }),
+  });
 
   if (!response.ok) {
     const error = await response.json();
@@ -271,26 +266,33 @@ export async function deleteTrackedAccount(accountId: string): Promise<void> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not authenticated');
 
-  const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-accounts`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`,
-        'apikey': `${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        action: 'delete',
-        account_id: accountId,
-      }),
-    }
-  );
+  const response = await fetch(`/api/accounts/manage`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ action: 'delete', account_id: accountId }),
+  });
 
   if (!response.ok) {
     const error = await response.json();
     throw new Error(error.error || 'Failed to delete account');
   }
+}
+
+/**
+ * Fetch signals for a specific tracked account
+ */
+export async function getAccountSignals(accountId: string): Promise<AccountSignal[]> {
+  const { data, error } = await supabase
+    .from('account_signals')
+    .select('*')
+    .eq('account_id', accountId)
+    .order('signal_date', { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as AccountSignal[];
 }
 
 /**

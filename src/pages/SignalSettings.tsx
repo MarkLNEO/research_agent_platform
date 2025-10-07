@@ -27,6 +27,11 @@ export function SignalSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState('all');
+  const [nlText, setNlText] = useState('');
+  const [extracting, setExtracting] = useState(false);
+
+  const hasPreferences = preferences.length > 0;
+  const hasUnsavedChanges = preferences.some(pref => pref.isNew || !pref.id);
 
   useEffect(() => {
     loadPreferences();
@@ -131,7 +136,7 @@ export function SignalSettings() {
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white" data-testid="signal-settings">
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-4xl mx-auto flex items-center gap-4">
           <button
@@ -153,7 +158,7 @@ export function SignalSettings() {
             <Filter className="w-4 h-4" />
             <span>{filteredPreferences.length} of {preferences.length} signals showing</span>
           </div>
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
             <select
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
@@ -167,20 +172,92 @@ export function SignalSettings() {
                 </option>
               ))}
             </select>
-            <button
-              type="button"
-              onClick={() => addPreference()}
-              className="inline-flex items-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Add signal
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => addPreference()}
+            className="inline-flex items-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add signal
+          </button>
         </div>
+      </div>
 
-        {preferences.length === 0 ? (
-          <div className="bg-gray-50 border border-dashed border-gray-300 rounded-xl p-6 text-center text-sm text-gray-600">
-            No signal preferences configured yet. Add a signal to start monitoring.
+      {/* Conversational Extraction */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
+        <div>
+          <label htmlFor="signal-extract" className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+            Describe a signal you care about
+          </label>
+          <textarea
+            id="signal-extract"
+            value={nlText}
+            onChange={(e) => setNlText(e.target.value)}
+            placeholder="Example: Alert me when aerospace companies announce a new CISO or experience a security breach."
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-describedby="signal-extract-help"
+          />
+          <p id="signal-extract-help" className="mt-2 text-xs text-gray-500">
+            I will translate natural language into a structured monitoring rule you can tweak before saving.
+          </p>
+        </div>
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-gray-500">Need inspiration? Try "Funding rounds in defense startups" or "Leadership changes for CIO/CTO".</div>
+          <button
+            disabled={extracting || !nlText.trim()}
+            onClick={async () => {
+              try {
+                setExtracting(true);
+                const { data: session } = await (await import('../lib/supabase')).supabase.auth.getSession();
+                const auth = session?.session?.access_token;
+                const resp = await fetch('/api/signals/extract', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...(auth ? { 'Authorization': `Bearer ${auth}` } : {}) },
+                  body: JSON.stringify({ text: nlText })
+                });
+                const json = await resp.json();
+                if (!resp.ok) throw new Error(json?.error || 'Extraction failed');
+                const p = json.preference || {};
+                if (!p.signal_type) {
+                  addToast({ type: 'error', title: 'No preference extracted' });
+                  return;
+                }
+                setPreferences(prev => [{
+                  signal_type: p.signal_type,
+                  importance: p.importance || 'important',
+                  lookback_days: Math.max(7, Math.min(365, Number(p.lookback_days) || 90)),
+                  config: p.config || {},
+                  isNew: true,
+                }, ...prev]);
+                addToast({ type: 'success', title: 'Extracted preference', description: 'Review and save.' });
+              } catch (e: any) {
+                addToast({ type: 'error', title: 'Failed to extract', description: e?.message || String(e) });
+              } finally {
+                setExtracting(false);
+              }
+            }}
+            className="px-3 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-blue-300"
+          >
+            {extracting ? 'Extracting…' : 'Extract from text'}
+          </button>
+        </div>
+      </div>
+
+        {!hasPreferences ? (
+          <div className="bg-gray-50 border border-dashed border-gray-300 rounded-xl p-6 text-sm text-gray-700">
+            <p className="font-medium text-gray-900 mb-3">Start with a recommended signal</p>
+            <div className="flex flex-wrap gap-2">
+              {BUILT_IN_SIGNALS.slice(0, 4).map((signal) => (
+                <button
+                  key={signal.id}
+                  onClick={() => addPreference(signal.id)}
+                  className="px-3 py-1.5 text-xs bg-white border border-gray-300 rounded-full hover:border-blue-400 hover:bg-blue-50"
+                >
+                  {signal.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-4 text-xs text-gray-500">You can add more at any time. I’ll alert you every time these signals fire on your tracked accounts.</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -291,11 +368,11 @@ export function SignalSettings() {
           <button
             type="button"
             onClick={savePreferences}
-            disabled={saving}
+            disabled={saving || !hasPreferences}
             className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus className="w-4 h-4" />
-            {saving ? 'Saving...' : 'Save changes'}
+            {saving ? 'Saving...' : hasUnsavedChanges ? 'Save changes' : 'Nothing to save'}
           </button>
         </div>
       </div>

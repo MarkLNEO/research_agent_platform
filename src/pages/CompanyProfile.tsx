@@ -8,7 +8,7 @@ import { MessageBubble } from '../components/MessageBubble';
 import { MessageInput } from '../components/MessageInput';
 import { ProfileCompleteness } from '../components/ProfileCompleteness';
 import { ThinkingIndicator } from '../components/ThinkingIndicator';
-import { ArrowLeft, User, ChevronDown } from 'lucide-react';
+import { ArrowLeft, User, ChevronDown, ClipboardList } from 'lucide-react';
 import type { TrackedAccount } from '../services/accountService';
 
 interface Message {
@@ -147,7 +147,7 @@ export function CompanyProfile() {
       .from('chats')
       .insert({
         user_id: user.id,
-        title: 'Settings Agent',
+        title: 'Profile Coach',
         agent_type: 'settings_agent',
       })
       .select()
@@ -196,10 +196,7 @@ export function CompanyProfile() {
         .single();
 
       if (savedAssistantMsg) {
-        setMessages(prev => {
-          // Replace streaming view with saved message
-          return [savedAssistantMsg];
-        });
+        setMessages([savedAssistantMsg]);
         setStreamingMessage('');
       }
 
@@ -210,7 +207,7 @@ export function CompanyProfile() {
 
     } catch (error) {
       console.error('Error sending initial greeting:', error);
-      addToast({ type: 'error', title: 'Failed to initialize', description: 'Could not start the Settings Agent. Please try again.' });
+      addToast({ type: 'error', title: 'Failed to initialize', description: 'Could not start the Profile Coach. Please try again.' });
     } finally {
       setLoading(false);
     }
@@ -331,7 +328,8 @@ export function CompanyProfile() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('No session');
 
-      const chatUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+      // Use Vercel API by default; opt-out only if explicitly disabled
+      const chatUrl = '/api/ai/chat';
       // Instrumentation start
       const startedAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
       try { window.dispatchEvent(new CustomEvent('llm:request', { detail: { page: 'settings', url: chatUrl, ts: Date.now() } })); } catch {}
@@ -342,7 +340,6 @@ export function CompanyProfile() {
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
-            'apikey': `${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
           },
           body: JSON.stringify({
             messages: conversationHistory,
@@ -419,9 +416,9 @@ export function CompanyProfile() {
                     }];
                   });
                 }
-                // Responses API format
-                else if (parsed.type === 'response.output_text.delta') {
-                  const content = parsed.delta;
+                // Responses API format (supports both canonical and simplified events)
+                else if (parsed.type === 'response.output_text.delta' || parsed.type === 'content') {
+                  const content = parsed.delta || parsed.content;
                   if (content) {
                     if (!startedOutput) {
                       startedOutput = true;
@@ -510,7 +507,8 @@ export function CompanyProfile() {
             continue;
           }
 
-          const updateProfileUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-profile`;
+          // Route profile updates through Vercel API proxy
+          const updateProfileUrl = '/api/update-profile';
 
           const response = await fetch(updateProfileUrl, {
             method: 'POST',
@@ -554,7 +552,7 @@ export function CompanyProfile() {
         chats={chats}
         currentChatId={currentChatId}
         onChatSelect={setCurrentChatId}
-        onCompanyProfile={() => navigate('/settings-agent')}
+        onCompanyProfile={() => navigate('/profile-coach')}
         onResearchHistory={() => navigate('/research')}
         onSettings={() => navigate('/settings')}
         onAccountClick={(account: TrackedAccount) => {
@@ -562,6 +560,7 @@ export function CompanyProfile() {
           navigate(`/?q=${encodeURIComponent(`Research ${account.company_name}`)}`);
         }}
         onAddAccount={() => navigate('/')}
+        onHome={() => navigate('/')}
       />
 
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -583,7 +582,7 @@ export function CompanyProfile() {
                 className="flex items-center gap-2 text-sm text-gray-700 px-3 py-1.5 bg-gray-50 rounded-lg hover:bg-gray-100"
               >
                 <User className="w-4 h-4" />
-                <span className="font-medium">Settings Agent</span>
+                <span className="font-medium">Profile Coach</span>
                 <ChevronDown className="w-3.5 h-3.5 text-gray-500" />
               </button>
               {agentMenuOpen && (
@@ -592,13 +591,13 @@ export function CompanyProfile() {
                     className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
                     onClick={() => { setAgentMenuOpen(false); navigate('/'); }}
                   >
-                    Research Agent
+                    Company Researcher
                   </button>
                   <button
                     className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                    onClick={() => { setAgentMenuOpen(false); navigate('/settings-agent'); }}
+                    onClick={() => { setAgentMenuOpen(false); navigate('/profile-coach'); }}
                   >
-                    Settings Agent
+                    Profile Coach
                   </button>
                 </div>
               )}
@@ -620,7 +619,56 @@ export function CompanyProfile() {
               </div>
             ) : (
               <div className="space-y-6">
-                {/* Streaming status / thinking events */}
+                {profileData && (
+                  <ProfileCompleteness
+                    profile={{
+                      ...profileData,
+                      custom_criteria_count: customCriteriaCount,
+                      signal_preferences_count: signalPreferencesCount
+                    }}
+                  />
+                )}
+                <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-5 shadow-sm">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 text-blue-600">
+                      <ClipboardList className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1">
+                      <h2 className="text-base font-semibold text-blue-900">What the Profile Coach captures for every account</h2>
+                      <p className="text-sm text-blue-800 mt-1">
+                        I keep your research configuration transparent so you always know the data points we\'re calibrating against.
+                        Update anything here and future research will align instantly.
+                      </p>
+                      <ul className="mt-4 grid gap-2 text-sm text-blue-900 sm:grid-cols-2">
+                        <li className="flex items-center gap-2"><span className="text-blue-600">•</span> Ideal customer profile & industry focus</li>
+                        <li className="flex items-center gap-2"><span className="text-blue-600">•</span> Target roles, seniority, and departments</li>
+                        <li className="flex items-center gap-2"><span className="text-blue-600">•</span> Buying signals you care about most</li>
+                        <li className="flex items-center gap-2"><span className="text-blue-600">•</span> Custom qualification criteria & disqualifiers</li>
+                        <li className="flex items-center gap-2"><span className="text-blue-600">•</span> Competitors and adjacent vendors to monitor</li>
+                        <li className="flex items-center gap-2"><span className="text-blue-600">•</span> Preferred output formats & tone</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+                {messages.map((message, index) => (
+                  <MessageBubble
+                    key={message.id}
+                    role={message.role}
+                    content={message.content}
+                    userName={getUserInitial()}
+                    showActions={message.role === 'assistant' && index === messages.length - 1 && !streamingMessage}
+                  />
+                ))}
+
+                {streamingMessage && (
+                  <MessageBubble
+                    role="assistant"
+                    content={streamingMessage}
+                    userName={getUserInitial()}
+                    showActions={false}
+                  />
+                )}
+
                 {thinkingEvents.length > 0 && (
                   <div className="space-y-2">
                     {thinkingEvents.map((event) => (
@@ -634,36 +682,10 @@ export function CompanyProfile() {
                     ))}
                   </div>
                 )}
-                {/* Fallback loader if nothing has streamed yet */}
-                {loading && !streamingMessage && thinkingEvents.length === 0 && (
+
+                {loading && !streamingMessage && thinkingEvents.length === 0 && messages.length === 0 && (
                   <ThinkingIndicator type={"reasoning_progress" as any} content="Preparing suggestions..." />
                 )}
-                {streamingMessage && (
-                  <MessageBubble
-                    role="assistant"
-                    content={streamingMessage}
-                    userName={getUserInitial()}
-                    showActions={false}
-                  />
-                )}
-                {profileData && (
-                  <ProfileCompleteness
-                    profile={{
-                      ...profileData,
-                      custom_criteria_count: customCriteriaCount,
-                      signal_preferences_count: signalPreferencesCount
-                    }}
-                  />
-                )}
-                {messages.map((message, index) => (
-                  <MessageBubble
-                    key={message.id}
-                    role={message.role}
-                    content={message.content}
-                    userName={getUserInitial()}
-                    showActions={message.role === 'assistant' && index === messages.length - 1 && !streamingMessage}
-                  />
-                ))}
 
                 {loading && !streamingMessage && messages.length > 0 && (
                   <div className="flex gap-3 items-start">
@@ -690,7 +712,7 @@ export function CompanyProfile() {
                 onSend={handleSendMessage}
                 disabled={loading}
                 placeholder="Tell me about your company..."
-                selectedAgent="Settings Agent"
+                selectedAgent="Profile Coach"
               />
             </div>
           </div>

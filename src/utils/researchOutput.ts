@@ -1,4 +1,4 @@
-import type { AgentType } from '../config/agents';
+import type { AgentType } from '../services/agents/types';
 
 export interface ResearchSource {
   url: string;

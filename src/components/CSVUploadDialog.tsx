@@ -104,13 +104,9 @@ export function CSVUploadDialog({ isOpen, onClose, onSuccess }: CSVUploadDialogP
         addToast({ type: 'info', title: 'Starting research', description: 'Refreshing newly added accounts…' });
         const { data: { session } } = await supabase.auth.getSession();
         const authHeader = session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {} as any;
-        const refreshRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/refresh-tracked-accounts`, {
+        const refreshRes = await fetch(`/api/accounts/refresh`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': `${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-            ...authHeader,
-          },
+          headers: { 'Content-Type': 'application/json', ...authHeader },
         });
         if (refreshRes.ok) {
           const data = await refreshRes.json();

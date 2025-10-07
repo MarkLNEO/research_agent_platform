@@ -1,9 +1,8 @@
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading, approvalStatus, approvalChecked } = useAuth();
-  const location = useLocation();
+  const { user, loading, approvalChecked } = useAuth();
 
   if (loading) {
     return (
@@ -32,10 +31,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Redirect unapproved users to the pending-approval screen (except if already there)
-  if ((approvalStatus === 'pending' || approvalStatus === 'rejected') && location.pathname !== '/pending-approval') {
-    return <Navigate to="/pending-approval" replace />;
-  }
+  // Approval-based routing removed in favor of server-side allowlist gating to reduce brittleness.
 
   return <>{children}</>;
 }

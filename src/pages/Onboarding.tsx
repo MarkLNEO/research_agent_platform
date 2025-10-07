@@ -80,7 +80,7 @@ export function Onboarding() {
         }
       } else {
         addAgentMessage(
-          "Hi! I'm your Research Agent. I'm here to help set up your account so I can provide personalized research insights. This will only take a couple of minutes.\n\nLet's start with the basics - what's your company name?",
+          "Hi! I'm your Welcome Agent. I'm here to help set up your account so I can provide personalized research insights. This will only take a couple of minutes.\n\nLet's start with the basics - what's your company name?",
           true
         );
       }
@@ -92,7 +92,7 @@ export function Onboarding() {
   const getStepMessage = (step: number): string => {
     switch (step) {
       case 1:
-        return "Hi! I'm your Research Agent. I'm here to help set up your account so I can provide personalized research insights. This will only take a couple of minutes.\n\nLet's start with the basics - what's your company name?";
+        return "Hi! I'm your Welcome Agent. I'm here to help set up your account so I can provide personalized research insights. This will only take a couple of minutes.\n\nLet's start with the basics - what's your company name?";
       case 2:
         return `Great! Now I need your company website URL. This helps me understand your business, products, and positioning.\n\nWhat's your website address?`;
       case 3:
@@ -347,7 +347,7 @@ export function Onboarding() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 pb-32">
-        <div className="max-w-3xl mx-auto space-y-6">
+        <div className="max-w-3xl mx-auto space-y-8">
           {messages.map((message) => (
             <div
               key={message.id}

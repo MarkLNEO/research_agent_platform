@@ -25,3 +25,6 @@
 ## 2025-10-07 21:12:28 UTC
 - Merged PR #1 into `main`, deployed to production (`research-agent-platform-wndsrf-gg4011ilv`).
 - Ran production smoke script: verified onboarding redirect and auto-approved credits for new signup.
+
+## 2025-10-07 21:53:25 UTC
+- Recovered production source via vercel-source-downloader (deployment research-agent-platform-wndsrf-99jijph94) and merged UI branding into repo.

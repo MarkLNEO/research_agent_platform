@@ -85,18 +85,14 @@ export function BulkResearchDialog({ isOpen, onClose, onSuccess }: BulkResearchD
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
 
-      // Submit bulk research job to Edge Function
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/bulk-research`, {
+      // Submit bulk research job to internal API
+      const response = await fetch(`/api/research/bulk`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
-          'apikey': `${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         },
-        body: JSON.stringify({
-          companies,
-          research_type: researchType,
-        }),
+        body: JSON.stringify({ companies, research_type: researchType }),
       });
 
       if (!response.ok) {
@@ -105,12 +101,25 @@ export function BulkResearchDialog({ isOpen, onClose, onSuccess }: BulkResearchD
       }
 
       const result = await response.json();
+
+      // Kick off runner immediately
+      try {
+        await fetch(`/api/research/bulk-runner`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ job_id: result.job_id, concurrency: researchType === 'deep' ? 2 : 3 })
+        });
+      } catch {}
       
       addToast({
         type: 'success',
         title: 'Bulk research started',
         description: `${companies.length} companies queued for ${researchType} research. You'll be notified when complete.`,
       });
+
+      try {
+        window.dispatchEvent(new CustomEvent('bulk-research:job-started', { detail: { jobId: result.job_id } }));
+      } catch {}
 
       if (onSuccess) {
         onSuccess(result.job_id, companies.length);

@@ -8,11 +8,13 @@ import { MessageBubble } from '../components/MessageBubble';
 import { MessageInput } from '../components/MessageInput';
 import { ThinkingIndicator } from '../components/ThinkingIndicator';
 import { SaveResearchDialog } from '../components/SaveResearchDialog';
-import { ProactiveDashboard } from '../components/ProactiveDashboard';
 import { CSVUploadDialog } from '../components/CSVUploadDialog';
 import { BulkResearchDialog } from '../components/BulkResearchDialog';
 import { BulkResearchStatus } from '../components/BulkResearchStatus';
 import { ProfileCompletenessBanner } from '../components/ProfileCompletenessBanner';
+import { AccountSignalsDrawer } from '../components/AccountSignalsDrawer';
+import { listRecentSignals, type AccountSignalSummary } from '../services/signalService';
+import { fetchDashboardGreeting } from '../services/accountService';
 import { useToast } from '../components/ToastProvider';
 import { buildResearchDraft } from '../utils/researchOutput';
 import type { ResearchDraft } from '../utils/researchOutput';
@@ -54,12 +56,14 @@ export function ResearchChat() {
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState('');
-  const [acknowledgment, setAcknowledgment] = useState('');
+  const streamingAbortRef = useRef<AbortController | null>(null);
+  // acknowledgment messages are displayed via ThinkingIndicator events
   const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const autoSentRef = useRef(false);
   const [showClarify, setShowClarify] = useState(false);
+  const [focusComposerTick, setFocusComposerTick] = useState(0);
   const [pendingQuery, setPendingQuery] = useState<string | null>(null);
   const [preferredResearchType, setPreferredResearchType] = useState<'deep' | 'quick' | 'specific' | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
@@ -69,6 +73,14 @@ export function ResearchChat() {
   const [lastUsage, setLastUsage] = useState<{ tokens: number; credits: number } | null>(null);
   const [csvUploadOpen, setCSVUploadOpen] = useState(false);
   const [bulkResearchOpen, setBulkResearchOpen] = useState(false);
+  const [agentMenuOpen, setAgentMenuOpen] = useState(false);
+  const assistantInsertedRef = useRef(false);
+  const [signalsDrawerOpen, setSignalsDrawerOpen] = useState(false);
+  const [signalsAccountId, setSignalsAccountId] = useState<string | null>(null);
+  const [signalsCompanyName, setSignalsCompanyName] = useState<string | undefined>(undefined);
+  const [recentSignals, setRecentSignals] = useState<AccountSignalSummary[]>([]);
+  const [greeting, setGreeting] = useState<{ time_of_day: string; user_name: string } | null>(null);
+  const [accountStats, setAccountStats] = useState<{ total: number; hot: number; warm: number; stale: number; with_signals: number } | null>(null);
   const lastSentRef = useRef<{ text: string; at: number } | null>(null);
 
   useEffect(() => {
@@ -92,6 +104,26 @@ export function ResearchChat() {
     }
   }, []);
 
+  // Load greeting + signals for proactive dashboard
+  useEffect(() => {
+    const load = async () => {
+      try {
+        try {
+          const data = await fetchDashboardGreeting();
+          if (data?.greeting) setGreeting(data.greeting as any);
+          if (Array.isArray(data?.signals)) setRecentSignals(data.signals as any);
+          if (data?.account_stats) setAccountStats(data.account_stats as any);
+        } catch {
+          const list = await listRecentSignals(6);
+          setRecentSignals(list);
+        }
+      } catch {
+        // best effort; silent
+      }
+    };
+    void load();
+  }, []);
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const q = params.get('q');
@@ -111,6 +143,19 @@ export function ResearchChat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search]);
 
+  useEffect(() => {
+    const prefillHandler = (event: Event) => {
+      const detail = (event as CustomEvent<{ prompt?: string }>).detail;
+      if (typeof detail?.prompt === 'string') {
+        setInputValue(detail.prompt);
+        setFocusComposerTick(tick => tick + 1);
+      }
+    };
+
+    window.addEventListener('chat:prefill', prefillHandler as EventListener);
+    return () => window.removeEventListener('chat:prefill', prefillHandler as EventListener);
+  }, []);
+
   const loadChats = async () => {
     if (!user) return;
     const { data } = await supabase
@@ -121,28 +166,73 @@ export function ResearchChat() {
     if (data) setChats(data);
   };
 
-  const getCurrentChat = () => chats.find(c => c.id === currentChatId) || null;
+  // Helper: find current chat if needed
+  // const getCurrentChat = () => chats.find(c => c.id === currentChatId) || null;
 
-  const handleOpenSaveDialog = () => {
-    // Use the last assistant message as the base
-    const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
-    if (!lastAssistant) return;
-    const current = getCurrentChat();
+  // Save dialog opens via onPromote in MessageBubble (last assistant message)
 
-    const sources = thinkingEvents
-      .filter(ev => ev.type === 'web_search' && (ev.sources?.length || 0) > 0)
-      .map(ev => ({ query: ev.query, sources: ev.sources })) as any[];
+  const handleTrackAccount = async (rawCompanyName: string) => {
+    if (!user) return;
+    const companyName = String(rawCompanyName || '')
+      .replace(/^\s*\d+[).-]?\s*/, '') // drop leading list markers like "1)"
+      .replace(/^[-*]\s*/, '')
+      .trim();
+    if (!companyName) {
+      addToast({ title: 'Invalid company name', description: 'Could not determine a company name to track.', type: 'error' });
+      return;
+    }
 
-    const draft = buildResearchDraft({
-      assistantMessage: lastAssistant.content,
-      userMessage: [...messages].reverse().find(m => m.role === 'user')?.content,
-      chatTitle: current?.title,
-      agentType: 'company_research',
-      sources,
-    });
+    try {
+      // Check if account already exists
+      const { data: existingAccount } = await supabase
+        .from('tracked_accounts')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('company_name', companyName)
+        .single();
 
-    setSaveDraft(draft);
-    setSaveOpen(true);
+      if (existingAccount) {
+        addToast({
+          title: 'Account already tracked',
+          description: `${companyName} is already in your tracked accounts`,
+          type: 'info',
+        });
+        return;
+      }
+
+      // Add new tracked account
+      const { error } = await supabase
+        .from('tracked_accounts')
+        .insert({
+          user_id: user.id,
+          company_name: companyName,
+          monitoring_enabled: true,
+          priority: 'standard',
+        });
+
+      if (error) throw error;
+
+      addToast({ title: 'Account tracked', description: `${companyName} has been added to your tracked accounts`, type: 'success' });
+
+      // Trigger signal detection for new account
+      fetch(`/api/signals/trigger-detection`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+        },
+      }).catch(console.error);
+
+      // Dispatch event to update AccountListWidget
+      window.dispatchEvent(new CustomEvent('accounts-updated'));
+
+    } catch (error: any) {
+      console.error('Failed to track account:', error);
+      addToast({
+        title: 'Failed to track account',
+        description: error.message || 'Unable to add account to tracking',
+        type: 'error',
+      });
+    }
   };
 
   const handleSaveResearch = async (draft: ResearchDraft) => {
@@ -150,7 +240,7 @@ export function ResearchChat() {
     setSaving(true);
     setSaveError(null);
     try {
-      const { error } = await supabase.from('research_outputs').insert({
+      const { data: inserted, error } = await supabase.from('research_outputs').insert({
         user_id: user.id,
         subject: draft.subject,
         research_type: draft.research_type,
@@ -168,8 +258,19 @@ export function ResearchChat() {
         custom_criteria_assessment: draft.custom_criteria_assessment || [],
         personalization_points: draft.personalization_points || [],
         recommended_actions: draft.recommended_actions || {},
-      });
+      }).select('id').single();
       if (error) throw error;
+      // Evaluate custom criteria post-save
+      try {
+        const auth = (await supabase.auth.getSession()).data.session?.access_token;
+        await fetch('/api/research/evaluate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${auth}` },
+          body: JSON.stringify({ research_id: inserted?.id, markdown: draft.markdown_report })
+        });
+      } catch (e) {
+        console.warn('Criteria evaluation failed', e);
+      }
       setSaveOpen(false);
       addToast({ type: 'success', title: 'Saved to history', description: 'Your research was added to History.' , actionText: 'View', onAction: () => navigate('/research') });
     } catch (e: any) {
@@ -220,6 +321,7 @@ export function ResearchChat() {
     setLoading(true);
     setStreamingMessage('');
     setThinkingEvents([]);
+    assistantInsertedRef.current = false;
 
     const tempUser: Message = {
       id: `temp-${Date.now()}`,
@@ -236,11 +338,25 @@ export function ResearchChat() {
         .select()
         .single();
 
-      const assistant = await streamAIResponse(text, chatId);
+      let assistant = await streamAIResponse(text, chatId);
+
+      // Normalize markdown for numbering and headings
+      try {
+        const { normalizeMarkdown } = await import('../utils/markdown');
+        assistant = normalizeMarkdown(assistant);
+      } catch {}
 
       // Persist any save_profile commands returned by the agent
       await processSaveCommands(assistant);
 
+      // Prevent duplicate assistant insertion if this handler races or is re-entered
+      if (assistantInsertedRef.current) {
+        // Already appended once; just ensure UI state is clean
+        setStreamingMessage('');
+        setThinkingEvents([]);
+        return;
+      }
+      assistantInsertedRef.current = true;
       const { data: savedAssistant } = await supabase
         .from('messages')
         .insert({ chat_id: chatId, role: 'assistant', content: assistant })
@@ -252,10 +368,111 @@ export function ResearchChat() {
         .update({ updated_at: new Date().toISOString(), title: messages.length === 0 ? text.slice(0, 60) : undefined })
         .eq('id', chatId);
 
-      setMessages(prev => prev.filter(m => m.id !== tempUser.id).concat([savedUser, savedAssistant] as any));
+      setMessages(prev => {
+        // Filter out the temporary user message
+        const filtered = prev.filter(m => m.id !== tempUser.id);
+        // Add the saved messages, ensuring no duplicates
+        return [...filtered, savedUser, savedAssistant].filter((m, index, self) =>
+          index === self.findIndex(msg => msg.id === m.id)
+        );
+      });
       setStreamingMessage('');
-      setAcknowledgment('');
       setThinkingEvents([]);
+
+      // JIT prompts based on usage milestones and profile state
+      try {
+        // Increment research count (local + server)
+        const key = 'research_count';
+        const current = Number(localStorage.getItem(key) || '0') || 0;
+        const next = current + 1;
+        localStorage.setItem(key, String(next));
+
+        // Persist in user_prompt_config (best-effort)
+        try {
+          const host = typeof window !== 'undefined' ? window.location.hostname : '';
+          const isLocal = host === 'localhost' || host === '127.0.0.1';
+          if (!isLocal) {
+            const sessionResult = await supabase.auth.getSession();
+            const profileUpdate = await fetch('/api/update-profile', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionResult.data.session?.access_token}`,
+              },
+              body: JSON.stringify({ prompt_config: { research_count: next } })
+            });
+
+            if (!profileUpdate.ok && profileUpdate.status !== 204) {
+              const detail = `Failed with status ${profileUpdate.status}`;
+              console.warn('[ProfileCoach] prompt_config update failed:', detail);
+              addToast({
+                type: 'warning',
+                title: 'Could not save research preferences',
+                description: detail,
+              });
+            }
+          } else {
+            console.debug('[ProfileCoach] skipping prompt_config update while running without local API server');
+          }
+        } catch (updateErr) {
+          console.warn('Prompt config update error', updateErr);
+        }
+
+        // After 1st research: suggest tracking account if none tracked
+        if (next === 1) {
+          const { count } = await supabase
+            .from('tracked_accounts')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', user!.id);
+          if ((count || 0) === 0) {
+            addToast({
+              type: 'info',
+              title: 'Track this account?',
+              description: 'I can monitor it for signals and changes.',
+              actionText: 'Track',
+              onAction: async () => {
+                const company = (assistant || '').split('\n')[0]?.replace(/^#+\s*/, '') || 'This account';
+                await handleTrackAccount(company);
+              }
+            });
+          }
+        }
+
+        // After 3rd research: suggest setting industry if missing
+        if (next === 3) {
+          const { data: profileRow } = await supabase
+            .from('company_profiles')
+            .select('industry')
+            .eq('user_id', user!.id)
+            .maybeSingle();
+          if (!profileRow?.industry) {
+            addToast({
+              type: 'info',
+              title: 'Set your target industry?',
+              description: 'This helps tailor research quality.',
+              actionText: 'Update',
+              onAction: () => navigate('/profile-coach')
+            });
+          }
+        }
+
+        // After 5th research: suggest signal tracking if none configured
+        if (next === 5) {
+          const { count: sigCount } = await supabase
+            .from('user_signal_preferences')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', user!.id);
+          if ((sigCount || 0) === 0) {
+            addToast({
+              type: 'info',
+              title: 'Set up signal tracking?',
+              description: 'Get alerts on leadership changes, breaches, funding, and more.',
+              actionText: 'Configure',
+              onAction: () => navigate('/settings/signals')
+            });
+          }
+        }
+      } catch {}
     } catch (err: any) {
       console.error(err);
       const errorMessage = err?.message || 'There was a problem sending your message. Please try again.';
@@ -274,7 +491,6 @@ export function ResearchChat() {
       };
       setMessages(prev => prev.filter(m => m.id !== tempUser.id).concat([tempUser, errorMsg] as any));
       setStreamingMessage('');
-      setAcknowledgment('');
       setThinkingEvents([]);
     } finally {
       setLoading(false);
@@ -311,7 +527,7 @@ export function ResearchChat() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       
-      const updateProfileUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-profile`;
+      const updateProfileUrl = '/api/update-profile';
       await fetch(updateProfileUrl, {
         method: 'POST',
         headers: {
@@ -353,7 +569,11 @@ export function ResearchChat() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('No session');
 
-      const chatUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+      // Feature flag for safe API migration
+      // Set VITE_USE_VERCEL_API=true in .env to use Vercel API instead of Edge Functions
+      // Default to Vercel API unless explicitly disabled
+      const chatUrl = '/api/ai/chat';
+
       console.log('[DEBUG] Calling chat API:', { chatUrl, hasSession: !!session });
       // Instrumentation: request start
       const startedAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -361,14 +581,25 @@ export function ResearchChat() {
         window.dispatchEvent(new CustomEvent('llm:request', { detail: { page: 'research', url: chatUrl, ts: Date.now() } }));
         console.log('[LLM][research] request', { url: chatUrl });
       } catch {}
+      // Build config to influence model depth based on user preference/clarifier
+      const depth = preferredResearchType || (needsClarification(userMessage) ? null : 'specific');
+      const cfg: any = {};
+      if (depth === 'deep') cfg.model = 'gpt-5';
+      if (depth === 'quick') cfg.model = 'gpt-5-mini';
+      if (depth === 'specific') cfg.model = 'gpt-5';
+
+      // Setup abort controller for Stop action
+      const controller = new AbortController();
+      streamingAbortRef.current = controller;
+
       const response = await fetch(chatUrl, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
-          'apikey': `${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         },
-        body: JSON.stringify({ messages: history, stream: true, chat_id: chatId ?? currentChatId }),
+        body: JSON.stringify({ messages: history, stream: true, chatId: chatId ?? currentChatId, config: cfg, research_type: depth }),
+        signal: controller.signal,
       });
       console.log('[DEBUG] Response status:', response.status, response.statusText);
       if (!response.ok) {
@@ -439,6 +670,16 @@ export function ResearchChat() {
       let buffer = '';
       let usedTokens: number | null = null;
       let firstDeltaAt: number | null = null;
+      const markFirstDelta = () => {
+        if (firstDeltaAt == null) {
+          firstDeltaAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+          setThinkingEvents(prev => prev.filter(e => e.type !== 'acknowledgment' && e.type !== 'reasoning_progress'));
+          try {
+            window.dispatchEvent(new CustomEvent('llm:first-delta', { detail: { page: 'research', ttfbMs: firstDeltaAt - startedAt } }));
+            console.log('[LLM][research] first-delta', { ttfbMs: firstDeltaAt - startedAt });
+          } catch {}
+        }
+      };
 
       if (reader) {
         while (true) {
@@ -454,12 +695,19 @@ export function ResearchChat() {
               if (!data || data === '[DONE]') continue;
               try {
                 const parsed = JSON.parse(data);
+                if (parsed.type === 'meta') {
+                  try {
+                    console.log('[LLM][meta]', parsed);
+                    window.dispatchEvent(new CustomEvent('llm:meta', { detail: parsed }));
+                  } catch {}
+                }
                 // Handle acknowledgment (shown before research starts)
-                if (parsed.type === 'acknowledgment') {
-                  setAcknowledgment(parsed.content);
+                else if (parsed.type === 'acknowledgment') {
+                  setThinkingEvents(prev => [...prev, { id: `ack-${Date.now()}`, type: 'acknowledgment', content: parsed.content }]);
                 }
                 // Handle reasoning events - UPDATE existing reasoning indicator
                 else if (parsed.type === 'reasoning') {
+                  markFirstDelta();
                   setThinkingEvents(prev => {
                     const existing = prev.find(e => e.type === 'reasoning');
                     if (existing) {
@@ -470,6 +718,7 @@ export function ResearchChat() {
                 }
                 // Handle reasoning progress
                 else if (parsed.type === 'reasoning_progress') {
+                  markFirstDelta();
                   setThinkingEvents(prev => {
                     // Replace or add reasoning progress indicator
                     const filtered = prev.filter(e => e.type !== 'reasoning_progress');
@@ -511,19 +760,12 @@ export function ResearchChat() {
                   // Trigger sidebar refresh by dispatching custom event
                   window.dispatchEvent(new CustomEvent('accounts-updated'));
                 }
-                // Handle output text deltas
-                else if (parsed.type === 'response.output_text.delta') {
-                  const delta = parsed.delta;
+                // Handle output text deltas (supports both Edge Function and Vercel API formats)
+                else if (parsed.type === 'response.output_text.delta' || parsed.type === 'content') {
+                  // Edge Function uses parsed.delta, Vercel API uses parsed.content
+                  const delta = parsed.delta || parsed.content;
                   if (delta) {
-                    if (firstDeltaAt == null) {
-                      firstDeltaAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-                      // Clear any acknowledgment/progress banners at first token
-                      try {
-                        setThinkingEvents(prev => prev.filter(e => e.type !== 'reasoning_progress' && e.type !== 'acknowledgment'));
-                        window.dispatchEvent(new CustomEvent('llm:first-delta', { detail: { page: 'research', ttfbMs: firstDeltaAt - startedAt } }));
-                        console.log('[LLM][research] first-delta', { ttfbMs: firstDeltaAt - startedAt });
-                      } catch {}
-                    }
+                    markFirstDelta();
                     full += delta;
                     setStreamingMessage(full);
                   }
@@ -558,6 +800,11 @@ export function ResearchChat() {
       } catch {}
       return full;
     } catch (e: any) {
+      // Swallow abort errors as user-initiated stops
+      if (e?.name === 'AbortError') {
+        console.log('[LLM] stream aborted by user');
+        return (streamingMessage || '');
+      }
       console.error('stream error', e);
       const errorMsg = e?.message || String(e);
       addToast({
@@ -584,12 +831,23 @@ export function ResearchChat() {
     await handleSendMessageWithChat(currentChatId, lastUserMessage.content);
   };
 
+  // New: Stop streaming handler
+  const handleStopStreaming = () => {
+    try { streamingAbortRef.current?.abort(); } catch {}
+    setThinkingEvents([]);
+  };
+
   const handleAccountClick = (account: TrackedAccount) => {
-    // When an account is clicked, start a research query
-    setInputValue(`Research ${account.company_name} and provide updated analysis`);
-    setTimeout(() => {
-      void handleSendMessage();
-    }, 100);
+    // Open a detailed signals drawer for the account
+    setSignalsAccountId(account.id);
+    setSignalsCompanyName(account.company_name);
+    setSignalsDrawerOpen(true);
+  };
+
+  const handleResearchAccount = (account: TrackedAccount) => {
+    window.dispatchEvent(new CustomEvent('chat:prefill', {
+      detail: { prompt: `Research ${account.company_name}` }
+    }));
   };
 
   const handleAddAccount = () => {
@@ -618,7 +876,7 @@ export function ResearchChat() {
           const { data: { session } } = await supabase.auth.getSession();
           if (!session) continue;
           
-          const updateProfileUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-profile`;
+          const updateProfileUrl = '/api/update-profile';
           
           const res = await fetch(updateProfileUrl, {
             method: 'POST',
@@ -646,6 +904,17 @@ export function ResearchChat() {
     }
   };
 
+  const handleGoHome = () => {
+    setCurrentChatId(null);
+    setMessages([]);
+    setStreamingMessage('');
+    setThinkingEvents([]);
+    assistantInsertedRef.current = false;
+    setShowClarify(false);
+    navigate('/');
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {}
+  };
+
   return (
     <>
     <div className="flex h-screen bg-gray-50">
@@ -656,10 +925,12 @@ export function ResearchChat() {
         currentChatId={currentChatId}
         onChatSelect={setCurrentChatId}
         onSettings={() => navigate('/settings')}
-        onCompanyProfile={() => navigate('/settings-agent')}
+        onCompanyProfile={() => navigate('/profile-coach')}
         onResearchHistory={() => navigate('/research')}
         onAccountClick={handleAccountClick}
         onAddAccount={handleAddAccount}
+        onResearchAccount={handleResearchAccount}
+        onHome={handleGoHome}
       />
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="bg-white border-b border-gray-200 px-6 py-4">
@@ -673,30 +944,102 @@ export function ResearchChat() {
                 <ArrowLeft className="w-4 h-4" />
                 <span className="text-sm font-medium">New session</span>
               </button>
+              <button
+                onClick={() => setBulkResearchOpen(true)}
+                className="text-sm px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                title="Upload CSV to research multiple companies"
+                aria-label="Upload CSV to research multiple companies"
+              >
+                Bulk Research
+              </button>
             </div>
-            <div className="flex items-center gap-2 text-sm text-gray-700 px-3 py-1.5 bg-gray-50 rounded-lg">
-              <span className="font-medium">Company Researcher</span>
-              <ChevronDown className="w-3.5 h-3.5 text-gray-500" />
+            <div className="relative">
+              <button
+                onClick={() => setAgentMenuOpen(prev => !prev)}
+                className="flex items-center gap-2 text-sm text-gray-700 px-3 py-1.5 bg-gray-50 rounded-lg hover:bg-gray-100"
+                aria-haspopup="menu"
+                aria-expanded={agentMenuOpen}
+              >
+                <span className="font-medium">Company Researcher</span>
+                <ChevronDown className="w-3.5 h-3.5 text-gray-500" />
+              </button>
+              {agentMenuOpen && (
+                <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-20" role="menu">
+                  <button className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50" role="menuitem" onClick={() => setAgentMenuOpen(false)}>
+                    Company Researcher
+                  </button>
+                  <button className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50" role="menuitem" onClick={() => { setAgentMenuOpen(false); navigate('/profile-coach'); }}>
+                    Profile Coach
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto" data-testid="chat-surface">
           <div className="max-w-3xl mx-auto px-6 py-8">
             <div className="space-y-6">
               {/* Profile completeness banner */}
               <ProfileCompletenessBanner />
               
-              {/* Proactive dashboard when chat is empty */}
-              {messages.length === 0 && !streamingMessage && !loading && (
-                <div className="text-center py-12">
-                  <h2 className="text-2xl font-bold text-gray-900 mb-4">
-                    👋 Ready to research companies?
-                  </h2>
-                  <p className="text-gray-600 mb-8">
-                    Ask me to research any company and I'll provide detailed intelligence.
-                  </p>
-                </div>
-              )}
+              {/* Proactive dashboard hero (always visible at top) */}
+              <div className="space-y-6" data-testid="dashboard-greeting">
+                  <div className="py-4">
+                    <h2 className="text-2xl font-bold text-gray-900">
+                      {greeting ? `👋 Good ${greeting.time_of_day}, ${greeting.user_name}!` : '👋 Welcome back!'}
+                    </h2>
+                    {accountStats && (
+                      <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-700">
+                        <span className="inline-flex items-center gap-1 bg-gray-100 px-2 py-0.5 rounded">📊 {accountStats.total} tracked</span>
+                        <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 px-2 py-0.5 rounded">🔥 {accountStats.hot} hot</span>
+                        <span className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-2 py-0.5 rounded">⚡ {accountStats.with_signals} with signals</span>
+                        <span className="inline-flex items-center gap-1 bg-yellow-50 text-yellow-700 px-2 py-0.5 rounded">📅 {accountStats.stale} need update</span>
+                      </div>
+                    )}
+                  </div>
+                  {recentSignals.length > 0 && (
+                    <div className="border border-gray-200 rounded-2xl p-4 bg-white">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-sm font-semibold text-gray-900">Top signals</div>
+                        <button
+                          className="text-xs text-blue-600 hover:text-blue-700"
+                          onClick={() => navigate('/signals')}
+                        >
+                          View all
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {recentSignals.map(s => (
+                          <div key={s.id} className="border border-gray-200 rounded-lg p-3">
+                            <div className="text-sm font-semibold text-gray-900 truncate">{s.company_name}</div>
+                            <div className="text-xs text-gray-600 truncate">{s.signal_type.replace(/_/g, ' ')} • {new Date(s.signal_date).toLocaleDateString()}</div>
+                            <div className="text-sm text-gray-900 mt-1 line-clamp-2">{s.description}</div>
+                            <div className="mt-2 flex items-center gap-2">
+                              <button className="text-xs text-blue-600 hover:text-blue-700" onClick={() => { setSignalsAccountId(s.account_id); setSignalsCompanyName(s.company_name); setSignalsDrawerOpen(true); }}>Review</button>
+                              <button
+                                className="text-xs text-gray-700 hover:text-gray-900"
+                                onClick={() => { setInputValue(`Research ${s.company_name}`); setTimeout(() => void handleSendMessage(), 50); }}
+                              >
+                                Research
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      'Which accounts had changes this week?',
+                      'Research my top 5 accounts',
+                      'Show accounts with security incidents',
+                    ].map((q, i) => (
+                      <button key={i} onClick={() => { setInputValue(q); void handleSendMessage(); }} className="px-3 py-1.5 text-xs bg-gray-100 rounded-full hover:bg-gray-200 text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" aria-label={`Suggestion: ${q}`}>
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+              </div>
               
               {/* Bulk Research Status */}
               <BulkResearchStatus />
@@ -732,14 +1075,26 @@ export function ResearchChat() {
                     content={m.content}
                     userName={getUserInitial()}
                     showActions={isLastAssistant}
+                    onTrackAccount={handleTrackAccount}
                     onPromote={isLastAssistant ? () => {
-                      const draft = buildResearchDraft(m.content);
-                      if (draft) {
-                        setSaveDraft(draft);
-                        setSaveOpen(true);
-                      } else {
-                        addToast({ type: 'error', title: 'Cannot save', description: 'This message does not contain research data.' });
-                      }
+                      // Find the user message that triggered this response
+                      const userMessage = [...messages].slice(0, idx).reverse().find(msg => msg.role === 'user')?.content;
+
+                      // Get any web search events from the thinking stream
+                      const sources = thinkingEvents
+                        .filter(ev => ev.type === 'web_search' && ev.query && ev.sources)
+                        .map(ev => ({ query: ev.query, sources: ev.sources })) as any[];
+
+                      const draft = buildResearchDraft({
+                        assistantMessage: m.content,
+                        userMessage,
+                        chatTitle: chats.find(c => c.id === currentChatId)?.title,
+                        agentType: 'company_research',
+                        sources,
+                      });
+
+                      setSaveDraft(draft);
+                      setSaveOpen(true);
                     } : undefined}
                     disablePromote={saving}
                     onRetry={isLastAssistant ? handleRetry : undefined}
@@ -764,6 +1119,17 @@ export function ResearchChat() {
             </div>
           </div>
         </div>
+        {/* Inline clarify choices: always visible near composer for clarity */}
+        {showClarify && (
+          <div className="px-6 py-2 border-t border-blue-200 bg-blue-50">
+            <div className="max-w-3xl mx-auto flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-blue-900">Choose research type:</span>
+              <button onClick={() => void chooseResearchType('deep')} className="text-xs px-2 py-1 rounded bg-white border border-blue-200 hover:border-blue-400">📊 Deep</button>
+              <button onClick={() => void chooseResearchType('quick')} className="text-xs px-2 py-1 rounded bg-white border border-blue-200 hover:border-blue-400">⚡ Quick</button>
+              <button onClick={() => void chooseResearchType('specific')} className="text-xs px-2 py-1 rounded bg-white border border-blue-200 hover:border-blue-400">🔍 Specific</button>
+            </div>
+          </div>
+        )}
         <div className="bg-gray-50">
           <div className="max-w-3xl mx-auto px-6 py-4">
             <MessageInput
@@ -771,15 +1137,19 @@ export function ResearchChat() {
               onChange={setInputValue}
               onSend={handleSendMessage}
               disabled={loading}
-              onAttach={() => setCSVUploadOpen(true)}
+              isStreaming={Boolean(streamingMessage)}
+              onStop={handleStopStreaming}
+              // Use a single clear CTA above for bulk research; keep Settings action to open dialog if needed
               onSettings={() => setBulkResearchOpen(true)}
               selectedAgent="Company Researcher"
+              focusSignal={focusComposerTick}
             />
           </div>
         </div>
       </div>
     </div>
     <SaveResearchDialog
+      open={saveOpen}
       initialDraft={saveDraft}
       onClose={() => setSaveOpen(false)}
       onSave={handleSaveResearch}
@@ -792,10 +1162,17 @@ export function ResearchChat() {
       onClose={() => setCSVUploadOpen(false)}
       onSuccess={handleCSVUploadSuccess}
     />
+    <AccountSignalsDrawer
+      open={signalsDrawerOpen}
+      accountId={signalsAccountId}
+      companyName={signalsCompanyName}
+      onClose={() => setSignalsDrawerOpen(false)}
+      onResearch={(company) => { setSignalsDrawerOpen(false); setInputValue(`Research ${company}`); setTimeout(() => void handleSendMessage(), 50); }}
+    />
     <BulkResearchDialog
       isOpen={bulkResearchOpen}
       onClose={() => setBulkResearchOpen(false)}
-      onSuccess={(jobId, count) => {
+      onSuccess={(_jobId, count) => {
         addToast({
           type: 'success',
           title: 'Bulk research started',

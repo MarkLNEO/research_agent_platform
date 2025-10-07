@@ -92,12 +92,25 @@ export interface AccountSignalSummary {
 
 export async function listRecentSignals(limit = 10): Promise<AccountSignalSummary[]> {
   const { data, error } = await supabase
-    .from('account_signals_view')
-    .select('*')
-    .returns<AccountSignalSummary[]>()
+    .from('account_signals')
+    .select(
+      `id, account_id, signal_type, severity, description, signal_date, source_url, score,
+       tracked_accounts:tracked_accounts!account_signals_account_id_fkey ( company_name )`
+    )
     .order('signal_date', { ascending: false })
     .limit(limit);
 
   if (error) throw error;
-  return (data ?? []) as AccountSignalSummary[];
+  return (data ?? []).map((row: any) => ({
+    id: row.id,
+    account_id: row.account_id,
+    company_name: row.tracked_accounts?.company_name || 'Unknown Account',
+    signal_type: row.signal_type,
+    severity: row.severity,
+    description: row.description,
+    signal_date: row.signal_date,
+    source_url: row.source_url,
+    score: row.score,
+    detected_at: row.detected_at,
+  }));
 }

@@ -21,20 +21,12 @@ export function Signup() {
     try {
       await signUp(email, password, name);
       
-      // Send approval notification email to admin via Supabase Edge Function
+      // Send approval notification via internal API route
       try {
-        await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-approval-notification`, {
+        await fetch(`/api/approvals/notify`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': `${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({
-            user: {
-              email,
-              user_metadata: { name },
-            },
-          }),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user: { email, user_metadata: { name } } }),
         });
       } catch (emailError) {
         console.warn('Failed to send signup notification:', emailError);
@@ -67,7 +59,17 @@ export function Signup() {
       // If not authenticated (email confirm flow), send to login
       navigate('/login');
     } catch (err: any) {
-      setError(err.message || 'Failed to create account');
+      const raw = err?.message ? String(err.message) : '';
+      // Map common auth errors to friendlier messages
+      if (/invalid.*email/i.test(raw) || /email.*invalid/i.test(raw)) {
+        setError('That email address looks invalid. Please use a standard format like name@gmail.com.');
+      } else if (/password/i.test(raw) && /short|length/i.test(raw)) {
+        setError('Your password is too short. Please use at least 6 characters.');
+      } else if (/rate|too many/i.test(raw)) {
+        setError('Too many attempts. Please wait a moment and try again.');
+      } else {
+        setError(raw || 'Failed to create account');
+      }
     } finally {
       setLoading(false);
     }
@@ -80,8 +82,12 @@ export function Signup() {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4">
             <Search className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">Research Agent</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Rebar Research Agent</h1>
           <p className="text-gray-600 mt-2">AI-powered sales intelligence platform</p>
+          <div className="mt-4 flex flex-col items-center justify-center gap-1 text-sm text-gray-600">
+            <span className="uppercase tracking-wide text-xs text-gray-500">Powered by</span>
+            <img src="/logo_black.png" alt="Rebar" className="h-8 w-auto drop-shadow-sm" />
+          </div>
         </div>
 
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8">
@@ -170,6 +176,7 @@ export function Signup() {
             </p>
           </div>
         </div>
+        <p className="mt-6 text-center text-xs text-gray-500">© {new Date().getFullYear()} Rebar. All rights reserved.</p>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import { Brain, Search, ExternalLink, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import { Streamdown } from 'streamdown';
 
 interface ThinkingIndicatorProps {
   type: 'reasoning' | 'web_search' | 'reasoning_progress' | 'acknowledgment' | 'content_extraction' | 'accounts_added';
@@ -29,41 +29,54 @@ function formatSourceTitle(url: string): string {
 
 export function ThinkingIndicator({ type, content, query, sources, url, count, companies }: ThinkingIndicatorProps) {
   const [isExpanded, setIsExpanded] = useState(true);
-  const [userToggled, setUserToggled] = useState(false);
-  const toggle = () => { setIsExpanded(v => !v); setUserToggled(true); };
+  const toggle = () => { setIsExpanded(v => !v); };
 
   if (type === 'reasoning') {
+    // Coerce plain reasoning lines into bullets if not already formatted
+    let display = content || '';
+    if (display && !/\n-\s/.test(display) && display.split(/\n+/).length > 1) {
+      const lines = display.split(/\n+/).map(l => l.trim()).filter(Boolean);
+      display = lines.map(l => `- ${l}`).join('\n');
+    }
     return (
       <div className="flex gap-3 items-start mb-4 animate-fadeIn">
-        <div className="flex gap-2 items-start px-4 py-3 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-xl text-sm shadow-sm max-w-full">
-          <Brain className="w-4 h-4 text-blue-700 flex-shrink-0 mt-0.5 animate-pulse" />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-blue-900 font-semibold">Thinking</span>
-              <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+        <div className="flex flex-col gap-2 px-4 py-3 bg-gradient-to-br from-indigo-50 via-blue-50 to-purple-50 border border-blue-200/50 rounded-2xl text-sm shadow-lg shadow-blue-100/20 backdrop-blur-sm max-w-full">
+          <div className="flex items-start gap-2">
+            <div className="p-1.5 bg-white/80 rounded-lg shadow-sm">
+              <Brain className="w-4 h-4 text-indigo-600 animate-pulse" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-gray-900 font-semibold text-sm">Thinking</span>
+                <div className="flex gap-1">
+                  <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse" />
+                  <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse delay-150" />
+                  <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse delay-300" />
+                </div>
+              </div>
             </div>
             {content && (
-              <div className="mt-1">
-                <button
-                  onClick={toggle}
-                  className="inline-flex items-center gap-1 text-blue-700 hover:text-blue-800 text-xs font-medium"
-                >
-                  {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                  {isExpanded ? 'Hide reasoning' : 'Show reasoning'}
-                </button>
-                {isExpanded && (
-                  <div className="mt-2 text-blue-800 text-xs leading-relaxed bg-white/50 p-2 rounded border border-blue-100 prose prose-sm max-w-none">
-                    <ReactMarkdown>{content}</ReactMarkdown>
-                  </div>
-                )}
-              </div>
-            )}
-            {!content && (
-              <div className="mt-1 text-blue-700 text-xs">
-                Analyzing your request...
-              </div>
+              <button
+                onClick={toggle}
+                className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 text-xs font-medium transition-colors px-2 py-1 rounded-lg hover:bg-white/50"
+              >
+                {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                {isExpanded ? 'Hide' : 'View'} reasoning
+              </button>
             )}
           </div>
+          {display && isExpanded && (
+            <div className="pl-8 pr-2">
+              <Streamdown className="text-gray-700 text-xs leading-relaxed bg-white/60 p-3 rounded-xl border border-gray-100/50 prose prose-sm max-w-none">
+                {display}
+              </Streamdown>
+            </div>
+          )}
+          {!content && (
+            <div className="pl-8 text-gray-600 text-xs italic">
+              Analyzing your request...
+            </div>
+          )}
         </div>
       </div>
     );
@@ -83,7 +96,8 @@ export function ThinkingIndicator({ type, content, query, sources, url, count, c
   if (type === 'acknowledgment') {
     return (
       <div className="flex gap-3 items-start mb-4 animate-fadeIn">
-        <div className="px-4 py-3 bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 rounded-xl text-sm shadow-sm">
+        <div className="px-4 py-3 bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 rounded-xl text-sm shadow-sm flex items-center gap-3">
+          <Loader2 className="w-4 h-4 text-amber-500 animate-spin" />
           <div className="text-amber-900 font-medium">{content}</div>
         </div>
       </div>

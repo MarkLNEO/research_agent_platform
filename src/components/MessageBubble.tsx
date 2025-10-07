@@ -1,4 +1,4 @@
-import { ThumbsUp, ThumbsDown, Copy, RotateCcw, Coins } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, Copy, RotateCcw, Coins, Building2, Mail } from 'lucide-react';
 import { Streamdown } from 'streamdown';
 import { useToast } from './ToastProvider';
 
@@ -11,6 +11,7 @@ interface MessageBubbleProps {
   onPromote?: () => void;
   disablePromote?: boolean;
   onRetry?: () => void;
+  onTrackAccount?: (company: string) => void;
   metadata?: Record<string, unknown>;
   usage?: { tokens: number; credits: number };
 }
@@ -20,28 +21,14 @@ function MarkdownContent({ content }: { content: string }) {
     <div className="streamdown-wrapper text-gray-900">
       <Streamdown
         className="prose prose-gray max-w-none"
+        // Keep component overrides minimal so Streamdown can provide
+        // built-in Shiki highlighting, copy controls, and math/mermaid.
         components={{
-          h1: ({ children }) => <h1 className="text-2xl font-bold mt-8 mb-4 text-gray-900">{children}</h1>,
-          h2: ({ children }) => <h2 className="text-xl font-semibold mt-7 mb-3 text-gray-900">{children}</h2>,
-          h3: ({ children }) => <h3 className="text-lg font-semibold mt-6 mb-3 text-gray-900">{children}</h3>,
-          h4: ({ children }) => <h4 className="text-base font-semibold mt-5 mb-2 text-gray-900">{children}</h4>,
-          h5: ({ children }) => <h5 className="text-sm font-semibold mt-4 mb-2 text-gray-900">{children}</h5>,
-          h6: ({ children }) => <h6 className="text-sm font-semibold mt-4 mb-2 text-gray-700">{children}</h6>,
+          h1: ({ children }) => <h1 className="mt-8 mb-4 text-gray-900 font-bold text-2xl">{children}</h1>,
+          h2: ({ children }) => <h2 className="mt-7 mb-3 text-gray-900 font-semibold text-xl">{children}</h2>,
+          h3: ({ children }) => <h3 className="mt-6 mb-3 text-gray-900 font-semibold text-lg">{children}</h3>,
           p: ({ children }) => <p className="mb-4 leading-relaxed text-gray-800">{children}</p>,
-          ul: ({ children }) => <ul className="list-disc ml-6 my-3 space-y-1.5">{children}</ul>,
-          ol: ({ children }) => <ol className="list-decimal ml-6 my-3 space-y-1.5">{children}</ol>,
-          li: ({ children }) => <li className="pl-1">{children}</li>,
-          strong: ({ children }) => <strong className="font-semibold text-gray-900">{children}</strong>,
-          em: ({ children }) => <em className="italic">{children}</em>,
-          code: ({ children }) => <code className="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono text-gray-800">{children}</code>,
-          pre: ({ children }) => <pre className="bg-gray-100 p-3 rounded-lg my-3 overflow-x-auto">{children}</pre>,
-          blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-300 pl-4 my-3 italic text-gray-700">{children}</blockquote>,
           a: ({ children, href }) => <a href={href} className="text-blue-600 hover:text-blue-700 underline" target="_blank" rel="noopener noreferrer">{children}</a>,
-          table: ({ children }) => <table className="min-w-full divide-y divide-gray-200 my-3">{children}</table>,
-          thead: ({ children }) => <thead className="bg-gray-50">{children}</thead>,
-          tbody: ({ children }) => <tbody className="bg-white divide-y divide-gray-200">{children}</tbody>,
-          th: ({ children }) => <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{children}</th>,
-          td: ({ children }) => <td className="px-4 py-2 text-sm text-gray-900">{children}</td>,
           hr: () => <hr className="my-6 border-gray-200" />,
         }}
       >
@@ -60,13 +47,79 @@ export function MessageBubble({
   onPromote,
   disablePromote,
   onRetry,
+  onTrackAccount,
   usage,
 }: MessageBubbleProps) {
   const { addToast } = useToast();
 
+  // Extract company name from research content if applicable
+  const extractCompanyName = () => {
+    // Prefer explicit labels
+    const labelMatch = content.match(/^\s*(?:Company|Target Company|Account)\s*:\s*(.+)$/mi);
+    if (labelMatch?.[1]) {
+      const cand = labelMatch[1].trim();
+      if (!/^\d+[).]?$/.test(cand)) return cand;
+    }
+
+    // Use top-level heading if present (and not just a numeral)
+    const h1 = content.match(/^#\s+(.+?)$/m);
+    if (h1?.[1] && !/^\d+[).]?$/.test(h1[1].trim())) {
+      return h1[1].trim();
+    }
+
+    // Fallback: "Research on X" phrasing
+    const onMatch = content.match(/Research\s+(?:on|about)\s+(.+?)(?:\s+for|\.|$)/i);
+    if (onMatch?.[1] && !/^\d+[).]?$/.test(onMatch[1].trim())) {
+      return onMatch[1].trim();
+    }
+
+    // Fallback: first non-empty line that looks like a name and not a list marker
+    const firstLine = content.split('\n').map(l => l.trim()).find(l => l && !/^\d+[).]/.test(l) && !/^[-*]/.test(l));
+    if (firstLine && !/^\d+[).]?$/.test(firstLine)) {
+      return firstLine.replace(/^#+\s*/, '').trim();
+    }
+
+    return null;
+  };
+
+  // Gate tracking: only show Track when we have a concise, human-looking company name
+  const looksLikeCompany = (name: string | null) => {
+    if (!name) return false;
+    const s = name.trim();
+    if (s.length < 2 || s.length > 80) return false;
+    if (/^if you want/i.test(s)) return false;
+    if (/\s{2,}/.test(s)) return false;
+    // Avoid sentences (multiple punctuation)
+    const puncts = (s.match(/[.!?]/g) || []).length;
+    if (puncts >= 2) return false;
+    // Allow up to 5 words
+    if (s.split(/\s+/).length > 6) return false;
+    return true;
+  };
+  const extracted = role === 'assistant' && showActions ? extractCompanyName() : null;
+  const companyName = looksLikeCompany(extracted) ? extracted : null;
+  const draftEmail = async () => {
+    try {
+      const { supabase } = await import('../lib/supabase');
+      const { data: { session } } = await supabase.auth.getSession();
+      const auth = session?.access_token;
+      const resp = await fetch('/api/outreach/draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(auth ? { 'Authorization': `Bearer ${auth}` } : {}) },
+        body: JSON.stringify({ research_markdown: content, company: companyName })
+      });
+      const json = await resp.json();
+      if (!resp.ok) throw new Error(json?.error || 'Draft failed');
+      await navigator.clipboard.writeText(json.email || '');
+      addToast({ type: 'success', title: 'Draft email copied' });
+    } catch (e: any) {
+      addToast({ type: 'error', title: 'Failed to draft email', description: e?.message || String(e) });
+    }
+  };
+
   if (role === 'user') {
     return (
-      <div className="flex gap-3 items-start">
+      <div className="flex gap-3 items-start" data-testid="message-user">
         <div className="w-8 h-8 rounded-full bg-gray-800 flex items-center justify-center text-white text-sm font-medium flex-shrink-0">
           {userName}
         </div>
@@ -78,7 +131,7 @@ export function MessageBubble({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-testid="message-assistant">
       <div className="relative">
         <MarkdownContent content={content} />
         {streaming && content && (
@@ -146,6 +199,25 @@ export function MessageBubble({
               aria-label="Save to Research"
             >
               Save to Research
+            </button>
+          )}
+          <button
+            onClick={draftEmail}
+            className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 inline-flex items-center gap-1"
+            aria-label="Draft Email"
+          >
+            <Mail className="w-3.5 h-3.5" /> Draft Email
+          </button>
+          {onTrackAccount && companyName && (
+            <button
+              onClick={() => onTrackAccount(companyName)}
+              className="text-xs font-semibold text-purple-600 hover:text-purple-700"
+              aria-label="Track Account"
+            >
+              <span className="inline-flex items-center gap-1">
+                <Building2 className="w-3.5 h-3.5" />
+                Track {companyName}
+              </span>
             </button>
           )}
 

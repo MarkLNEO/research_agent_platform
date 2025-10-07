@@ -6,6 +6,7 @@ interface MessageInputProps {
   value: string;
   onChange: (value: string) => void;
   onSend: () => void;
+  onStop?: () => void;
   disabled?: boolean;
   placeholder?: string;
   selectedAgent?: string;
@@ -15,24 +16,32 @@ interface MessageInputProps {
   onEstimateChange?: (estimate: CreditEstimate | null) => void;
   onAttach?: () => void;
   onSettings?: () => void;
+  isStreaming?: boolean;
+  focusSignal?: number;
 }
 
 export function MessageInput({
   value,
   onChange,
   onSend,
+  onStop,
   disabled = false,
   placeholder = 'Message agent...',
-  selectedAgent = 'Research Agent',
+  selectedAgent = 'Company Researcher',
   guardrailProfileName,
   onGuardrailClick,
   qualityChecklistSummary,
   onEstimateChange,
   onAttach,
-  onSettings
+  onSettings,
+  isStreaming = false,
+  focusSignal
 }: MessageInputProps) {
   const [showAgentDropdown, setShowAgentDropdown] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Safe defaults for optional handlers
+  const safeOnAttach = onAttach ?? (() => {});
+  const safeOnSettings = onSettings ?? (() => {});
 
   const creditEstimate = useMemo(() => {
     if (!value.trim()) return null;
@@ -49,6 +58,18 @@ export function MessageInput({
       textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
   }, [value]);
+
+  useEffect(() => {
+    if (focusSignal != null) {
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          const pos = textareaRef.current.value.length;
+          textareaRef.current.setSelectionRange(pos, pos);
+        }
+      });
+    }
+  }, [focusSignal]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -84,8 +105,8 @@ export function MessageInput({
       <div className="flex items-center justify-between mt-2">
         <div className="flex items-center gap-2">
           <button
-            onClick={onAttach}
-            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+            onClick={safeOnAttach}
+            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             title="Upload CSV for bulk research"
             aria-label="Upload CSV for bulk research"
           >
@@ -93,8 +114,8 @@ export function MessageInput({
           </button>
 
           <button
-            onClick={onSettings}
-            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+            onClick={safeOnSettings}
+            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             title="Bulk Research"
             aria-label="Bulk Research"
           >
@@ -127,27 +148,41 @@ export function MessageInput({
 
             {showAgentDropdown && (
               <div className="absolute bottom-full right-0 mb-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-1" role="listbox">
-                <button className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 text-gray-900" role="option" aria-selected={selectedAgent === 'Research Agent'}>
-                  Research Agent
-                </button>
-                <button className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 text-gray-500" role="option" aria-selected={selectedAgent === 'Analysis Agent'}>
-                  Analysis Agent
-                </button>
-                <button className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 text-gray-500" role="option" aria-selected={selectedAgent === 'Writing Agent'}>
-                  Writing Agent
-                </button>
+                {['Company Researcher', 'Profile Coach', 'Writing Partner'].map(option => (
+                  <button
+                    key={option}
+                    className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${selectedAgent === option ? 'text-gray-900' : 'text-gray-500'}`}
+                    role="option"
+                    aria-selected={selectedAgent === option}
+                    onClick={() => {
+                      setShowAgentDropdown(false);
+                    }}
+                  >
+                    {option}
+                  </button>
+                ))}
               </div>
             )}
           </div>
 
-          <button
-            onClick={onSend}
-            disabled={disabled || !value.trim()}
-            className="p-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors shadow-sm hover:shadow-md"
-            aria-label="Send message"
-          >
-            <ArrowUp className={`w-4 h-4 ${disabled || !value.trim() ? 'text-gray-500' : 'text-white'}`} />
-          </button>
+          {isStreaming ? (
+            <button
+              onClick={onStop}
+              className="px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+              aria-label="Stop generation"
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              onClick={onSend}
+              disabled={disabled || !value.trim()}
+              className="p-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors shadow-sm hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+              aria-label="Send message"
+            >
+              <ArrowUp className={`w-4 h-4 ${disabled || !value.trim() ? 'text-gray-500' : 'text-white'}`} />
+            </button>
+          )}
         </div>
       </div>
 

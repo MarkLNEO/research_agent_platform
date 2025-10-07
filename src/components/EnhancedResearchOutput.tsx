@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, ExternalLink, AlertCircle, TrendingUp, Building2, Users, DollarSign, Shield, Briefcase } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import { Streamdown } from 'streamdown';
 
 interface ResearchSection {
   title: string;
@@ -26,13 +26,19 @@ interface EnhancedResearchOutputProps {
     url: string;
     title: string;
   }>;
+  onSave?: () => void;
+  onExportPDF?: () => void;
+  onShare?: () => void;
 }
 
 export function EnhancedResearchOutput({ 
   content, 
   companyName, 
   signals = [],
-  sources = []
+  sources = [],
+  onSave,
+  onExportPDF,
+  onShare
 }: EnhancedResearchOutputProps) {
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set([0])); // First section expanded by default
 
@@ -128,9 +134,9 @@ export function EnhancedResearchOutput({
             
             {expandedSections.has(index) && (
               <div className="px-4 pb-4 border-t border-gray-100">
-                <div className="prose prose-sm max-w-none mt-3">
-                  <ReactMarkdown>{section.content}</ReactMarkdown>
-                </div>
+                <Streamdown className="prose prose-sm max-w-none mt-3">
+                  {section.content}
+                </Streamdown>
                 
                 {section.signals && section.signals.length > 0 && (
                   <div className="mt-4 space-y-2">
@@ -174,13 +180,24 @@ export function EnhancedResearchOutput({
 
       {/* Quick Actions */}
       <div className="flex gap-2 pt-2">
-        <button className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors">
-          Save to Research
-        </button>
-        <button className="px-4 py-2 bg-white text-gray-700 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+        {onSave && (
+          <button
+            onClick={onSave}
+            className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            Save to Research
+          </button>
+        )}
+        <button
+          className="px-4 py-2 bg-white text-gray-700 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          onClick={onExportPDF}
+        >
           Export as PDF
         </button>
-        <button className="px-4 py-2 bg-white text-gray-700 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+        <button
+          className="px-4 py-2 bg-white text-gray-700 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          onClick={onShare}
+        >
           Share
         </button>
       </div>

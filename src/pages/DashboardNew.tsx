@@ -7,7 +7,7 @@ import { MessageBubble } from '../components/MessageBubble';
 import { MessageInput } from '../components/MessageInput';
 import { ThinkingIndicator } from '../components/ThinkingIndicator';
 import { ChevronDown, ArrowRight, AlertCircle, AlertTriangle, ArrowLeft, Zap } from 'lucide-react';
-import { ALL_AGENTS, AVAILABLE_AGENTS, getAgentById, type AgentType } from '../config/agents';
+import type { AgentType } from '../services/agents/types';
 import { useUserProfile } from '../hooks/useUserProfile';
 import { getUserFriendlyError } from '../utils/retry';
 import { SaveResearchDialog } from '../components/SaveResearchDialog';
@@ -21,6 +21,7 @@ import { SignalPreview } from '../components/SignalPreview';
 import { CapabilityPlanCard } from '../components/CapabilityPlanCard';
 import { PlaybookList } from '../components/PlaybookList';
 import { buildTemplateKickoffMarkdown } from '../utils/templateRun';
+import { DashboardGreeting } from '../components/DashboardGreeting';
 
 const LOW_BALANCE_THRESHOLD = 10;
 
@@ -71,7 +72,16 @@ export function DashboardNew() {
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [showAgentDropdown, setShowAgentDropdown] = useState(false);
-  const [selectedAgent, setSelectedAgent] = useState(AVAILABLE_AGENTS[0]);
+  // Minimal local agent catalog to decouple from deprecated src/config/agents
+  const LOCAL_AGENTS = [
+    {
+      id: 'company_research' as AgentType,
+      label: 'Company Researcher',
+      description: 'Deep research on specific companies with scoring and insights',
+    }
+  ];
+  const getAgentById = (id: AgentType) => LOCAL_AGENTS.find(a => a.id === id) || LOCAL_AGENTS[0];
+  const [selectedAgent, setSelectedAgent] = useState(LOCAL_AGENTS[0]);
   const [streamingMessage, setStreamingMessage] = useState('');
   const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([]);
   const [userCredits, setUserCredits] = useState({ remaining: 0, total: 0 });
@@ -95,6 +105,7 @@ export function DashboardNew() {
   const lastSentRef = useRef<{ text: string; at: number } | null>(null);
   const autoPromptedMessagesRef = useRef(new Set<string>());
   const [pendingAutoPrompt, setPendingAutoPrompt] = useState<string | null>(null);
+  const assistantInsertedRef = useRef(false);
 
   const {
     templates,
@@ -564,6 +575,7 @@ export function DashboardNew() {
     setSaveError(null);
     setSaveSuccess(null);
     resetResponseMetadata();
+    assistantInsertedRef.current = false;
 
     const tempUserMsg: Message = {
       id: `temp-user-${Date.now()}`,
@@ -591,6 +603,13 @@ export function DashboardNew() {
 
       const response = await streamAIResponse(message);
 
+      // Prevent duplicate insertions in case of race or re-entry
+      if (assistantInsertedRef.current) {
+        setStreamingMessage('');
+        setThinkingEvents([]);
+        return;
+      }
+      assistantInsertedRef.current = true;
       const { data: savedAssistantMsg } = await supabase
         .from('messages')
         .insert({
@@ -662,7 +681,7 @@ export function DashboardNew() {
   const launchTemplateRun = async () => {
     if (!selectedTemplate || !selectedGuardrailProfile || !selectedSignalSet) return;
 
-    setSelectedAgent(ALL_AGENTS.find(agent => agent.id === 'company_research') ?? selectedAgent);
+    setSelectedAgent(getAgentById('company_research'));
 
     const metadata = templateMetadata
       ? { ...templateMetadata, capability_plan: capabilityPlan }
@@ -742,14 +761,16 @@ export function DashboardNew() {
 
       const startedAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
       try { window.dispatchEvent(new CustomEvent('llm:request', { detail: { page: 'dashboard', ts: Date.now() } })); } catch {}
+      // Use Vercel API by default; opt-out only if explicitly disabled
+      const chatUrl = '/api/ai/chat';
+
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`,
+        chatUrl,
         {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
-            'apikey': `${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
           },
           body: JSON.stringify({
             messages: conversationHistory,
@@ -812,9 +833,9 @@ export function DashboardNew() {
                     sources: parsed.sources
                   }]);
                 }
-                // Responses API format: look for output_text delta
-                else if (parsed.type === 'response.output_text.delta') {
-                  const content = parsed.delta;
+                // Responses API format: support both canonical and simplified events
+                else if (parsed.type === 'response.output_text.delta' || parsed.type === 'content') {
+                  const content = parsed.delta || parsed.content;
                   if (content) {
                     if (firstDeltaAt == null) {
                       firstDeltaAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -875,12 +896,13 @@ export function DashboardNew() {
         chats={chats}
         currentChatId={currentChatId}
         onChatSelect={setCurrentChatId}
-        onCompanyProfile={() => navigate('/settings-agent')}
+        onCompanyProfile={() => navigate('/profile-coach')}
         onResearchHistory={() => navigate('/research')}
         onSettings={() => navigate('/settings')}
         profile={profileData}
         customCriteriaCount={customCriteriaCount}
         signalPreferencesCount={signalPreferencesCount}
+        onHome={() => navigate('/')}
       />
 
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -890,7 +912,7 @@ export function DashboardNew() {
               <span className="font-medium text-gray-900">Select Agent</span>
             </div>
             <div className="max-h-96 overflow-y-auto">
-              {AVAILABLE_AGENTS.map(agent => (
+              {LOCAL_AGENTS.map(agent => (
                 <button
                   key={agent.id}
                   onClick={() => {
@@ -902,7 +924,7 @@ export function DashboardNew() {
                   }`}
                 >
                   <div className="flex items-start gap-3">
-                    <agent.icon className="w-5 h-5 mt-0.5 flex-shrink-0" />
+                    <div className="w-5 h-5 mt-0.5 flex-shrink-0 rounded bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-semibold">{agent.label[0]}</div>
                     <div className="flex-1 min-w-0">
                       <div className="font-medium text-sm">{agent.label}</div>
                       <div className="text-xs text-gray-500 mt-0.5">{agent.description}</div>
@@ -918,30 +940,61 @@ export function DashboardNew() {
           {messages.length === 0 ? (
             <div className="h-full px-6 py-8">
               <div className="max-w-6xl mx-auto space-y-8">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                  <div>
-                    <h1 className="text-4xl font-serif text-gray-900">Universal Brief Console</h1>
-                    <p className="text-gray-600 mt-1">
-                      Configure templates, guardrails, and signals to launch research instantly.
-                    </p>
+                {/* Dashboard Greeting with signals and proactive insights */}
+                <DashboardGreeting
+                  onSuggestionClick={(suggestion) => {
+                    setInputValue(suggestion);
+                  }}
+                  onSignalClick={(company) => {
+                    const next = `Research ${company} and show me what changed`;
+                    setInputValue(next);
+                    // Immediately send the message
+                    void (async () => {
+                      if (!currentChatId) {
+                        const newChatId = await createNewChat({
+                          title: selectedTemplate?.label ?? selectedAgent.label,
+                          agentType: 'company_research',
+                          metadata: templateMetadata
+                            ? { ...templateMetadata, capability_plan: capabilityPlan }
+                            : {}
+                        });
+                        if (newChatId) await handleSendMessageWithChat(newChatId, next);
+                        return;
+                      }
+                      await handleSendMessageWithChat(currentChatId, next);
+                    })();
+                  }}
+                  onViewAccounts={() => {
+                    window.dispatchEvent(new CustomEvent('show-tracked-accounts'));
+                  }}
+                />
+
+                {/* Template Console Section */}
+                <div className="border-t border-gray-200 pt-8">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    <div>
+                      <h2 className="text-2xl font-serif text-gray-900">Universal Brief Console</h2>
+                      <p className="text-gray-600 mt-1">
+                        Configure templates, guardrails, and signals to launch research instantly.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => selectPlaybook(null)}
+                        className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        Reset config
+                      </button>
+                      <button
+                        onClick={launchTemplateRun}
+                        disabled={loading}
+                        className="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold shadow-sm hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-500"
+                      >
+                        <ArrowRight className="w-4 h-4" />
+                        Launch brief
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => selectPlaybook(null)}
-                      className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-                    >
-                      Reset config
-                    </button>
-                    <button
-                      onClick={launchTemplateRun}
-                      disabled={loading}
-                      className="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold shadow-sm hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-500"
-                    >
-                      <ArrowRight className="w-4 h-4" />
-                      Launch brief
-                    </button>
-                  </div>
-                </div>
 
                 <div className="grid lg:grid-cols-[2fr,1fr] gap-6">
                   <div className="space-y-6">
@@ -1023,6 +1076,7 @@ export function DashboardNew() {
                     </div>
                   </div>
                 </div>
+                </div>
               </div>
             </div>
           ) : (
@@ -1045,7 +1099,7 @@ export function DashboardNew() {
                   onClick={() => setShowAgentDropdown(!showAgentDropdown)}
                   className="text-sm text-gray-600 hover:text-gray-900 flex items-center gap-2"
                 >
-                  <selectedAgent.icon className="w-4 h-4" />
+                  <div className="w-4 h-4 rounded bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-semibold">{selectedAgent.label[0]}</div>
                   {selectedAgent.label}
                   <ChevronDown className="w-4 h-4" />
                 </button>

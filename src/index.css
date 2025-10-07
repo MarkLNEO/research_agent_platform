@@ -2,6 +2,9 @@
 @import 'tailwindcss/components';
 @import 'tailwindcss/utilities';
 
+/* Enable Streamdown built-in styles (typography, code controls, math, mermaid) */
+@source "../node_modules/streamdown/dist/index.js";
+
 @layer utilities {
   .animate-fadeIn {
     animation: fadeIn 0.3s ease-in;

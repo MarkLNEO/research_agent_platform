@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -85,10 +85,25 @@ export function OnboardingEnhanced() {
 
   const [customCriteria, setCustomCriteria] = useState<CustomCriterion[]>([]);
   const [selectedSignals, setSelectedSignals] = useState<string[]>([]);
+  const [selectedFocus, setSelectedFocus] = useState<string[]>([]);
+
+  const recommendedFocus = useMemo(() => {
+    const role = (profileData.userRole || '').toLowerCase();
+    if (role.includes('security') || role.includes('ciso') || role.includes('risk')) {
+      return ['leadership', 'tech_stack', 'news'];
+    }
+    if (role.includes('marketing')) {
+      return ['market', 'customers', 'news'];
+    }
+    if (role.includes('sales') || role.includes('account') || role.includes('revenue')) {
+      return ['leadership', 'customers', 'news'];
+    }
+    return ['leadership', 'news'];
+  }, [profileData.userRole]);
 
   const [pendingCriteria, setPendingCriteria] = useState<string[]>([]);
   const [currentCriterionIndex, setCurrentCriterionIndex] = useState(-1);
-  const [currentCriterionStep, setCurrentCriterionStep] = useState<'type' | 'importance' | null>(null);
+  const [currentCriterionStep, setCurrentCriterionStep] = useState<'importance' | null>(null);
   const [tempCriterion, setTempCriterion] = useState<Partial<CustomCriterion>>({});
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -111,6 +126,12 @@ export function OnboardingEnhanced() {
   }, [isTyping, currentStep]);
 
   useEffect(() => {
+    if (currentStep === 9 && !welcomeMode && selectedFocus.length === 0 && recommendedFocus.length > 0) {
+      setSelectedFocus(Array.from(new Set(recommendedFocus)));
+    }
+  }, [currentStep, welcomeMode, selectedFocus.length, recommendedFocus]);
+
+  useEffect(() => {
     const checkExistingProfile = async () => {
       if (!user || initializedRef.current) return;
       initializedRef.current = true;
@@ -124,6 +145,7 @@ export function OnboardingEnhanced() {
       if (data?.onboarding_complete) {
         navigate('/');
       } else if (data) {
+        // Load any saved values, but always start at the welcome card for clarity
         setProfileData({
           companyName: data.company_name || '',
           companyUrl: data.company_url || '',
@@ -141,19 +163,9 @@ export function OnboardingEnhanced() {
           outputFormat: data.output_format || 'pdf',
           outputStyle: data.output_style || 'executive_summary',
         });
-        setCurrentStep(data.onboarding_step);
-
-        const isReturningUser = data.company_name && data.company_url;
-        if (isReturningUser) {
-          addAgentMessage(
-            `Welcome back! I see you're updating your company profile for ${data.company_name}. Let's go through the setup again to make sure everything is current.\n\nFirst, is your company name still ${data.company_name}? You can confirm by typing it again or provide a new one.`,
-            true
-          );
-          setWelcomeMode(false);
-        } else {
-          // Show agentic welcome instead of immediate text prompt
-          setWelcomeMode(true);
-        }
+        setCurrentStep(data.onboarding_step || 1);
+        // Always show the welcome mode for incomplete onboarding to keep flow consistent
+        setWelcomeMode(true);
       } else {
         setWelcomeMode(true);
       }
@@ -165,9 +177,9 @@ export function OnboardingEnhanced() {
   const getStepMessage = (step: number): string => {
     switch (step) {
       case 1:
-        return "Hi! I'm your Research Agent. I'm here to help set up your account so I can provide personalized research insights for your sales team.\n\nLet's start - what's your company name?";
+        return "Hi! I'm your Welcome Agent. I'll use this setup to auto-fill firmographics, monitor signals, and tailor every briefing for you.\n\nLet's start—what's your company name? You can paste the website if that's easier and I'll detect it automatically.";
       case 2:
-        return `Great! Now I need your company website URL and a bit about your role.\n\nWhat's your website address?`;
+        return `Great! I'll use the official domain to pull logo, news, and verified firmographics.\n\nWhat's your website address?`;
       case 3:
         return `Perfect! Now let's define your Ideal Customer Profile (ICP). This helps me find the right prospects.\n\nWhat industry are you in?`;
       case 4:
@@ -181,7 +193,7 @@ export function OnboardingEnhanced() {
       case 8:
         return `Almost done! Who do you typically sell to?\n\nPlease provide job titles (e.g., "VP Sales, CRO, Director of Sales") or type "skip".`;
       case 9:
-        return `Finally, what areas should I focus on when researching? Select any that apply:\n${RESEARCH_FOCUS_OPTIONS.map((opt, idx) => `${idx + 1}. ${opt.label}`).join('\n')}\n\nType the numbers (like "1,3,5"), type "all", or describe what you're interested in.`;
+        return `Here’s what I can dig into for every account. By default I’ll cover all of them.\n${RESEARCH_FOCUS_OPTIONS.map((opt, idx) => `${idx + 1}. ${opt.label}`).join('\n')}\n\nTell me if there’s anything you’d like me to skip, or anything missing that you expect.`;
       default:
         return '';
     }
@@ -251,6 +263,18 @@ export function OnboardingEnhanced() {
     await processUserInput(userInput);
   };
 
+  const handleSkip = async () => {
+    if (welcomeMode || isTyping) return;
+    if (currentStep === 9) {
+      await finishOnboarding([]);
+      return;
+    }
+    const skippable = new Set([4, 5, 6, 7, 8]);
+    if (!skippable.has(currentStep)) return;
+    addUserMessage('skip');
+    await processUserInput('skip');
+  };
+
   const processUserInput = async (input: string) => {
     const lowerInput = input.toLowerCase();
 
@@ -258,6 +282,37 @@ export function OnboardingEnhanced() {
       case 1: {
         const affirmations = ['yes', 'y', 'correct', 'same', 'unchanged', 'no change', 'yep', 'yeah'];
         const currentName = profileData.companyName?.trim();
+
+        const looksLikeUrl = /\./.test(input) || input.startsWith('http');
+        if (looksLikeUrl) {
+          try {
+            const normalizedUrl = input.startsWith('http') ? input : `https://${input}`;
+            const parsed = new URL(normalizedUrl);
+            const sanitizedUrl = parsed.origin;
+            const guessedName = deriveCompanyNameFromUrl(normalizedUrl);
+            const finalName = guessedName || input.replace(/^https?:\/\//, '');
+
+            setProfileData(prev => ({
+              ...prev,
+              companyName: finalName,
+              companyUrl: sanitizedUrl,
+            }));
+
+            await saveProgress(3, {
+              company_name: finalName,
+              company_url: sanitizedUrl
+            });
+
+            setCurrentStep(3);
+            await addAgentMessage(
+              `Got it — I'll research for ${finalName}.\n\nNow, what's your role?\n\n• BDR/SDR (finding new prospects)\n• AE (researching existing accounts)\n• Marketing\n• Other`
+            );
+            break;
+          } catch {
+            await addAgentMessage("That looks like a partial link. Paste the full domain (e.g., acme.com) or type the company name and I'll look it up for you.");
+            return;
+          }
+        }
 
         if (affirmations.includes(lowerInput)) {
           if (!currentName) {
@@ -273,7 +328,7 @@ export function OnboardingEnhanced() {
         }
 
         if (input.length < 2) {
-          await addAgentMessage("That seems quite short. Could you provide your full company name?");
+          await addAgentMessage("That seems quite short. Try the full company name (e.g., 'Acme Corp') or paste the website.");
           return;
         }
         setProfileData(prev => ({ ...prev, companyName: input }));
@@ -514,7 +569,7 @@ export function OnboardingEnhanced() {
     }
   };
 
-  const parseCriteriaFromInput = (input: string): string[] => {
+const parseCriteriaFromInput = (input: string): string[] => {
     // Check if input contains numbered patterns like "1. text 2. text" or "1. text\n2. text"
     const hasNumbering = /\d+\.\s+/.test(input);
 
@@ -542,6 +597,44 @@ export function OnboardingEnhanced() {
       .filter(line => line.length > 3);
 
     return lines;
+};
+
+const inferFieldTypeFromCriterion = (criterion: string): 'text' | 'number' | 'boolean' | 'list' => {
+  const lower = criterion.toLowerCase();
+  if (/count|number of|revenue|employees|growth|%|percent|pipeline|budget|headcount|ARR|MRR/.test(lower)) {
+    return 'number';
+  }
+  if (/has |have |do they|does it|is there|compliance|certified|yes|no/.test(lower)) {
+    return 'boolean';
+  }
+  if (/list|titles|tools|stack|technolog|vendors|platforms/.test(lower)) {
+    return 'list';
+  }
+  return 'text';
+};
+
+const deriveCompanyNameFromUrl = (raw: string): string => {
+  try {
+    const normalized = raw.startsWith('http') ? raw : `https://${raw}`;
+    const url = new URL(normalized);
+    const host = url.hostname.replace(/^www\./, '');
+    const segment = host.split('.')[0] || host;
+    return segment
+      .split(/[-_]/)
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  } catch {
+    return '';
+  }
+};
+
+  const promptImportanceForCriterion = async (criterion: string) => {
+    const inferred = inferFieldTypeFromCriterion(criterion);
+    setTempCriterion({ field_name: criterion, field_type: inferred });
+    setCurrentCriterionStep('importance');
+    await addAgentMessage(
+      `How important is "${criterion}"?\n• Critical (must have)\n• Important (nice to have)\n• Optional (bonus)`
+    );
   };
 
   const handleCustomCriteriaInput = async (input: string, lowerInput: string) => {
@@ -559,33 +652,6 @@ export function OnboardingEnhanced() {
       });
       setCurrentStep(5);
       await addAgentMessage(getStepMessage(5));
-      return;
-    }
-
-    if (currentCriterionStep === 'type') {
-      let fieldType: 'text' | 'number' | 'boolean' | 'list' = 'text';
-
-      if (lowerInput.includes('text')) {
-        fieldType = 'text';
-      } else if (lowerInput.includes('number')) {
-        fieldType = 'number';
-      } else if (lowerInput.includes('yes') || lowerInput.includes('no') || lowerInput.includes('boolean')) {
-        fieldType = 'boolean';
-      } else if (lowerInput.includes('list')) {
-        fieldType = 'list';
-      } else {
-        await addAgentMessage(
-          `I didn't catch that. Is "${pendingCriteria[currentCriterionIndex]}" a:\n• Text (e.g., "Salesforce")\n• Number (e.g., 500)\n• Yes/No`
-        );
-        return;
-      }
-
-      setTempCriterion({ field_name: pendingCriteria[currentCriterionIndex], field_type: fieldType });
-      setCurrentCriterionStep('importance');
-
-      await addAgentMessage(
-        `Got it! How important is "${pendingCriteria[currentCriterionIndex]}"?\n• Critical (must have)\n• Important (nice to have)\n• Optional (bonus)`
-      );
       return;
     }
 
@@ -616,22 +682,18 @@ export function OnboardingEnhanced() {
 
       if (currentCriterionIndex < pendingCriteria.length - 1) {
         setCurrentCriterionIndex(currentCriterionIndex + 1);
-        setCurrentCriterionStep('type');
-
-        await addAgentMessage(
-          `Perfect! Next criterion: "${pendingCriteria[currentCriterionIndex + 1]}"\n\nWhat type of data is this?\n• Text (e.g., "Salesforce")\n• Number (e.g., 500)\n• Yes/No`
-        );
+        await promptImportanceForCriterion(pendingCriteria[currentCriterionIndex + 1]);
       } else {
         setPendingCriteria([]);
         setCurrentCriterionIndex(-1);
         setCurrentCriterionStep(null);
 
         const criteriaList = customCriteria.concat([newCriterion]).map((c, idx) =>
-          `${idx + 1}. ${c.field_name} (${c.field_type}, ${c.importance})`
+          `${idx + 1}. ${c.field_name} (${c.field_type} • ${c.importance})`
         ).join('\n');
 
         await addAgentMessage(
-          `Excellent! I've saved all your criteria:\n\n${criteriaList}\n\nYou can add more criteria, or type "done" to continue.`
+          `Excellent! I've saved all your criteria:\n\n${criteriaList}\n\nYou can add more criteria, or type "done" to continue. You can refine these later in Settings if needed.`
         );
       }
       return;
@@ -648,19 +710,19 @@ export function OnboardingEnhanced() {
 
     setPendingCriteria(newCriteria);
     setCurrentCriterionIndex(0);
-    setCurrentCriterionStep('type');
-
     const criteriaListFormatted = newCriteria.map((c, idx) => `${idx + 1}. ${c}`).join('\n');
 
     await addAgentMessage(
-      `Got it! I've identified ${newCriteria.length} ${newCriteria.length === 1 ? 'criterion' : 'criteria'}:\n\n${criteriaListFormatted}\n\nNow I need to know what type of data each one is. Let's start with the first one:\n\n"${newCriteria[0]}"\n\nWhat type of data is this?\n• Text (e.g., "Salesforce")\n• Number (e.g., 500)\n• Yes/No`
+      `Got it! I've identified ${newCriteria.length} ${newCriteria.length === 1 ? 'criterion' : 'criteria'}:\n\n${criteriaListFormatted}\n\nI'll make sensible assumptions about the data type for each one. Let's talk about priority next.`
     );
+
+    await promptImportanceForCriterion(newCriteria[0]);
   };
 
   const handleResearchFocusInput = async (input: string) => {
     const lowerInput = input.toLowerCase();
 
-    if (lowerInput === 'all') {
+    if (lowerInput === 'all' || lowerInput.includes('all of those') || lowerInput.includes('all of them') || lowerInput.includes('all of these') || lowerInput.includes('everything')) {
       const allFocus = RESEARCH_FOCUS_OPTIONS.map(opt => opt.id);
       await finishOnboarding(allFocus);
     } else if (lowerInput === 'skip') {
@@ -673,7 +735,7 @@ export function OnboardingEnhanced() {
       await finishOnboarding(selectedFocus);
     } else {
       await addAgentMessage(
-        "Please type numbers separated by commas (like '1,3,5'), 'all' for everything, or 'skip'."
+        "Use the checkboxes below to fine-tune what I emphasize, or leave everything checked and continue."
       );
     }
   };
@@ -735,6 +797,45 @@ export function OnboardingEnhanced() {
     addAgentMessage(getStepMessage(1), false);
   };
 
+  const inputMetadata = useMemo(() => {
+    if (welcomeMode) {
+      return {
+        label: "What should I get ready for you?",
+        helper: 'Jump straight into research or let me gather preferences—either way, you can change these anytime.',
+        placeholder: 'Research Boeing or “Help me set up”',
+      };
+    }
+
+    switch (currentStep) {
+      case 1:
+        return {
+          label: 'Company name or website',
+          helper: 'Paste the full domain (acme.com) or type the company name. I’ll verify it and pull the official details.',
+          placeholder: 'Acme Corp or acme.com',
+        };
+      case 2:
+        return {
+          label: 'Company website',
+          helper: "Confirm the domain you want me to monitor and enrich. Paste any variation—I'll normalize it.",
+          placeholder: 'https://acme.com',
+        };
+      case 3:
+        return {
+          label: 'Your role',
+          helper: 'Helps personalize recommendations (e.g., Account Executive, VP of Sales, RevOps Lead).',
+          placeholder: 'Account Executive',
+        };
+      default:
+        return {
+          label: 'Your answer',
+          helper: undefined,
+          placeholder: 'Type your answer...',
+        };
+    }
+  }, [currentStep, welcomeMode]);
+
+  const canSkip = !welcomeMode && [4, 5, 6, 7, 8].includes(currentStep);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
       <div className="w-full max-w-3xl bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
@@ -744,20 +845,24 @@ export function OnboardingEnhanced() {
               <Sparkles className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-xl font-semibold">Research Agent</h1>
-              {!welcomeMode && <p className="text-sm text-blue-100">Step {currentStep} of 9</p>}
+              <h1 className="text-xl font-semibold">Welcome Agent</h1>
+              {!welcomeMode && (
+                <p className="text-sm text-blue-100">
+                  Step {currentStep} of 9 <span aria-hidden="true">•</span> ≈ 2 minutes total
+                </p>
+              )}
             </div>
           </div>
         </div>
 
         <div className="h-[500px] overflow-y-auto p-6 space-y-4">
           {welcomeMode && (
-            <div className="bg-gray-50 border border-gray-200 rounded-2xl p-5">
+            <div className="bg-gray-50 border border-gray-200 rounded-2xl p-5" data-testid="onboarding-welcome">
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center text-lg">👋</div>
                 <div className="flex-1">
                   <div className="mb-2">
-                    <div className="text-sm text-gray-900 font-semibold">Hey! I'm your Research Agent.</div>
+                    <div className="text-sm text-gray-900 font-semibold">Hey! I'm your Welcome Agent.</div>
                   </div>
                   <div className="text-sm text-gray-700 mb-4">
                     I help sales teams research companies, find hot leads, and track accounts.
@@ -766,7 +871,7 @@ export function OnboardingEnhanced() {
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="border border-gray-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-sm transition cursor-pointer" onClick={() => selectPath('immediate')}>
+                    <div className="border border-gray-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-sm transition cursor-pointer" data-testid="onboarding-immediate" onClick={() => selectPath('immediate')}>
                       <div className="text-2xl">🚀</div>
                       <div className="font-semibold text-gray-900 mt-1">Jump right in</div>
                       <div className="text-sm text-gray-600">Research a company now</div>
@@ -776,7 +881,7 @@ export function OnboardingEnhanced() {
                         <button className="text-xs bg-gray-100 rounded-full px-2.5 py-1" onClick={(e) => { e.stopPropagation(); selectPath('immediate', 'What can you do?'); }}>What can you do?</button>
                       </div>
                     </div>
-                    <div className="border border-gray-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-sm transition cursor-pointer" onClick={() => selectPath('guided')}>
+                    <div className="border border-gray-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-sm transition cursor-pointer" data-testid="onboarding-guided" onClick={() => selectPath('guided')}>
                       <div className="text-2xl">💬</div>
                       <div className="font-semibold text-gray-900 mt-1">Quick chat first</div>
                       <div className="text-sm text-gray-600">2 min conversation to personalize</div>
@@ -826,25 +931,128 @@ export function OnboardingEnhanced() {
         </div>
 
         <div className="border-t border-gray-200 p-4 bg-gray-50">
-          <form onSubmit={handleSubmit} className="flex gap-3">
-            <input
-              ref={inputRef}
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              placeholder="Type your answer..."
-              className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-              autoFocus
-              disabled={isTyping}
-            />
-            <button
-              type="submit"
-              disabled={!inputValue.trim() || isTyping}
-              className="bg-blue-600 text-white p-3 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Send className="w-5 h-5" />
-            </button>
-          </form>
+          {currentStep === 9 && !welcomeMode ? (
+            <div className="space-y-4" role="group" aria-label="Select research focus areas">
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-gray-900">Final step — tailor your agent</p>
+                <p className="text-xs text-gray-600">I’ll pull all of these by default. Uncheck anything you don’t need, or highlight the topics that matter most. You can adjust this anytime in Settings.</p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-full border border-blue-200 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-40"
+                  onClick={() => setSelectedFocus(Array.from(new Set([...(recommendedFocus.length ? recommendedFocus : []), ...selectedFocus])))}
+                  disabled={recommendedFocus.length === 0}
+                >
+                  Use recommended
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-full border border-gray-200 text-xs font-medium text-gray-700 bg-white hover:bg-gray-100"
+                  onClick={() => setSelectedFocus(RESEARCH_FOCUS_OPTIONS.map(opt => opt.id))}
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-full border border-gray-200 text-xs font-medium text-gray-700 bg-white hover:bg-gray-100"
+                  onClick={() => setSelectedFocus([])}
+                >
+                  Clear selection
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {RESEARCH_FOCUS_OPTIONS.map(opt => {
+                  const checked = selectedFocus.includes(opt.id);
+                  return (
+                    <label key={opt.id} className={`flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer transition ${checked ? 'border-blue-300 bg-blue-50' : 'border-gray-300 bg-white hover:border-gray-400'}`}>
+                      <input
+                        type="checkbox"
+                        className="mt-1 w-4 h-4"
+                        checked={checked}
+                        onChange={(e) => {
+                          setSelectedFocus(prev => e.target.checked ? Array.from(new Set([...prev, opt.id])) : prev.filter(id => id !== opt.id));
+                        }}
+                        aria-label={opt.label}
+                      />
+                      <span className="text-sm text-gray-800 leading-tight">{opt.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-xs text-gray-500">We’ll use this to highlight the most relevant insights. You can update preferences later.</div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100"
+                  onClick={() => { void finishOnboarding([]); }}
+                  disabled={isTyping}
+                >
+                  Skip for now
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
+                  onClick={() => { void finishOnboarding(selectedFocus); }}
+                  disabled={isTyping}
+                >
+                  Create my agent
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="flex gap-3">
+              <div className="flex-1">
+                <label htmlFor="welcome-agent-input" className="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">
+                  {inputMetadata.label}
+                </label>
+                {inputMetadata.helper && (
+                  <p id="welcome-agent-helper" className="text-xs text-gray-500 mb-2">
+                    {inputMetadata.helper}
+                  </p>
+                )}
+                <input
+                  id="welcome-agent-input"
+                  ref={inputRef}
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  placeholder={inputMetadata.placeholder}
+                  aria-describedby={inputMetadata.helper ? 'welcome-agent-helper' : undefined}
+                  aria-label="Onboarding input"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                  autoFocus
+                  disabled={isTyping}
+                  autoComplete="off"
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <button
+                  type="submit"
+                  disabled={!inputValue.trim() || isTyping}
+                  aria-label="Continue onboarding"
+                  className="flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-3 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Send className="w-5 h-5" aria-hidden="true" />
+                  <span className="text-sm font-semibold">Continue</span>
+                </button>
+                {canSkip && (
+                  <button
+                    type="button"
+                    onClick={handleSkip}
+                    className="text-xs font-medium text-gray-600 hover:text-gray-800"
+                  >
+                    Skip this step
+                  </button>
+                )}
+              </div>
+            </form>
+          )}
         </div>
       </div>
     </div>
