@@ -21,3 +21,7 @@
 
 ## 2025-10-07 20:42:29 UTC
 - Added Vercel env vars (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_USE_VERCEL_API`) across Development/Preview/Production.
+
+## 2025-10-07 21:12:28 UTC
+- Merged PR #1 into `main`, deployed to production (`research-agent-platform-wndsrf-gg4011ilv`).
+- Ran production smoke script: verified onboarding redirect and auto-approved credits for new signup.
