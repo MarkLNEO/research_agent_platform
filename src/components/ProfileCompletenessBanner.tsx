@@ -1,5 +1,6 @@
 import { AlertCircle, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
 interface ProfileCompleteness {
@@ -9,11 +10,36 @@ interface ProfileCompleteness {
 }
 
 export function ProfileCompletenessBanner() {
+  const navigate = useNavigate();
   const [profileStatus, setProfileStatus] = useState<ProfileCompleteness | null>(null);
-  const [isDismissed, setIsDismissed] = useState(false);
+  const [isDismissed, setIsDismissed] = useState(() => {
+    // Check localStorage for dismissal state
+    const dismissed = localStorage.getItem('profileBannerDismissed');
+    return dismissed === 'true';
+  });
 
   useEffect(() => {
     checkProfileCompleteness();
+  }, []);
+
+  const handleDismiss = () => {
+    setIsDismissed(true);
+    // Persist dismissal for 7 days
+    localStorage.setItem('profileBannerDismissed', 'true');
+    localStorage.setItem('profileBannerDismissedAt', Date.now().toString());
+  };
+
+  useEffect(() => {
+    // Check if dismissal has expired (7 days)
+    const dismissedAt = localStorage.getItem('profileBannerDismissedAt');
+    if (dismissedAt) {
+      const daysSinceDismissal = (Date.now() - parseInt(dismissedAt)) / (1000 * 60 * 60 * 24);
+      if (daysSinceDismissal > 7) {
+        localStorage.removeItem('profileBannerDismissed');
+        localStorage.removeItem('profileBannerDismissedAt');
+        setIsDismissed(false);
+      }
+    }
   }, []);
 
   const checkProfileCompleteness = async () => {
@@ -21,16 +47,12 @@ export function ProfileCompletenessBanner() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const [profileRes, criteriaCountRes, signalsCountRes] = await Promise.all([
+      const [profileRes, signalsCountRes] = await Promise.all([
         supabase
           .from('company_profiles')
           .select('*')
           .eq('user_id', user.id)
           .maybeSingle(),
-        supabase
-          .from('user_custom_criteria')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', user.id),
         supabase
           .from('user_signal_preferences')
           .select('id', { count: 'exact', head: true })
@@ -38,7 +60,6 @@ export function ProfileCompletenessBanner() {
       ]);
 
       const profile = profileRes.data;
-      const customCriteriaCount = criteriaCountRes.count || 0;
       const signalPreferencesCount = signalsCountRes.count || 0;
 
       if (!profile) {
@@ -79,7 +100,7 @@ export function ProfileCompletenessBanner() {
   }
 
   return (
-    <div className="bg-amber-50 border-l-4 border-amber-400 p-4 mb-4 rounded-r-lg">
+    <div className="bg-amber-50 border-l-4 border-amber-400 p-4 mb-4 rounded-r-lg" data-testid="profile-completeness-banner">
       <div className="flex items-start">
         <div className="flex-shrink-0">
           <AlertCircle className="h-5 w-5 text-amber-400" />
@@ -103,7 +124,7 @@ export function ProfileCompletenessBanner() {
           </div>
           <div className="mt-4">
             <button
-              onClick={() => { window.location.href = '/settings-agent'; }}
+              onClick={() => navigate('/profile-coach')}
               className="text-sm font-medium text-amber-800 hover:text-amber-900 underline"
             >
               Complete your profile →
@@ -112,8 +133,9 @@ export function ProfileCompletenessBanner() {
         </div>
         <div className="ml-auto pl-3">
           <button
-            onClick={() => setIsDismissed(true)}
+            onClick={handleDismiss}
             className="inline-flex text-amber-400 hover:text-amber-500"
+            title="Dismiss for 7 days"
           >
             <X className="h-5 w-5" />
           </button>
