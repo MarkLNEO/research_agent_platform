@@ -109,27 +109,32 @@ export default async function handler(req, res) {
                 throw error;
             results.disqualifying_criteria = data;
         }
-        // Update prompt config
+        // Update prompt config (best-effort; ignore unknown columns)
         if (updateData.prompt_config && typeof updateData.prompt_config === 'object') {
-            const { data: existingCfg } = await supabase
-                .from('user_prompt_config')
-                .select('id')
-                .eq('user_id', user.id)
-                .maybeSingle();
-            if (existingCfg) {
-                const { error } = await supabase
+            try {
+                const { data: existingCfg } = await supabase
                     .from('user_prompt_config')
-                    .update({ ...updateData.prompt_config, updated_at: new Date().toISOString() })
-                    .eq('user_id', user.id);
-                if (error)
-                    throw error;
+                    .select('id')
+                    .eq('user_id', user.id)
+                    .maybeSingle();
+                if (existingCfg) {
+                    const { error } = await supabase
+                        .from('user_prompt_config')
+                        .update({ ...updateData.prompt_config, updated_at: new Date().toISOString() })
+                        .eq('user_id', user.id);
+                    if (error)
+                        throw error;
+                }
+                else {
+                    const { error } = await supabase
+                        .from('user_prompt_config')
+                        .insert({ user_id: user.id, ...updateData.prompt_config });
+                    if (error)
+                        throw error;
+                }
             }
-            else {
-                const { error } = await supabase
-                    .from('user_prompt_config')
-                    .insert({ user_id: user.id, ...updateData.prompt_config });
-                if (error)
-                    throw error;
+            catch (e) {
+                console.warn('[update-profile] prompt_config update skipped:', e?.message || e);
             }
         }
         return res.json({ success: true, data: results });

@@ -98,6 +98,22 @@ export function ResearchChat() {
 
   // Load preference and handle quick starter
   useEffect(() => {
+    // Recover last unsent or mid-stream message after refresh
+    try {
+      const raw = localStorage.getItem('last_research_message');
+      if (raw) {
+        const saved = JSON.parse(raw) as { text: string; at: number } | null;
+        if (saved && Date.now() - saved.at < 20000 && !inputValue) {
+          setInputValue(saved.text);
+          setFocusComposerTick(tick => tick + 1);
+          addToast({ type: 'info', title: 'Recovered your last request', description: 'Press Send to continue.' });
+        }
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     const pref = localStorage.getItem('preferred_research_type');
     if (pref === 'deep' || pref === 'quick' || pref === 'specific') {
       setPreferredResearchType(pref);
@@ -357,6 +373,8 @@ export function ResearchChat() {
     setMessages(prev => [...prev, tempUser]);
 
     try {
+      // Persist last message for recovery in case of refresh
+      try { localStorage.setItem('last_research_message', JSON.stringify({ text: normalized, at: Date.now() })); } catch {}
       const { data: savedUser } = await supabase
         .from('messages')
         .insert({ chat_id: chatId, role: 'user', content: normalized })
@@ -519,6 +537,7 @@ export function ResearchChat() {
       setThinkingEvents([]);
     } finally {
       setLoading(false);
+      try { localStorage.removeItem('last_research_message'); } catch {}
     }
   };
 

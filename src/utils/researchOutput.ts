@@ -162,10 +162,17 @@ export function approximateTokenCount(text: string): number {
 }
 
 export function buildResearchDraft(input: ResearchDraftInput): ResearchDraft {
-  const normalizedSources = normalizeSourceEvents(input.sources);
+  let normalizedSources = normalizeSourceEvents(input.sources);
   const researchType = inferResearchType(input);
   const subject = inferSubject(input);
   const markdown = input.assistantMessage.trim();
+  // If no captured sources from reasoning/search, attempt to extract first URL from markdown
+  if (normalizedSources.length === 0) {
+    const firstUrl = (markdown.match(/https?:\/\/[^\s)]+/i) || [])[0];
+    if (firstUrl) {
+      normalizedSources = [{ url: firstUrl }];
+    }
+  }
   const executiveSummary = buildSummary(markdown);
   const companyData = extractCompanyData(markdown);
   const { icpFit, signalScore, composite, priority, confidence } = computeScores(markdown, normalizedSources.length);

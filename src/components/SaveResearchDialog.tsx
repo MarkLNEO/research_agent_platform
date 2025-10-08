@@ -93,9 +93,7 @@ export function SaveResearchDialog({
       }
     });
 
-    if (trimmedSources.length === 0) {
-      nextErrors.sources = 'Add at least one supporting source.';
-    }
+    // Allow saving without sources; warn in UI instead of blocking
 
     setValidationErrors(nextErrors);
     setSourceErrors(nextSourceErrors);
@@ -405,7 +403,9 @@ export function SaveResearchDialog({
 
               <div className="space-y-3">
                 {(draft.sources || []).length === 0 && (
-                  <p className="text-xs text-gray-500">No sources captured yet. Add links that support this research.</p>
+                  <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    No sources were captured from this run. You can add links that support this research, or save without sources.
+                  </div>
                 )}
 
                 {(draft.sources || []).map((source, index) => (
@@ -439,9 +439,7 @@ export function SaveResearchDialog({
                   </div>
                 ))}
               </div>
-              {validationErrors.sources && (
-                <p className="text-xs text-red-600">{validationErrors.sources}</p>
-              )}
+              {/* Non-blocking: no hard error when sources are empty */}
             </div>
 
             {usage && (
