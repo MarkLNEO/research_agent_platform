@@ -782,6 +782,19 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
     await addAgentMessage(
       `Perfect! You're all set up. I'm ready to help you research companies, find prospects, and provide personalized insights based on your ICP.\n\nRedirecting you to your dashboard...`
     );
+
+    // Default the research preference to 'deep' so we don't re-ask later
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        await fetch('/api/update-profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ prompt_config: { preferred_research_type: 'deep' } })
+        });
+        try { localStorage.setItem('preferred_research_type', 'deep'); } catch {}
+      }
+    } catch {}
     navigate('/');
   };
 
@@ -871,21 +884,23 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {/* Guided setup FIRST */}
+                    <div className="border border-blue-200 bg-blue-50 rounded-xl p-4 hover:border-blue-300 hover:shadow-sm transition cursor-pointer" data-testid="onboarding-guided" onClick={() => selectPath('guided')}>
+                      <div className="text-2xl">🛠️</div>
+                      <div className="font-semibold text-gray-900 mt-1">Take 5 minutes to set up your Research Agent</div>
+                      <div className="text-sm text-gray-700">Help me help you — I’ll personalize research, signals, and contacts.</div>
+                      <div className="text-xs text-gray-600 mt-2">I’ll ask about your role, what you’re looking for, and what data matters.</div>
+                    </div>
+                    {/* Immediate research SECOND */}
                     <div className="border border-gray-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-sm transition cursor-pointer" data-testid="onboarding-immediate" onClick={() => selectPath('immediate')}>
                       <div className="text-2xl">🚀</div>
-                      <div className="font-semibold text-gray-900 mt-1">Jump right in</div>
-                      <div className="text-sm text-gray-600">Research a company now</div>
+                      <div className="font-semibold text-gray-900 mt-1">Dive into research now</div>
+                      <div className="text-sm text-gray-600">Set it up as you go — I’ll automate and learn.</div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button className="text-xs bg-gray-100 rounded-full px-2.5 py-1" onClick={(e) => { e.stopPropagation(); selectPath('immediate', 'Research Boeing'); }}>Research Boeing</button>
                         <button className="text-xs bg-gray-100 rounded-full px-2.5 py-1" onClick={(e) => { e.stopPropagation(); selectPath('immediate', 'Find companies like Stripe'); }}>Find companies like Stripe</button>
                         <button className="text-xs bg-gray-100 rounded-full px-2.5 py-1" onClick={(e) => { e.stopPropagation(); selectPath('immediate', 'What can you do?'); }}>What can you do?</button>
                       </div>
-                    </div>
-                    <div className="border border-gray-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-sm transition cursor-pointer" data-testid="onboarding-guided" onClick={() => selectPath('guided')}>
-                      <div className="text-2xl">💬</div>
-                      <div className="font-semibold text-gray-900 mt-1">Quick chat first</div>
-                      <div className="text-sm text-gray-600">2 min conversation to personalize</div>
-                      <div className="text-xs text-gray-500 mt-2">I'll ask about your role, what you're looking for, and what data matters to you.</div>
                     </div>
                   </div>
 

@@ -103,5 +103,7 @@ export function buildSystemPrompt(
 
   const extraBlock = extras.length ? extras.join('\n') : '';
 
-  return [header, behaviour, contextBlock, extraBlock].filter(Boolean).join('\n\n');
+  const clarificationPolicy = `Clarification & Defaults:\n- Do not present fill-in templates or long forms.\n- Ask at most one short clarifying question only when essential; otherwise proceed using saved profile and sensible defaults.\n- If the user writes "all of the above" (or similar), interpret it as comprehensive coverage of the standard sections and proceed.\n- If a company is identified and a website/domain can be inferred or is present in the profile, do NOT ask for the domain; derive it yourself.\n- Default research depth: ${researchMode || 'deep'} unless the user specifies otherwise.\n- If profile context exists, do not re-ask "what would you like researched?" — assume defaults from the profile and mode.`;
+
+  return [header, behaviour, clarificationPolicy, contextBlock, extraBlock].filter(Boolean).join('\n\n');
 }
