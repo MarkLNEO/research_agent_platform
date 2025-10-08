@@ -176,7 +176,7 @@ test.describe('Production smoke (UI only)', () => {
       await page.waitForTimeout(800);
     }
 
-    // Research streaming minimal
+    // Research streaming minimal (Quick Facts)
     const composer = page.getByLabel(/Message agent/i).or(page.locator('textarea[placeholder*="Message agent"]'));
     await composer.waitFor({ state: 'visible', timeout: 20_000 });
     await composer.fill('Research Acme Test Co');
@@ -186,6 +186,48 @@ test.describe('Production smoke (UI only)', () => {
     // Wait for assistant bubble
     const assistant = page.locator('[data-testid="message-assistant"]').last();
     await assistant.waitFor({ state: 'visible', timeout: 60_000 });
+
+    // Save to Research (open dialog, add one source if needed, save)
+    const saveBtn = page.getByRole('button', { name: /Save to Research/i });
+    const hasSave = await saveBtn.isVisible({ timeout: 3000 }).catch(() => false);
+    if (hasSave) {
+      await saveBtn.click({ timeout: 10_000 }).catch(() => {});
+      const dialog = page.getByTestId('save-research-dialog');
+      const dialogVisible = await dialog.isVisible({ timeout: 10_000 }).catch(() => false);
+      if (dialogVisible) {
+        // If validation requires at least one source, add a simple source
+        const addBtn = page.getByRole('button', { name: /Add source/i });
+        const hasAdd = await addBtn.isVisible({ timeout: 2000 }).catch(() => false);
+        if (hasAdd) {
+          await addBtn.click().catch(() => {});
+          await page.getByLabel(/Source URL/i).last().fill('https://example.com');
+        }
+        // Try to submit; if errors persist, just close the dialog to proceed
+        const submit = page.getByRole('button', { name: /Save research|Save/i });
+        await submit.click({ timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(800);
+        const stillOpen = await dialog.isVisible({ timeout: 500 }).catch(() => false);
+        if (stillOpen) {
+          await page.getByRole('button', { name: /Close save dialog/i }).click().catch(() => {});
+        }
+      }
+    }
+
+    // Deep research run (choose Deep) and verify streaming, then refresh mid-stream to test resilience
+    await composer.fill('Research Beta Manufacturing');
+    await tryClick(page, 'button', /Send|Send message/i, 2000);
+    await tryClick(page, 'button', /Deep Account Research|Deep/i, 5000);
+    // Small wait, then reload to simulate user refresh during stream
+    await page.waitForTimeout(1500);
+    await page.reload();
+    // Expect chat or onboarding visible again
+    const readyAfterReload = await Promise.any([
+      page.getByLabel(/Message agent/i).isVisible({ timeout: 20_000 }),
+      page.getByTestId('onboarding-welcome').isVisible({ timeout: 20_000 })
+    ]).then(() => true).catch(() => false);
+    expect(readyAfterReload).toBeTruthy();
+    // Wait for an assistant response to show up again
+    await page.locator('[data-testid="message-assistant"]').last().waitFor({ state: 'visible', timeout: 60_000 });
 
     // Bulk Research: open dialog programmatically (supported in app), upload small CSV
     await page.evaluate(() => window.dispatchEvent(new Event('bulk:open')));
