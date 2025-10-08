@@ -187,6 +187,52 @@ test.describe('Production smoke (UI only)', () => {
     const assistant = page.locator('[data-testid="message-assistant"]').last();
     await assistant.waitFor({ state: 'visible', timeout: 60_000 });
 
+    // Summarize quick action: click and verify a concise follow-up appears
+    const summarizeBtn = page.getByRole('button', { name: /Summarize/i });
+    const canSummarize = await summarizeBtn.isVisible({ timeout: 3000 }).catch(() => false);
+    if (canSummarize) {
+      const beforeText = await assistant.innerText().catch(() => '');
+      await summarizeBtn.click({ timeout: 10_000 }).catch(() => {});
+      // Wait for next assistant message (or updated content)
+      const assistantAfter = page.locator('[data-testid="message-assistant"]').last();
+      await assistantAfter.waitFor({ state: 'visible', timeout: 60_000 });
+      const summaryText = await assistantAfter.innerText().catch(() => '');
+      // Basic sanity: avoid form-like prompts; prefer TL;DR presence or shorter text than before
+      const badSummary = /please share the text\/file|scope\s*\(|depth and format|do you want me to use web/i.test(summaryText);
+      expect(badSummary).toBeFalsy();
+    }
+
+    // Draft Email CTA: click and ensure /api/outreach/draft returns 2xx
+    const draftBtn = page.getByRole('button', { name: /Draft Email/i });
+    const canDraft = await draftBtn.isVisible({ timeout: 3000 }).catch(() => false);
+    if (canDraft) {
+      const waitDraft = page.waitForResponse((r) => r.url().includes('/api/outreach/draft') && r.request().method() === 'POST', { timeout: 20000 }).catch(() => null);
+      await draftBtn.click({ timeout: 10_000 }).catch(() => {});
+      const resp = await waitDraft;
+      expect(resp && resp.ok()).toBeTruthy();
+    }
+
+    // Targeted check: URL then "All of the above" should proceed without form-like prompts
+    await composer.fill('https://keepit.com');
+    await tryClick(page, 'button', /Send|Send message/i, 2000);
+    await page.waitForTimeout(600);
+    await composer.fill('All of the above');
+    await tryClick(page, 'button', /Send|Send message/i, 2000);
+    const assistant2 = page.locator('[data-testid="message-assistant"]').last();
+    await assistant2.waitFor({ state: 'visible', timeout: 60_000 });
+    const respText = await assistant2.innerText().catch(() => '');
+    const badPhrases = [
+      'To tailor the research, please share',
+      'Exact company name',
+      'Do you want me to use web research',
+      'Depth and format (bullets, summary, slides)'
+    ];
+    const hasBad = badPhrases.some(p => respText.toLowerCase().includes(p.toLowerCase()));
+    // Soft assertion: log if found, but continue
+    if (hasBad) {
+      fs.appendFileSync(logFile, `Found undesired prompt text in response: ${badPhrases.find(p => respText.toLowerCase().includes(p.toLowerCase()))}\n`);
+    }
+
     // Save to Research (open dialog, add one source if needed, save)
     const saveBtn = page.getByRole('button', { name: /Save to Research/i });
     const hasSave = await saveBtn.isVisible({ timeout: 3000 }).catch(() => false);
