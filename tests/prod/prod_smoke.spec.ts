@@ -286,5 +286,16 @@ test.describe('Production smoke (UI only)', () => {
     timelineActive = false;
     await snap('end-of-test');
     await timeline.catch(() => {});
+
+    // Cleanup: remove timeline screenshots unless explicitly kept
+    if (!process.env.E2E_KEEP_TIMELINE) {
+      try {
+        const dir = 'test-artifacts/prod';
+        const files = fs.readdirSync(dir).filter(f => /-timeline\.png$/i.test(f));
+        for (const f of files) {
+          try { fs.unlinkSync(`${dir}/${f}`); } catch {}
+        }
+      } catch {}
+    }
   });
 });

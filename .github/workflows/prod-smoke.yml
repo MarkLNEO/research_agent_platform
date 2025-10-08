@@ -17,6 +17,7 @@ jobs:
       E2E_BASE_URL: ${{ vars.E2E_BASE_URL || 'https://research-agent-platform-wndsrf.vercel.app' }}
       E2E_EMAIL: ${{ vars.E2E_EMAIL || format('mark+ci-{0}@nevereverordinary.com', github.run_id) }}
       E2E_PASSWORD: ${{ secrets.E2E_PASSWORD || 'Codex123!' }}
+      E2E_KEEP_TIMELINE: '1'
 
     steps:
       - name: Checkout
@@ -72,4 +73,3 @@ jobs:
           If FAIL, see the artifacts bundle for the timeline and network log to pinpoint UI/regression.
           EOF
           cat manager_note.txt >> $GITHUB_STEP_SUMMARY
-
