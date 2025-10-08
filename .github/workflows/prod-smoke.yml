@@ -1,0 +1,75 @@
+name: Prod Smoke E2E
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: prod-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      E2E_BASE_URL: ${{ vars.E2E_BASE_URL || 'https://research-agent-platform-wndsrf.vercel.app' }}
+      E2E_EMAIL: ${{ vars.E2E_EMAIL || format('mark+ci-{0}@nevereverordinary.com', github.run_id) }}
+      E2E_PASSWORD: ${{ secrets.E2E_PASSWORD || 'Codex123!' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Wait for prod to be reachable
+        run: |
+          echo "Probing $E2E_BASE_URL ..."
+          for i in {1..30}; do
+            if curl -sSf "$E2E_BASE_URL/login" >/dev/null; then echo "Reachable"; exit 0; fi
+            echo "Attempt $i/30: not ready yet"; sleep 10;
+          done
+          echo "Timed out waiting for prod"; exit 1
+
+      - name: Run prod smoke
+        id: smoke
+        continue-on-error: true
+        run: |
+          echo "Running with E2E_EMAIL=$E2E_EMAIL"
+          npx playwright test -c playwright.prod.config.ts tests/prod/prod_smoke.spec.ts --reporter=list --workers=1
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+
+      - name: Upload artifacts (screens, logs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-smoke-artifacts-${{ github.run_id }}
+          path: |
+            test-results/**
+            test-artifacts/prod/**
+          retention-days: 7
+
+      - name: Manager note
+        if: always()
+        run: |
+          RESULT="${{ steps.smoke.outputs.exit_code }}"
+          STATUS=$([ "$RESULT" = "0" ] && echo PASS || echo FAIL)
+          cat > manager_note.txt << EOF
+          Prod smoke: $STATUS
+
+          Coverage: signup/login → onboarding → quick + deep research → save to research → bulk upload → signals → research history → logout/login. Timeline screenshots captured every ~2s; artifacts attached under "prod-smoke-artifacts-${{ github.run_id }}".
+
+          If FAIL, see the artifacts bundle for the timeline and network log to pinpoint UI/regression.
+          EOF
+          cat manager_note.txt >> $GITHUB_STEP_SUMMARY
+
