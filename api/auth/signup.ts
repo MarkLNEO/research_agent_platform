@@ -16,9 +16,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!SUPABASE_URL || !SERVICE_KEY) return res.status(500).json({ error: 'Server not configured' });
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
 
-    // If user already exists, do not error — let client attempt sign in.
-    const { data: existing } = await admin.auth.admin.listUsers({ email });
-    const existingUser = existing?.users?.[0];
+    // Look up by exact email reliably
+    const adminAuth: any = (admin as any).auth.admin;
+    let existingUser: any = undefined;
+    if (typeof adminAuth.getUserByEmail === 'function') {
+      const { data: byEmail } = await adminAuth.getUserByEmail(email);
+      existingUser = byEmail?.user;
+    } else {
+      // Fallback for older SDKs: scan up to 1000 users on first page
+      const { data: list } = await adminAuth.listUsers({ page: 1, perPage: 1000 });
+      existingUser = list?.users?.find((u: any) => (u.email || '').toLowerCase() === email.toLowerCase());
+    }
     const userExists = Boolean(existingUser);
     if (!userExists) {
       const { error: createErr } = await admin.auth.admin.createUser({
@@ -29,10 +37,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
       if (createErr) return res.status(500).json({ error: String(createErr.message || createErr) });
     } else {
-      // Ensure existing user is confirmed
+      // Ensure existing user is confirmed and set password
       const confirmed = Boolean((existingUser as any)?.email_confirmed_at);
+      const payload: any = { email_confirm: true };
+      if (password) payload.password = password;
       if (!confirmed || password) {
-        const { error: updErr } = await admin.auth.admin.updateUserById(existingUser.id, { email_confirm: true, password });
+        const { error: updErr } = await admin.auth.admin.updateUserById(existingUser.id, payload);
         if (updErr) return res.status(500).json({ error: String(updErr.message || updErr) });
       }
     }

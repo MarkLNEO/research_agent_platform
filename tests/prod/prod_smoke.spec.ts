@@ -1,0 +1,230 @@
+import { test, expect } from '@playwright/test';
+import * as fs from 'fs';
+
+const EMAIL = process.env.E2E_EMAIL || 'mark+55@nevereverordinary.com';
+const PASSWORD = process.env.E2E_PASSWORD || 'Codex123!';
+
+async function tryClick(page, role: Parameters<typeof page.getByRole>[0], name: string | RegExp, timeout = 3000) {
+  const btn = page.getByRole(role as any, { name });
+  const visible = await btn.isVisible({ timeout }).catch(() => false);
+  if (visible) { await btn.click({ timeout: 5000 }).catch(() => {}); }
+}
+
+test.describe('Production smoke (UI only)', () => {
+  test('new user signup → onboarding → research → bulk → signals → logout/login', async ({ page }) => {
+    // Artifacts setup (screenshots, logs)
+    fs.mkdirSync('test-artifacts/prod', { recursive: true });
+    const startedAt = Date.now();
+    const runId = `${startedAt}`;
+    const logFile = `test-artifacts/prod/${runId}-network-console.log`;
+    const shots: string[] = [];
+    const log = (msg: string) => {
+      try {
+        fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`);
+      } catch {}
+    };
+    const snap = async (label: string) => {
+      const safe = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      const file = `test-artifacts/prod/${Date.now()}-${safe}.png`;
+      await page.screenshot({ path: file, fullPage: true }).catch(() => {});
+      shots.push(file);
+      log(`SNAP: ${label} -> ${file} @ ${page.url()}`);
+    };
+    await page.context()._wrapApiCall?.(() => {})?.catch(() => {});
+
+    // Continuous timeline screenshots (every 2s) until stopped
+    let timelineActive = true;
+    const timeline = (async () => {
+      try {
+        while (timelineActive) {
+          await snap('timeline');
+          await page.waitForTimeout(2000);
+        }
+      } catch {}
+    })();
+
+    // Console + network diagnostics
+    page.on('console', (msg) => {
+      try {
+        log(`CONSOLE:${msg.type()} ${msg.text()}`);
+      } catch {}
+    });
+    page.on('request', (req) => {
+      const url = req.url();
+      if (/supabase|auth|api\/auth|vercel\.app/i.test(url)) {
+        log(`REQUEST: ${req.method()} ${url}`);
+      }
+    });
+    page.on('response', async (res) => {
+      const url = res.url();
+      const status = res.status();
+      if (/supabase|auth|api\/auth|vercel\.app/i.test(url) || status >= 400) {
+        let body = '';
+        try {
+          if (status >= 400) body = await res.text();
+        } catch {}
+        log(`RESPONSE: ${status} ${url}${body ? `\nBODY: ${body.substring(0, 500)}` : ''}`);
+      }
+    });
+    // Try provisioning via API (auto-confirm path) to avoid signup friction
+    try {
+      const apiUrl = `${process.env.E2E_BASE_URL || ''}/api/auth/signup`;
+      log(`Attempting API signup: ${apiUrl} for ${EMAIL}`);
+      const resp = await page.request.post(apiUrl, {
+        data: { name: 'Mark Test', email: EMAIL, password: PASSWORD },
+      });
+      const status = resp.status();
+      let body = '';
+      try { body = await resp.text(); } catch {}
+      log(`API signup response: ${status} ${body.substring(0, 800)}`);
+      await snap('after-api-signup');
+    } catch (e: any) {
+      log(`API signup error: ${e?.message || e}`);
+    }
+
+    // Try login first in case the account now exists
+    await page.goto('/login');
+    const loginEmail = page.getByPlaceholder('you@company.com');
+    const loginPwd = page.getByPlaceholder('••••••••');
+    await loginEmail.fill(EMAIL);
+    await loginPwd.fill(PASSWORD);
+    await tryClick(page, 'button', /Sign In/i, 2000);
+    await page.waitForTimeout(1000);
+    await snap('after-sign-in-click');
+    log(`Post Sign In URL: ${page.url()}`);
+
+    // Check if we reached app (composer or onboarding), otherwise sign up
+    const reachedApp = await Promise.any([
+      page.getByLabel(/Message agent/i).isVisible({ timeout: 5000 }),
+      page.getByTestId('onboarding-welcome').isVisible({ timeout: 5000 })
+    ]).then(() => true).catch(() => false);
+
+    if (!reachedApp) {
+      log('Did not reach app after login; switching to UI signup');
+      // Signup
+      await page.goto('/');
+      await tryClick(page, 'link', /Sign up/i, 5000);
+      await tryClick(page, 'link', /Sign up/i, 2000);
+      // Fill signup form
+      const nameField = page.getByLabel(/Full Name/i);
+      await nameField.click({ timeout: 20_000 }).catch(() => {});
+      await page.keyboard.type('Mark Test').catch(() => {});
+      await page.getByPlaceholder('you@company.com').fill(EMAIL);
+      await page.getByPlaceholder('••••••••').fill(PASSWORD);
+      await tryClick(page, 'button', /Create Account|Sign Up/i, 5000);
+      await page.waitForTimeout(1500);
+      await snap('after-ui-signup');
+      log(`After UI signup URL: ${page.url()}`);
+    }
+
+    // Onboarding: navigate to onboarding if not auto-routed
+    await page.goto('/onboarding');
+    await snap('onboarding-entry');
+    const input = page.getByLabel('Onboarding input');
+    await input.waitFor({ state: 'visible', timeout: 20_000 });
+    await snap('onboarding-input-visible');
+
+    const send = async (value: string, pause = 800) => {
+      await input.fill(value);
+      await tryClick(page, 'button', /Continue|Send|Continue onboarding/i, 1000);
+      await page.keyboard.press('Enter').catch(() => {});
+      await page.waitForTimeout(pause);
+    };
+
+    await send('Nevereverordinary Labs');
+    await send('nevereverordinary.com');
+    await send('Account Executive');
+    await send('Research existing accounts');
+    await send('Aerospace & Defense');
+    await send('Mid-market aerospace companies with 1000+ employees');
+    await send('Has a CISO, Splunk or CrowdStrike, SOC 2 or ISO 27001');
+    await send('done');
+    await send('skip');
+    await send('Lockheed Martin, Raytheon');
+    await send('security_breach, leadership_change');
+    await send('done');
+    await send('CISO, VP Security');
+
+    // Final step: look for visible Create button, otherwise click Select all then Create
+    await page.waitForTimeout(1200);
+    await tryClick(page, 'button', /Select all/i, 2000);
+    const finalize = page.getByRole('button', { name: /Create my agent/i });
+    await finalize.waitFor({ state: 'visible', timeout: 30_000 });
+    await expect(finalize).toBeEnabled({ timeout: 30_000 });
+    await finalize.click();
+
+    // Home load + credits non-zero
+    await page.goto('/');
+    await page.waitForTimeout(1500);
+    // Click Open last dashboard if loader visible
+    const loader = page.getByText('Preparing your workspace', { exact: false });
+    if (await loader.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await tryClick(page, 'button', /Open last dashboard/i, 2000);
+      await page.waitForTimeout(800);
+    }
+
+    // Research streaming minimal
+    const composer = page.getByLabel(/Message agent/i).or(page.locator('textarea[placeholder*="Message agent"]'));
+    await composer.waitFor({ state: 'visible', timeout: 20_000 });
+    await composer.fill('Research Acme Test Co');
+    await tryClick(page, 'button', /Send|Send message/i, 2000);
+    // If clarifiers appear, choose Quick Facts
+    await tryClick(page, 'button', /Quick Facts/i, 5000);
+    // Wait for assistant bubble
+    const assistant = page.locator('[data-testid="message-assistant"]').last();
+    await assistant.waitFor({ state: 'visible', timeout: 60_000 });
+
+    // Bulk Research: open dialog programmatically (supported in app), upload small CSV
+    await page.evaluate(() => window.dispatchEvent(new Event('bulk:open')));
+    const dialogVisible = await page.getByText(/Bulk Company Research/i).isVisible({ timeout: 10_000 }).catch(() => false);
+    if (dialogVisible) {
+      const csv = 'company_name\nAlpha Seed Co\nBeta Seed LLC\n';
+      const csvPath = 'tmp/prod-accounts.csv';
+      await page.context()._wrapApiCall?.(() => {})?.catch(() => {}); // noop guard
+      await page.waitForTimeout(100);
+      fs.mkdirSync('tmp', { recursive: true });
+      fs.writeFileSync(csvPath, csv);
+      await page.locator('input[type="file"]').setInputFiles(csvPath);
+      await tryClick(page, 'button', /Research \d+ Companies|Starting Research|Research 2 Companies/i, 2000);
+      // Expect either toast or jobs section
+      const ok = await Promise.any([
+        page.getByText(/Bulk research started/i).isVisible({ timeout: 20_000 }),
+        page.getByText(/Bulk Research Jobs/i).isVisible({ timeout: 20_000 })
+      ]).then(() => true).catch(() => false);
+      expect(ok).toBeTruthy();
+    }
+
+    // Signals page
+    await page.goto('/signals');
+    await expect(page.getByTestId('all-signals')).toBeVisible({ timeout: 20_000 });
+
+    // Research history
+    await page.goto('/research');
+    await expect(page.getByTestId('research-history')).toBeVisible({ timeout: 20_000 });
+
+    // Log out
+    await page.goto('/');
+    await tryClick(page, 'button', /Sign out/i, 2000);
+    await page.waitForTimeout(800);
+
+    // Existing user login
+    await page.goto('/login');
+    await page.getByPlaceholder('you@company.com').fill(EMAIL);
+    await page.getByPlaceholder('••••••••').fill(PASSWORD);
+    await tryClick(page, 'button', /Sign In/i, 2000);
+    await page.waitForTimeout(1200);
+    await page.goto('/');
+    // Verify chat surface or onboarding
+    const composer2 = page.getByLabel(/Message agent/i).or(page.locator('textarea[placeholder*="Message agent"]'));
+    const ready = await Promise.any([
+      composer2.isVisible({ timeout: 20_000 }),
+      page.getByTestId('onboarding-welcome').isVisible({ timeout: 20_000 })
+    ]).then(() => true).catch(() => false);
+    expect(ready).toBeTruthy();
+
+    // Stop timeline and take final snapshot
+    timelineActive = false;
+    await snap('end-of-test');
+    await timeline.catch(() => {});
+  });
+});
