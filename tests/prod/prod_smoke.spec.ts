@@ -226,7 +226,12 @@ test.describe('Production smoke (UI only)', () => {
       page.getByTestId('onboarding-welcome').isVisible({ timeout: 20_000 })
     ]).then(() => true).catch(() => false);
     expect(readyAfterReload).toBeTruthy();
-    // Wait for an assistant response to show up again
+    // After reload, proactively send again to ensure response
+    const composerAfter = page.getByLabel(/Message agent/i).or(page.locator('textarea[placeholder*="Message agent"]'));
+    await composerAfter.waitFor({ state: 'visible', timeout: 20_000 });
+    await composerAfter.fill('Research Beta Manufacturing');
+    await tryClick(page, 'button', /Send|Send message/i, 2000);
+    await tryClick(page, 'button', /Deep Account Research|Deep/i, 5000);
     await page.locator('[data-testid="message-assistant"]').last().waitFor({ state: 'visible', timeout: 60_000 });
 
     // Bulk Research: open dialog programmatically (supported in app), upload small CSV
