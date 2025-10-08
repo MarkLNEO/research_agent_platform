@@ -6,6 +6,10 @@
     {
       "source": "/api/update-profile",
       "destination": "/api/profiles/update"
+    },
+    {
+      "source": "/((?!api).*)",
+      "destination": "/index.html"
     }
   ],
   "functions": {
