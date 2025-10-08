@@ -1,0 +1,117 @@
+{
+  "user": "codex.e2e@nevereverordinary.com",
+  "when": "2025-10-07T01:58:56.919Z",
+  "results": [
+    {
+      "name": "Deep account research",
+      "query": "Research Boeing",
+      "output": "Here’s a concise, sales-ready Boeing brief (as of Oct 7, 2025).\n\nCompany snapshot\n- Ticker: NYSE: BA | HQ: 929 Long Bridge Dr, Arlington, VA. CEO: Kelly Ortberg (since Aug 8, 2024). Employees: ~172,000 (FY2024). ([mapquest.com](https://www.mapquest.com/us/virginia/the-boeing-company-east-coast-headquarters-442389469?utm_source=openai))\n- Segments: Commercial Airplanes (BCA); Defense, Space & Security (BDS); Global Services (BGS); Boeing Capital. Backlog Q2’25: ~$619B, incl. >5,900 commercial aircraft. ([investors.boeing.com](https://investors.boeing.com/investors/news/press-release-details/2025/Boeing-Reports-Second-Quarter-Results/default.aspx?utm_source=openai))\n\nFinancials & performance (latest)\n- Q2’25: Revenue $22.7B; free cash flow −$0.2B; debt $53.3B; backlog $619B. FY2024 net loss ~$11.8B. ([investors.boeing.com](https://investors.boeing.com/investors/news/press-release-details/2025/Boeing-Reports-Second-Quarter-Results/default.aspx?utm_source=openai))\n- Segment notes (Q2’25): BCA revenue $10.9B (150 deliveries). BDS revenue $6.6B; margin 1.7%; backlog ~$74B. BGS revenue $5.3B; margin 19.9%. ([investors.boeing.com](https://investors.boeing.com/investors/news/press-release-details/2025/Boeing-Reports-Second-Quarter-Results/default.aspx?utm_source=openai))\n\nPrograms, milestones, outlook\n- 737 MAX: FAA cap has limited production to ~38/mo; reports suggest prep to lift to 42/mo as soon as Oct 2025 (not yet independently verified). Certification of -7/-10 now widely expected in 2026 (customer commentary). ([barrons.com](https://www.barrons.com/articles/boeing-stock-faa-max-production-1f852bb0?utm_source=openai))\n- 787: Production ~7/mo (Q2’25). FAA oversight of airworthiness certs easing back to shared model. ([investors.boeing.com](https://investors.boeing.com/investors/news/press-release-details/2025/Boeing-Reports-Second-Quarter-Results/default.aspx?utm_source=openai))\n- 777X: Entry into service now targeted for early 2027 per multiple reports; financial charge possible. ([investing.com](https://www.investing.com/news/stock-market-news/boeing-777x-to-be-delayed-to-2027-bloomberg-news-reports-4269379?utm_source=openai))\n- BDS highlights: Awards include USAF T‑7A production-representative aircraft; MQ‑25 ground testing started. Deliveries across F‑15, KC‑46, AH‑64, CH‑47, P‑8 continue. ([investors.boeing.com](https://investors.boeing.com/investors/news/press-release-details/2025/Boeing-Reports-Second-Quarter-Results/default.aspx))\n- Space: Starliner CFT issues led to uncrewed return in Sept 2024; astronauts returned later via Dragon. Ongoing propulsion system testing into 2025. ([nasa.gov](https://www.nasa.gov/blogs/boeing-crew-flight-test/2024/08/24/nasa-decides-to-bring-starliner-spacecraft-back-to-earth-without-crew/?utm_source=openai))\n\nQuality, safety, and regulatory\n- Post‑Alaska 1282, FAA mandated a 90‑day plan to address systemic quality controls; Boeing published a Safety & Quality Plan and actions aligned to FAA panel recommendations; usage of internal safety reporting rose significantly. ([cnbc.com](https://www.cnbc.com/2024/02/28/faa-gives-boeing-90-days-for-quality-control-on-737-max.html?utm_source=openai))\n- DOJ/737 MAX legal case: Judge set a June 23, 2025 trial date after rejecting an earlier plea deal; status remains an ongoing legal risk. ([reuters.com](https://www.reuters.com/business/aerospace-defense/us-judge-sets-boeing-737-max-fraud-trial-june-23-2025-03-25/?utm_source=openai))\n\nM&A and supply chain\n- Spirit AeroSystems: Definitive deal announced July 1, 2024; shareholders approved Jan 31, 2025. Expected close now Q4’25, concurrent with divestiture of Airbus programs to Airbus; FTC second request issued. ([spiritaero.com](https://www.spiritaero.com/pages/release/spirit-aerosystems-announces-acquisition-by-boeing-in-8.3-billion-transaction/?utm_source=openai))\n\nSupplier/partner requirements (how to engage)\n- Register: Boeing Supplier Capability Assessment DB; access via Exostar; Supplier Portal requires Exostar MAG credentials. ([boeingsuppliers.com](https://www.boeingsuppliers.com/become?utm_source=openai))\n- Cybersecurity: NIST SP 800‑171, DFARS 252.204‑7012; Boeing Terms of Use & Cybersecurity Supplement (SP5); CMMC rollout—expect Level 2 for most DIB work. ([boeingsuppliers.com](https://www.boeingsuppliers.com/become/cybersecurity?utm_source=openai))\n\nKey sites and entry points (prospecting)\n- Commercial: Renton (737), Everett (777/767), North Charleston (787). Defense: St. Louis (fighters, MQ‑25), Mesa (Apache), Philadelphia (H‑47/V‑22), Huntsville (space). Use cases: production quality, digital thread/MBSE, supplier quality, inspection automation, training. ([investors.boeing.com](https://investors.boeing.com/investors/news/press-release-details/2025/Boeing-Reports-Second-Quarter-Results/default.aspx))\n\nRecent headlines to know\n- Potential 737 production ramp toward 42/mo; no near‑term “new airplane” launch; 777X delay chatter. ([reuters.com](https://www.reuters.com/business/aerospace-defense/boeing-said-prepare-737-output-hike-soon-october-bloomberg-news-reports-2025-10-06/?utm_source=openai))\n\nWhy this matters for Nevereverordinary Labs (A&D)\n- Hot-button priorities: raise first-pass yield, defect detection, auditability (FAA/DOJ scrutiny), supplier performance, CMMC readiness, digital continuity across BCA/BDS/BGS.\n- Likely buyers/sponsors: VP/Dir Manufacturing Quality; VP Safety & Quality Transformation; BCA/BDS Program Chiefs; Supplier Quality Ops; BGS Digital Solutions.\n\nDiscovery questions (fast)\n- Where are your top three quality escape modes on 737/787/777 lines today, and what’s the time-to-detect vs. time-to-correct?\n- Which supplier tiers drive the most rework/delays post‑Spirit integration?\n- What’s the current DPPM/FPY target by program and the digital traceability gaps preventing it?\n- How are you operationalizing the Safety & Quality Plan metrics at the cell/shift level?\n- CMMC Level 2: which environments and data flows are still not assessment‑ready?\n\nLand-and-expand motion\n- Land: pilot AI-assisted inspection/defect analytics on a single fuselage/structure workcell or a high-defect station at Renton or North Charleston.\n- Expand: supplier quality analytics across Spirit‑legacy work packages; then roll to BDS final assembly/test; tie into training/recert flows (BGS).\n\nObjections to expect\n- “Regulatory freeze/limited change bandwidth.” Counter with low‑lift pilots that map to FAA metrics and existing SMS/QMS dashboards. ([boeing.com](https://www.boeing.com/strengthening-safety-and-quality?utm_source=openai))\n- “Supplier data access.” Counter with secure, CUI‑compliant pipelines aligned to NIST 800‑171/CMMC. ([boeingsuppliers.com](https://www.boeingsuppliers.com/become/cybersecurity?utm_source=openai))\n\nWant me to tailor this into a one-pager for your meeting, with target stakeholders at BCA vs. BDS and a 30‑minute agenda?",
+      "judge": {
+        "scores": {
+          "alignment": 6,
+          "deep_research_fit": 8
+        },
+        "issues": [
+          "No proactive greeting or use of the user's name/company",
+          "Does not surface upcoming meetings or provide prep tied to a specific calendar",
+          "Lacks an explicit executive summary up front (starts with snapshot, not key takeaways + next steps)",
+          "Some facts appear outdated or insufficiently verified for Oct 2025 (e.g., DOJ trial date status, CEO naming) and lack authoritative sourcing",
+          "Uses weaker/secondary sources for basic facts (e.g., MapQuest for HQ) instead of primary sources",
+          "Contains speculative language without clear verification (e.g., 737 ramp \"reports suggest\")",
+          "Decision-maker section lists roles but no named contacts; could be more actionable",
+          "Length may exceed a crisp <3-minute read target",
+          "Did not follow the \"stream short deltas\" policy; delivered a single long block"
+        ],
+        "improvements": [
+          "Open with a brief, personalized greeting that uses the user's name and Nevereverordinary Labs, and sets context",
+          "Add a 4–6 bullet executive summary at the very top: top 3–5 signals, why they matter, and a recommended next step",
+          "Surface hot signals with an explicit Action line for each tying to Nevereverordinary Labs capabilities",
+          "Include an Upcoming meetings/prep section with a proposed 30-minute agenda, key questions, and pre-read links; ask for calendar access if unavailable",
+          "Name at least two specific Boeing decision-makers (titles + links) for BCA and BDS to increase actionability",
+          "Replace secondary sources with primary ones (Boeing IR/10-Q/10-K, FAA directives, DOJ/court dockets, NASA posts) and date-stamp every fact",
+          "Verify and update legal/program statuses to Oct 2025 (e.g., DOJ case outcomes, 737 production caps, 777X timeline) and remove unverified speculation",
+          "Add an explicit ICP fit assessment and a concrete next step (pilot scope, timeline, success criteria, stakeholders)",
+          "Tighten to a <3-minute read: compress bullets, prioritize must-know data, move details to an appendix if needed",
+          "Follow the stated policy: note that web_search was used for verification and, if delivering iteratively, stream short deltas instead of a single monolith"
+        ]
+      },
+      "error": null
+    },
+    {
+      "name": "Quick facts",
+      "query": "Quick facts: Lockheed Martin",
+      "output": "Quick facts: Lockheed Martin\n\n- Legal name: Lockheed Martin Corporation (NYSE: LMT); formed March 15, 1995 via Lockheed–Martin Marietta merger. ([en.wikipedia.org](https://en.wikipedia.org/wiki/Lockheed_Martin?utm_source=openai))\n- HQ: 6801 Rockledge Dr, Bethesda, Maryland 20817, USA. ([sec.gov](https://www.sec.gov/Archives/edgar/data/936468/000093646825000009/lmt-20241231.htm?utm_source=openai))\n- Leadership (Oct 7, 2025): Jim Taiclet, Chairman, President & CEO; Evan Scott, CFO; Frank St. John, COO. ([lockheedmartin.com](https://www.lockheedmartin.com/en-us/who-we-are/leadership-governance/james-taiclet.html?utm_source=openai))\n- FY2024 results (reported Jan 28, 2025): Net sales $71.0B; record backlog $176.0B; 2025 outlook provided. ([investors.lockheedmartin.com](https://investors.lockheedmartin.com/news-releases/news-release-details/lockheed-martin-reports-fourth-quarter-and-full-year-2024/?utm_source=openai))\n- Employees: ~121,000 as of Dec 31, 2024 (≈70,000 in engineering/IT). ([sec.gov](https://www.sec.gov/Archives/edgar/data/936468/000093646825000009/lmt-20241231.htm))\n- Customer mix (2024): U.S. Government ~73% of sales; International ~26%; U.S. commercial ~1%. ([sec.gov](https://www.sec.gov/Archives/edgar/data/936468/000093646825000009/lmt-20241231.htm))\n- Business areas: Aeronautics; Missiles & Fire Control (MFC); Rotary & Mission Systems (RMS); Space. ([lockheedmartin.com](https://lockheedmartin.com/en-us/who-we-are/business-areas.html?utm_source=openai))\n- Largest program: F‑35 Lightning II (~26% of 2024 consolidated net sales; ~65% of Aeronautics). ([sec.gov](https://www.sec.gov/Archives/edgar/data/936468/000093646825000009/lmt-20241231.htm))\n- Key programs by area:\n  - Aeronautics: F‑35, F‑16, C‑130, F‑22 sustainment. ([sec.gov](https://www.sec.gov/Archives/edgar/data/936468/000093646825000009/lmt-20241231.htm))\n  - MFC: PAC‑3, THAAD, HIMARS/MLRS & GMLRS, JASSM/LRASM, Hellfire, PrSM, Javelin (JV with RTX). ([sec.gov](https://www.sec.gov/Archives/edgar/data/936468/000093646825000009/lmt-20241231.htm))\n  - RMS: Aegis Combat System, C2BMC, CH‑53K, Black Hawk/Seahawk, CRH, VH‑92A. ([sec.gov](https://www.sec.gov/Archives/edgar/data/936468/000093646825000009/lmt-20241231.htm))\n  - Space: Trident II D5, Orion, GPS III, Next Gen OPIR, Transport Layer, NGI. ([sec.gov](https://www.sec.gov/Archives/edgar/data/936468/000093646825000009/lmt-20241231.htm))\n- Recent highlights:\n  - Selected by MDA to develop the Next Generation Interceptor (NGI). ([news.lockheedmartin.com](https://news.lockheedmartin.com/2024-04-15-U-S-Missile-Defense-Agency-selects-Lockheed-Martin-to-provide-its-Next-Generation-Interceptor?utm_source=openai))\n  - Awarded up to $4.1B for C2BMC-Next. ([reuters.com](https://www.reuters.com/business/aerospace-defense/lockheed-wins-41-bln-battle-command-system-contract-us-govt-2024-04-11/?utm_source=openai))\n  - Won $9.8B U.S. Army order for PAC‑3 MSE missiles (Sept 2025). ([reuters.com](https://www.reuters.com/business/aerospace-defense/lockheed-martin-wins-98-billion-patriot-missile-contract-2025-09-03/?utm_source=openai))\n\nNeed a one-pager or account-specific angles?",
+      "judge": {
+        "scores": {
+          "alignment": 2,
+          "deep_research_fit": 4
+        },
+        "issues": [
+          "No proactive greeting or personalization to user/company/role",
+          "No hot signals surfaced with recommended sales actions",
+          "No summary stats block or smart suggestions",
+          "No upcoming meetings context or prep checklist",
+          "No executive summary upfront",
+          "No ICP fit assessment or decision criteria evaluation",
+          "No tailored next step for the AE at Nevereverordinary Labs",
+          "Decision-maker mapping limited to top execs; lacks functional buyers",
+          "Potential factual error: CFO likely not 'Evan Scott' (verify; historically Jay Malave)",
+          "Signals listed but not framed as sales-relevant insights",
+          "Did not explicitly follow 'stream short deltas' instruction"
+        ],
+        "improvements": [
+          "Open with a brief greeting addressing the user by name and role",
+          "Provide a 2–3 line executive summary at the top",
+          "Add a Summary Stats section (revenue, growth, backlog, headcount, segments, locations)",
+          "Surface ≥3 timely signals and attach a concrete sales action to each",
+          "Map ≥2 relevant functional decision makers (e.g., CIO/CTO, VP Digital Transformation, VP Supply Chain/Programs) with why-they-matter",
+          "Assess ICP fit and outline likely buying criteria; include a quick qualification checklist",
+          "Propose a clear, tailored next step for the AE (e.g., 15-min discovery with specific angle)",
+          "Include upcoming earnings/events and a prep checklist with talk tracks and questions",
+          "Verify leadership names and financials via latest 10-K/IR; correct the CFO",
+          "Keep it scannable under 3 minutes using clear headings and bullets",
+          "Cite sources inline with dates; use web_search to verify recency and accuracy"
+        ]
+      },
+      "error": null
+    },
+    {
+      "name": "Specific question",
+      "query": "Who is the CISO of Raytheon and recent security incidents?",
+      "output": "Here’s the latest:\n\nWho’s the CISO\n- Brad Maiorino, Corporate VP and Chief Information Security Officer at RTX (parent of Raytheon). ([aspendigital.org](https://www.aspendigital.org/person/brad-maiorino/?utm_source=openai))\n\nRecent security incidents (past 12–18 months)\n- Sep 19–24, 2025: Ransomware attack on Collins Aerospace’s MUSE airline check‑in/bag drop software (RTX unit); disclosed via 8‑K, caused airport disruptions across Europe. ([reuters.com](https://www.reuters.com/legal/government/airport-chaos-highlights-rise-high-profile-ransomware-attacks-cyber-experts-say-2025-09-22/))\n- May 1, 2025: DOJ settlement—Raytheon Company/RTX/Nightwing to pay $8.4M over alleged non‑compliance with DoD cybersecurity requirements (DFARS/NIST 800‑171) on 2015–2021 contracts. ([justice.gov](https://www.justice.gov/opa/pr/raytheon-companies-and-nightwing-group-pay-84m-resolve-false-claims-act-allegations-relating?utm_source=openai))\n- Aug 30, 2024: RTX fined $200M by U.S. State Department for export‑control violations; half suspended contingent on remedial compliance investments. ([wsj.com](https://www.wsj.com/articles/rtx-to-pay-200-million-over-export-control-violations-46d653b1?utm_source=openai))\n\nWant me to confirm the current security lead for the Raytheon business unit specifically (separate from enterprise CISO)?",
+      "judge": {
+        "scores": {
+          "alignment": 3,
+          "deep_research_fit": 2
+        },
+        "issues": [
+          "No proactive greeting or personalization (name) to the user",
+          "Did not surface hot signals with recommended actions",
+          "No executive summary up front",
+          "Only one decision-maker named; missing ≥2 relevant security decision-makers (e.g., BU CISO/security leads)",
+          "No criteria-based evaluation of the signals (severity, impact, recency, relevance)",
+          "No ICP fit articulation or next-step recommendation tailored to the AE",
+          "No upcoming meetings surfaced or prep guidance",
+          "One item (export-control fine) is regulatory/compliance, not a cybersecurity incident",
+          "Potential accuracy risk: incidents may be unverified or mischaracterized; at least one appears questionable",
+          "Sources cited but not clearly validated via primary/official references (SEC filings, company press, CISA, DOJ)",
+          "No summary stats about the account/org to provide context",
+          "Did not clearly distinguish enterprise (RTX) CISO vs Raytheon business unit security lead (only offers to confirm later)"
+        ],
+        "improvements": [
+          "Open with a brief, personalized greeting and name the user; add a one-line executive summary of findings",
+          "Confirm the enterprise CISO via primary sources (RTX leadership page, recent press/SEC filings) and explicitly note the Raytheon BU security lead; list ≥2 decision-makers (e.g., Enterprise CISO, Deputy CISO, Raytheon BU CISO/Director of Cyber)",
+          "Provide ≥3 verified security signals strictly related to cybersecurity (breaches, ransomware, data exposure, federal cyber settlements), each with date, impact, scope, and relevance",
+          "Use primary sources for each signal (SEC 8-K/10-K/8-K, DOJ/CISA alerts, official company press releases) and include links",
+          "Add a concise criteria evaluation per signal (recency, severity, affected BU, operational impact, third-party vs internal, regulatory exposure)",
+          "Summarize account context: org structure (RTX vs Raytheon units), revenue/size, relevant cyber programs—keep it to quick stats",
+          "Surface hot signals into actions (e.g., outreach angle, proposed value props, timing) and tie to Nevereverordinary Labs’ ICP",
+          "Recommend clear next steps: who to contact, suggested messaging, meeting objective, and a 3-bullet prep checklist",
+          "Keep the read-time under 3 minutes with clear headings and tight bullet points",
+          "If uncertain items exist, explicitly label them as pending verification and queue a web search check with sources to confirm"
+        ]
+      },
+      "error": null
+    }
+  ]
+}
