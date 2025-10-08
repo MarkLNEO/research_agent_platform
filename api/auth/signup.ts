@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { assertEmailAllowed } from '../../server-build/server/routes/_lib/access.js';
 
-export const config = { runtime: 'edge' } as const;
+export const config = { runtime: 'nodejs' } as const;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -18,7 +18,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // If user already exists, do not error — let client attempt sign in.
     const { data: existing } = await admin.auth.admin.listUsers({ email });
-    const userExists = Boolean(existing?.users?.length);
+    const existingUser = existing?.users?.[0];
+    const userExists = Boolean(existingUser);
     if (!userExists) {
       const { error: createErr } = await admin.auth.admin.createUser({
         email,
@@ -27,6 +28,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         email_confirm: true,
       });
       if (createErr) return res.status(500).json({ error: String(createErr.message || createErr) });
+    } else {
+      // Ensure existing user is confirmed
+      const confirmed = Boolean((existingUser as any)?.email_confirmed_at);
+      if (!confirmed) {
+        const { error: updErr } = await admin.auth.admin.updateUserById(existingUser.id, { email_confirm: true });
+        if (updErr) return res.status(500).json({ error: String(updErr.message || updErr) });
+      }
     }
 
     return res.status(200).json({ ok: true, created: !userExists });
@@ -35,4 +43,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'Internal server error' });
   }
 }
-
