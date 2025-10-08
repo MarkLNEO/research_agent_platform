@@ -931,7 +931,7 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
         </div>
 
         <div className="border-t border-gray-200 p-4 bg-gray-50">
-          {currentStep === 9 && !welcomeMode ? (
+          {currentStep === 9 ? (
             <div className="space-y-4" role="group" aria-label="Select research focus areas">
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-gray-900">Final step — tailor your agent</p>
