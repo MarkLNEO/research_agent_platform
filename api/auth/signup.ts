@@ -31,8 +31,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } else {
       // Ensure existing user is confirmed
       const confirmed = Boolean((existingUser as any)?.email_confirmed_at);
-      if (!confirmed) {
-        const { error: updErr } = await admin.auth.admin.updateUserById(existingUser.id, { email_confirm: true });
+      if (!confirmed || password) {
+        const { error: updErr } = await admin.auth.admin.updateUserById(existingUser.id, { email_confirm: true, password });
         if (updErr) return res.status(500).json({ error: String(updErr.message || updErr) });
       }
     }
