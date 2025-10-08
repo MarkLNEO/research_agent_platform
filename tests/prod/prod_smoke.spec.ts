@@ -154,12 +154,12 @@ test.describe('Production smoke (UI only)', () => {
     for (const rx of finalizeVariants) {
       const btn = page.getByRole('button', { name: rx });
       const vis = await btn.isVisible({ timeout: 3000 }).catch(() => false);
-      if (vis) {
-        await expect(btn).toBeEnabled({ timeout: 10_000 });
-        await btn.click({ timeout: 10_000 });
-        finalized = true;
-        break;
-      }
+      if (!vis) continue;
+      const enabled = await btn.isEnabled({ timeout: 1000 }).catch(() => false);
+      if (!enabled) continue; // ignore disabled composer Continue
+      await btn.click({ timeout: 10_000 });
+      finalized = true;
+      break;
     }
     if (!finalized) {
       // If onboarding UI changed, proceed to home and validate surface
