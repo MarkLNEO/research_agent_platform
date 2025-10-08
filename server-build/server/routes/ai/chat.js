@@ -102,9 +102,11 @@ function classifyResearchIntent(raw) {
         return false;
     const RESEARCH_VERBS = /(research|analy[sz]e|investigate|look\s*up|deep\s*dive|latest\s+news|competitive|funding|hiring|tech(?:\s|-)?stack|security|signals?|tell me about|what is|who is)/i;
     const COMPANY_INDICATORS = /(inc\.|corp\.|ltd\.|llc|company|co\b)/i;
+    const ALL_SYNONYMS = /\ball(\s+of\s+the\s+(above|those|them))?\b/i;
     const hasVerb = RESEARCH_VERBS.test(text);
     const companyLike = /\b[A-Z][\w&]+(?:\s+[A-Z][\w&]+){0,3}\b/.test(text) && COMPANY_INDICATORS.test(text);
-    return hasVerb || companyLike;
+    const allPhrase = ALL_SYNONYMS.test(text);
+    return hasVerb || companyLike || allPhrase;
 }
 function summarizeContextForPlan(userContext) {
     if (!userContext)
@@ -222,7 +224,13 @@ export default async function handler(req, res) {
                 req.__isResearchQuery = _isResearchQuery;
                 if (_isResearchQuery) {
                     // Build explicit research task input
-                    input = `Task: Perform company research as specified in the instructions.\n\nRequest: ${lastUserMessage.content}\n\nPlease use the web_search tool to research this company and provide a concise, well-formatted analysis following the output structure defined in the instructions.`;
+                    // Include brief recent context (last 4 messages) so we don't lose company URL or scope already provided
+                    const recent = (messages || []).slice(-4).map(m => {
+                        const role = m.role === 'user' ? 'User' : (m.role === 'assistant' ? 'Assistant' : 'System');
+                        const text = String(m.content || '').replace(/\s+/g, ' ').trim();
+                        return `${role}: ${text}`;
+                    }).join('\n');
+                    input = `Task: Perform company research as specified in the instructions.\n\nRecent context (last turns):\n${recent}\n\nRequest: ${lastUserMessage.content}\n\nPlease use the web_search tool to research this company and provide a concise, well-formatted analysis following the output structure defined in the instructions.`;
                 }
                 else {
                     // Generic small talk / non-research: short helpful reply only (no web_search)
