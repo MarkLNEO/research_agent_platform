@@ -177,7 +177,7 @@ export function OnboardingEnhanced() {
   const getStepMessage = (step: number): string => {
     switch (step) {
       case 1:
-        return "Hi! I'm your Welcome Agent. I'll use this setup to auto-fill firmographics, monitor signals, and tailor every briefing for you.\n\nLet's start—what's your company name? You can paste the website if that's easier and I'll detect it automatically.";
+        return "Hi! I'm your Welcome Agent. I'll use this setup to auto‑fill firmographics, monitor signals, and tailor every briefing for you. Besides company research, I can: run bulk research from CSV, track accounts and monitor signals, save/export reports, draft outreach, and summarize with a TL;DR.\n\nLet's start — what's your company name? You can paste the website if that's easier and I'll detect it automatically.";
       case 2:
         return `Great! I'll use the official domain to pull logo, news, and verified firmographics.\n\nWhat's your website address?`;
       case 3:
@@ -880,7 +880,14 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
                   <div className="text-sm text-gray-700 mb-4">
                     I help sales teams research companies, find hot leads, and track accounts.
                     <br />
-                    <span className="font-semibold">Here's how this works:</span> You can ask me anything right now, and I'll learn about your needs as we go. No forms to fill out.
+                    <span className="font-semibold">What I can do (besides individual research):</span>
+                    <ul className="list-disc ml-6 mt-1 space-y-1">
+                      <li>Run <span className="font-medium">bulk research</span> from a CSV for many companies</li>
+                      <li><span className="font-medium">Track accounts</span> and monitor signals (breaches, leadership changes, funding)</li>
+                      <li><span className="font-medium">Save reports</span>, export to PDF, and <span className="font-medium">draft outreach</span></li>
+                      <li><span className="font-medium">Summarize</span> any response (TL;DR + key bullets)</li>
+                    </ul>
+                    <div className="mt-2"><span className="font-semibold">How it works:</span> Ask me anything and I’ll adapt — or set me up in 5 minutes.</div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -904,8 +911,31 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
                     </div>
                   </div>
 
-                  <div className="mt-4 text-sm">
-                    <button className="text-blue-600 hover:text-blue-700" onClick={() => selectPath('immediate')}>Or just start asking me questions →</button>
+                  <div className="mt-4 text-sm space-y-2">
+                    <div>
+                      <button className="text-blue-600 hover:text-blue-700" onClick={() => selectPath('immediate')}>Or just start asking me questions →</button>
+                    </div>
+                    <div className="text-xs text-gray-600">Quick suggestions:</div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        className="px-2.5 py-1.5 text-xs rounded-full bg-gray-100 hover:bg-gray-200"
+                        onClick={() => { navigate('/'); setTimeout(() => { try { window.dispatchEvent(new Event('bulk:open')); } catch {} }, 350); }}
+                      >
+                        Run Bulk Research
+                      </button>
+                      <button
+                        className="px-2.5 py-1.5 text-xs rounded-full bg-gray-100 hover:bg-gray-200"
+                        onClick={() => navigate('/signals')}
+                      >
+                        View Signals
+                      </button>
+                      <button
+                        className="px-2.5 py-1.5 text-xs rounded-full bg-gray-100 hover:bg-gray-200"
+                        onClick={() => navigate('/research')}
+                      >
+                        Research History
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
