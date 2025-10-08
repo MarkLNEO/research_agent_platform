@@ -19,7 +19,20 @@ export function Signup() {
     setLoading(true);
 
     try {
-      await signUp(email, password, name);
+      // Try domain allowlisted signup via serverless first (auto-confirm for approved domains)
+      try {
+        const resp = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, password })
+        });
+        if (!resp.ok) {
+          // Fall back to default Supabase signup if serverless path not available/denied
+          await signUp(email, password, name);
+        }
+      } catch {
+        await signUp(email, password, name);
+      }
       
       // Send approval notification via internal API route
       try {
@@ -33,7 +46,7 @@ export function Signup() {
         // Don't block signup if email fails
       }
       
-      // Try to sign in immediately (will succeed if email confirmations are disabled)
+      // Try to sign in immediately (will succeed if email is auto-confirmed or confirmations are disabled)
       try {
         await signIn(email, password);
       } catch {}
