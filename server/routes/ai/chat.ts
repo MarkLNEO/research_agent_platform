@@ -604,6 +604,15 @@ export default async function handler(req: any, res: any) {
         console.error('Stream finalization error:', finalErr);
       }
 
+      if (storeRun && finalResponseData?.id) {
+        try {
+          const verify = await openai.responses.retrieve(finalResponseData.id);
+          console.log('[OPENAI] Stored response status:', verify?.status);
+        } catch (verifyErr: any) {
+          console.error('[OPENAI] Failed to verify stored response', finalResponseData?.id, verifyErr?.message || verifyErr);
+        }
+      }
+
       console.log('[DEBUG] Stream processing complete. Total chunks:', chunkCount);
       console.log('[DEBUG] Total content length:', accumulatedContent.length);
 
