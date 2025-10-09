@@ -14,6 +14,13 @@ export function HomeGate() {
   const shouldRedirect = Boolean(user) && !loading && profileIncomplete;
   const [bypassGate, setBypassGate] = useState(false);
   const handoffLock = useRef(false);
+  // Hooks must not be conditional; precompute steps and reuse when needed
+  const loadingSteps: LoadingStep[] = useMemo(() => ([
+    { key: 'auth', title: 'Authenticating & restoring profile', status: 'in_progress' },
+    { key: 'accounts', title: 'Syncing tracked accounts', status: 'pending' },
+    { key: 'signals', title: 'Fetching signal summary', status: 'pending' },
+    { key: 'chat', title: 'Warming research chat', status: 'pending' },
+  ]), []);
 
   useEffect(() => {
     if (shouldRedirect && !handoffLock.current) {
@@ -23,7 +30,17 @@ export function HomeGate() {
   }, [shouldRedirect, navigate]);
 
   if (!user) {
-    return null;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="bg-white border border-gray-200 rounded-2xl shadow-xl px-8 py-6 max-w-md text-center">
+          <div className="text-base font-semibold text-gray-900">Sign in required</div>
+          <div className="text-xs text-gray-600 mt-1">Your session isn’t active yet. Click below to sign in.</div>
+          <div className="mt-3">
+            <button className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg" onClick={() => (window.location.href = '/login')}>Go to Sign In</button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const canSkip = (() => {
@@ -31,16 +48,9 @@ export function HomeGate() {
   })();
 
   if (loading && !bypassGate && !canSkip) {
-    const steps: LoadingStep[] = useMemo(() => ([
-      { key: 'auth', title: 'Authenticating & restoring profile', status: 'in_progress' },
-      { key: 'accounts', title: 'Syncing tracked accounts', status: 'pending' },
-      { key: 'signals', title: 'Fetching signal summary', status: 'pending' },
-      { key: 'chat', title: 'Warming research chat', status: 'pending' },
-    ]), []);
-
     return (
       <LoadingGate
-        steps={steps}
+        steps={loadingSteps}
         onContinueNow={() => {
           try { window.localStorage?.setItem('skipHomeGate', '1'); } catch {}
           setBypassGate(true);
@@ -51,7 +61,14 @@ export function HomeGate() {
   }
 
   if (shouldRedirect) {
-    return null;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="bg-white border border-gray-200 rounded-2xl shadow-xl px-8 py-6 max-w-md text-center">
+          <div className="text-base font-semibold text-gray-900">Redirecting…</div>
+          <div className="text-xs text-gray-600 mt-1">Taking you to onboarding to finish setup.</div>
+        </div>
+      </div>
+    );
   }
 
   // Align with Just-In-Time Configuration: allow research immediately.

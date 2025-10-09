@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { ToastProvider } from './components/ToastProvider';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { OnboardingEnhanced as Onboarding } from './pages/OnboardingEnhanced';
@@ -20,6 +21,7 @@ function App() {
     <BrowserRouter>
       <ToastProvider>
         <AuthProvider>
+          <ErrorBoundary>
           <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
@@ -99,6 +101,7 @@ function App() {
           />
           <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </ErrorBoundary>
         </AuthProvider>
       </ToastProvider>
     </BrowserRouter>
