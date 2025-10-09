@@ -981,6 +981,34 @@ export function ResearchChat() {
     setThinkingEvents([]);
   };
 
+  // Open Save dialog for the latest assistant message (also used by Next Actions bar)
+  const openSaveForLastAssistant = () => {
+    const idx = [...messages].reduce((last, m, i) => (m.role === 'assistant' ? i : last), -1);
+    if (idx === -1) return;
+    const m = messages[idx];
+    const userMessage = [...messages].slice(0, idx).reverse().find(msg => msg.role === 'user')?.content;
+    const sources = thinkingEvents
+      .filter(ev => ev.type === 'web_search' && ev.query && ev.sources)
+      .map(ev => ({ query: ev.query, sources: ev.sources })) as any[];
+    const draft = buildResearchDraft({
+      assistantMessage: m.content,
+      userMessage,
+      chatTitle: chats.find(c => c.id === currentChatId)?.title,
+      agentType: 'company_research',
+      sources,
+    });
+    const subj = (draft.subject || '').trim();
+    const active = (activeSubject || '').trim();
+    const isMismatch = Boolean(active && subj && active.toLowerCase() !== subj.toLowerCase());
+    if (isMismatch) {
+      setMismatchDraft(draft);
+      setMismatchOpen(true);
+      return;
+    }
+    setSaveDraft(draft);
+    setSaveOpen(true);
+  };
+
   const handleAccountClick = (account: TrackedAccount) => {
     // Open a detailed signals drawer for the account
     setSignalsAccountId(account.id);
@@ -1282,6 +1310,7 @@ export function ResearchChat() {
                   <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" onClick={handleContinueCompany}>Continue {activeSubject ? `with ${activeSubject}` : 'this company'}</button>
                   <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" onClick={async () => { await handleSummarizeLast(); }}>Summarize</button>
                   <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" onClick={handleEmailDraftFromLast}>Email draft</button>
+                  <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" aria-label="Save to Research" onClick={openSaveForLastAssistant}>Save to Research</button>
                   <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" onClick={() => setShowRefine(true)}>Refine scope</button>
                   <label className="ml-auto text-xs text-gray-700 inline-flex items-center gap-1">
                     <input type="checkbox" checked={clarifiersLocked} onChange={(e) => setClarifiersLocked(e.target.checked)} />
