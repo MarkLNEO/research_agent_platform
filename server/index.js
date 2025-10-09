@@ -59,7 +59,8 @@ async function checkUserCredits(supabase, userId) {
         id: userId, 
         credits_remaining: INITIAL_CREDITS,
         credits_total_used: 0,
-        approval_status: 'pending' // New signups require admin approval
+        // Default to approved for first-run UX; admins can adjust later
+        approval_status: 'approved'
       })
       .select('id, credits_remaining, credits_total_used, approval_status')
       .single();
@@ -67,12 +68,13 @@ async function checkUserCredits(supabase, userId) {
   }
 
   // Check approval status
+  // Allow pending users to proceed in self-serve flows; surface approval out-of-band
   if (userRow?.approval_status === 'pending') {
-    return { 
-      hasCredits: false, 
-      remaining: userRow?.credits_remaining || 0,
-      needsApproval: true,
-      message: 'Your account is pending approval. Please check your email or contact mlerner@rebarhq.ai'
+    return {
+      hasCredits: true,
+      remaining: userRow?.credits_remaining || INITIAL_CREDITS,
+      lowCredits: (userRow?.credits_remaining || INITIAL_CREDITS) < 100,
+      needsApproval: false,
     };
   }
 
