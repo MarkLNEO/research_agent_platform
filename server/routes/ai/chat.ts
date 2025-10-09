@@ -238,6 +238,9 @@ export default async function handler(req: any, res: any) {
 
     // Build system prompt if not provided; pass research_type to bias depth
     let instructions = systemPrompt || buildSystemPrompt(userContext as any, agentType as AgentType, (req.body || {}).research_type);
+    if (!instructions.startsWith('Formatting re-enabled')) {
+      instructions = `Formatting re-enabled\n\n${instructions}`;
+    }
     if (subjectSnapshot) instructions += subjectSnapshot;
     // Apply clarifier lock and facet budget hints
     if (userConfig?.clarifiers_locked) {
@@ -396,7 +399,7 @@ export default async function handler(req: any, res: any) {
         const preview = contextSummary ? `Planning next steps using: ${contextSummary.slice(0, 160)}${contextSummary.length > 160 ? '…' : ''}` : 'Planning next steps using your saved preferences…';
         safeWrite(`data: ${JSON.stringify({ type: 'reasoning_progress', content: preview })}\n\n`);
       }
-      const storeRun = userConfig?.debug_store ?? true;
+      const storeRun = true;
       const shouldPlanStream = isResearchQuery && !userConfig?.disable_fast_plan;
 
       console.log('[DEBUG] Creating OpenAI Responses API call with:', {
