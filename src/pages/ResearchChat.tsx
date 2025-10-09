@@ -9,6 +9,7 @@ import { MessageInput } from '../components/MessageInput';
 import { ThinkingIndicator } from '../components/ThinkingIndicator';
 import { SaveResearchDialog } from '../components/SaveResearchDialog';
 import { CSVUploadDialog } from '../components/CSVUploadDialog';
+import { SubjectMismatchModal } from '../components/SubjectMismatchModal';
 import { BulkResearchDialog } from '../components/BulkResearchDialog';
 import { BulkResearchStatus } from '../components/BulkResearchStatus';
 import { ProfileCompletenessBanner } from '../components/ProfileCompletenessBanner';
@@ -68,6 +69,8 @@ export function ResearchChat() {
   const [preferredResearchType, setPreferredResearchType] = useState<'deep' | 'quick' | 'specific' | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveDraft, setSaveDraft] = useState<ResearchDraft | null>(null);
+  const [mismatchOpen, setMismatchOpen] = useState(false);
+  const [mismatchDraft, setMismatchDraft] = useState<ResearchDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastUsage, setLastUsage] = useState<{ tokens: number; credits: number } | null>(null);
@@ -82,6 +85,16 @@ export function ResearchChat() {
   const [greeting, setGreeting] = useState<{ time_of_day: string; user_name: string } | null>(null);
   const [accountStats, setAccountStats] = useState<{ total: number; hot: number; warm: number; stale: number; with_signals: number } | null>(null);
   const lastSentRef = useRef<{ text: string; at: number } | null>(null);
+  const [postSummarizeNudge, setPostSummarizeNudge] = useState(false);
+  const [clarifiersLocked, setClarifiersLocked] = useState(false);
+  const [activeSubject, setActiveSubject] = useState<string | null>(null);
+  const [showRefine, setShowRefine] = useState(false);
+  const [refineFacets, setRefineFacets] = useState<string[]>([]);
+  const [refineTimeframe, setRefineTimeframe] = useState<string>('last 12 months');
+  const [crumbOpen, setCrumbOpen] = useState(false);
+  const [switchInput, setSwitchInput] = useState('');
+  const lastSubjectRef = useRef<{ prev: string | null; at: number | null }>({ prev: null, at: null });
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
     if (user) void loadChats();
@@ -169,7 +182,22 @@ export function ResearchChat() {
     };
 
     window.addEventListener('chat:prefill', prefillHandler as EventListener);
-    return () => window.removeEventListener('chat:prefill', prefillHandler as EventListener);
+    const continueWithout = () => setSaveOpen(false);
+    window.addEventListener('save:continue-without', continueWithout as EventListener);
+    const keyHandler = (e: KeyboardEvent) => {
+      const mac = navigator.platform.toLowerCase().includes('mac');
+      const combo = (mac && e.metaKey && e.key.toLowerCase() === 'k') || (!mac && e.ctrlKey && e.key.toLowerCase() === 'k');
+      if (combo) {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', keyHandler);
+    return () => {
+      window.removeEventListener('chat:prefill', prefillHandler as EventListener);
+      window.removeEventListener('save:continue-without', continueWithout as EventListener);
+      window.removeEventListener('keydown', keyHandler);
+    };
   }, []);
 
   // Allow tests and power users to open the signals drawer programmatically
@@ -320,6 +348,14 @@ export function ResearchChat() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const countMentions = (text: string, term?: string | null) => {
+    if (!text || !term) return 0;
+    try {
+      const re = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\b`, 'gi');
+      return (text.match(re) || []).length;
+    } catch { return 0; }
   };
 
   const loadMessages = async (chatId: string) => {
@@ -631,6 +667,8 @@ export function ResearchChat() {
       if (depth === 'deep') cfg.model = 'gpt-5';
       if (depth === 'quick') cfg.model = 'gpt-5-mini';
       if (depth === 'specific') cfg.model = 'gpt-5';
+      cfg.clarifiers_locked = clarifiersLocked;
+      cfg.facet_budget = depth === 'quick' ? 3 : depth === 'deep' ? 8 : 6;
 
       // Setup abort controller for Stop action
       const controller = new AbortController();
@@ -830,6 +868,11 @@ export function ResearchChat() {
         // Trigger credit display refresh
         window.dispatchEvent(new CustomEvent('credits-updated'));
       }
+      // Try to set active subject from simple patterns like "Research X"
+      try {
+        const m = userMessage.match(/research\s+([\w\s.&-]{2,})/i);
+        if (m && m[1]) setActiveSubject(m[1].trim());
+      } catch {}
       try {
         const endedAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
         window.dispatchEvent(new CustomEvent('llm:complete', {
@@ -873,6 +916,63 @@ export function ResearchChat() {
 
     // Regenerate the response
     await handleSendMessageWithChat(currentChatId, lastUserMessage.content);
+  };
+
+  // Next Actions helpers
+  const handleStartNewCompany = () => {
+    setInputValue('');
+    setActiveSubject(null);
+    setFocusComposerTick(t => t + 1);
+  };
+  const handleContinueCompany = () => {
+    setFocusComposerTick(t => t + 1);
+  };
+  const handleSummarizeLast = async () => {
+    if (!currentChatId) return;
+    await handleSendMessageWithChat(currentChatId, 'Summarize the above into a one-line headline (<=140 chars) and a TL;DR with 5–8 bullets. No web research.');
+  };
+  const handleEmailDraftFromLast = async () => {
+    try {
+      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+      if (!lastAssistant) return addToast({ type: 'error', title: 'No content to draft', description: 'Send a research query first.' });
+      const { data: { session } } = await supabase.auth.getSession();
+      const auth = session?.access_token;
+      const resp = await fetch('/api/outreach/draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: `Bearer ${auth}` } : {}) },
+        body: JSON.stringify({ research_markdown: lastAssistant.content, company: activeSubject || undefined })
+      });
+      const json = await resp.json();
+      if (!resp.ok) throw new Error(json?.error || 'Draft failed');
+      await navigator.clipboard.writeText(json.email || '');
+      addToast({ type: 'success', title: 'Draft email copied' });
+    } catch (e: any) {
+      addToast({ type: 'error', title: 'Failed to draft email', description: e?.message || String(e) });
+    }
+  };
+
+  const canUndoSubject = () => {
+    const at = lastSubjectRef.current.at; if (!at) return false; return (Date.now() - at) < 10000;
+  };
+  const handleSwitchSubject = async () => {
+    const next = (switchInput || '').trim();
+    if (!next) { setCrumbOpen(false); return; }
+    if (saveOpen || saving) {
+      const ok = window.confirm('You have unsaved changes. Switch subject anyway?');
+      if (!ok) return;
+    }
+    lastSubjectRef.current = { prev: activeSubject, at: Date.now() };
+    setActiveSubject(next);
+    setCrumbOpen(false);
+    setSwitchInput('');
+    addToast({ type: 'info', title: `Context switched to ${next}`, description: 'Undo available for 10 seconds.' });
+  };
+  const handleUndoSubject = () => {
+    if (!canUndoSubject()) return;
+    const prev = lastSubjectRef.current.prev;
+    setActiveSubject(prev);
+    lastSubjectRef.current = { prev: null, at: null };
+    addToast({ type: 'success', title: 'Context restored' });
   };
 
   // New: Stop streaming handler
@@ -1137,8 +1237,23 @@ export function ResearchChat() {
                         sources,
                       });
 
+                      // Proactive subject mismatch handling (before Save dialog)
+                      const subj = (draft.subject || '').trim();
+                      const active = (activeSubject || '').trim();
+                      const isMismatch = Boolean(active && subj && active.toLowerCase() !== subj.toLowerCase());
+                      if (isMismatch) {
+                        setMismatchDraft(draft);
+                        setMismatchOpen(true);
+                        return;
+                      }
+
                       setSaveDraft(draft);
                       setSaveOpen(true);
+                    } : undefined}
+                    onSummarize={isLastAssistant ? async () => {
+                      setPostSummarizeNudge(false);
+                      await handleSendMessageWithChat(currentChatId!, 'Summarize the above into a TL;DR (1–2 sentences) followed by 5–8 decision-relevant bullets. Do not ask for inputs. No web research.');
+                      setPostSummarizeNudge(true);
                     } : undefined}
                     disablePromote={saving}
                     onRetry={isLastAssistant ? handleRetry : undefined}
@@ -1159,6 +1274,119 @@ export function ResearchChat() {
                 <MessageBubble role="assistant" content={streamingMessage} userName={getUserInitial()} showActions={false} />
               )}
 
+              {/* Next Actions bar after a completed assistant turn */}
+              {!streamingMessage && messages.length > 0 && messages[messages.length - 1]?.role === 'assistant' && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 p-2 border border-gray-200 rounded-lg bg-white">
+                  <span className="text-xs text-gray-600 mr-2">Next actions:</span>
+                  <button className="px-2.5 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700" onClick={handleStartNewCompany}>Start new company</button>
+                  <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" onClick={handleContinueCompany}>Continue {activeSubject ? `with ${activeSubject}` : 'this company'}</button>
+                  <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" onClick={async () => { await handleSummarizeLast(); }}>Summarize</button>
+                  <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" onClick={handleEmailDraftFromLast}>Email draft</button>
+                  <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" onClick={() => setShowRefine(true)}>Refine scope</button>
+                  <label className="ml-auto text-xs text-gray-700 inline-flex items-center gap-1">
+                    <input type="checkbox" checked={clarifiersLocked} onChange={(e) => setClarifiersLocked(e.target.checked)} />
+                    No more setup questions this chat
+                  </label>
+                </div>
+              )}
+
+              {/* Post-summarize nudge: offer to persist TL;DR or brevity preference */}
+              {postSummarizeNudge && (
+                <div className="mt-3 flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <div className="text-xs text-blue-900">
+                    Prefer me to keep outputs shorter or always include a TL;DR next time?
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="px-2.5 py-1.5 text-xs font-medium bg-white border border-blue-300 text-blue-700 rounded hover:bg-blue-100"
+                      onClick={async () => {
+                        try {
+                          const { data: { session } } = await supabase.auth.getSession();
+                          if (!session) throw new Error('Not authenticated');
+                          await fetch('/api/update-profile', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+                            body: JSON.stringify({ prompt_config: { always_tldr: true } })
+                          });
+                          addToast({ type: 'success', title: 'Preference saved', description: 'I\'ll include a TL;DR by default.' });
+                        } catch (e: any) {
+                          addToast({ type: 'error', title: 'Save failed', description: e?.message || 'Unable to save preference' });
+                        } finally {
+                          setPostSummarizeNudge(false);
+                        }
+                      }}
+                    >
+                      Always include TL;DR
+                    </button>
+                    <button
+                      className="px-2.5 py-1.5 text-xs font-medium bg-white border border-blue-300 text-blue-700 rounded hover:bg-blue-100"
+                      onClick={async () => {
+                        try {
+                          const { data: { session } } = await supabase.auth.getSession();
+                          if (!session) throw new Error('Not authenticated');
+                          await fetch('/api/update-profile', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+                            body: JSON.stringify({ prompt_config: { default_output_brevity: 'short' } })
+                          });
+                          addToast({ type: 'success', title: 'Preference saved', description: 'I\'ll keep outputs shorter by default.' });
+                        } catch (e: any) {
+                          addToast({ type: 'error', title: 'Save failed', description: e?.message || 'Unable to save preference' });
+                        } finally {
+                          setPostSummarizeNudge(false);
+                        }
+                      }}
+                    >
+                      Prefer shorter outputs
+                    </button>
+                    <button
+                      className="px-2 py-1 text-xs text-blue-900 hover:underline"
+                      onClick={() => setPostSummarizeNudge(false)}
+                    >
+                      Not now
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Refine scope modal (simple) */}
+              {showRefine && (
+                <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30">
+                  <div className="bg-white rounded-xl shadow-xl border border-gray-200 w-full max-w-md p-4">
+                    <div className="font-semibold text-gray-900 mb-2">Refine scope</div>
+                    <div className="text-xs text-gray-600 mb-2">Pick focus facets and timeframe for the next run.</div>
+                    <div className="grid grid-cols-2 gap-2 mb-3 text-sm">
+                      {['leadership','funding','tech stack','news','competitors','hiring'].map(f => (
+                        <label key={f} className="inline-flex items-center gap-2">
+                          <input type="checkbox" checked={refineFacets.includes(f)} onChange={(e) => setRefineFacets(prev => e.target.checked ? Array.from(new Set([...prev, f])) : prev.filter(x => x!==f))} />
+                          <span className="capitalize">{f}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="mb-3">
+                      <label className="text-xs text-gray-700">Timeframe</label>
+                      <select className="mt-1 w-full border border-gray-300 rounded-lg text-sm p-2" value={refineTimeframe} onChange={e => setRefineTimeframe(e.target.value)}>
+                        {['last 3 months','last 6 months','last 12 months'].map(tf => <option key={tf} value={tf}>{tf}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                      <button className="px-3 py-1.5 text-sm text-gray-700" onClick={() => setShowRefine(false)}>Cancel</button>
+                      <button className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded-lg" onClick={async () => {
+                        setShowRefine(false);
+                        const target = activeSubject ? `Research ${activeSubject}` : 'Continue research';
+                        const cmd = `${target}. Focus on ${refineFacets.join(', ') || 'top facets'} within ${refineTimeframe}.`;
+                        if (!currentChatId) {
+                          const id = await createNewChat();
+                          if (id) await handleSendMessageWithChat(id, cmd);
+                        } else {
+                          await handleSendMessageWithChat(currentChatId, cmd);
+                        }
+                      }}>Apply</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div ref={messagesEndRef} />
             </div>
           </div>
@@ -1174,24 +1402,95 @@ export function ResearchChat() {
             </div>
           </div>
         )}
-        <div className="bg-gray-50">
-          <div className="max-w-3xl mx-auto px-6 py-4">
-            <MessageInput
-              value={inputValue}
-              onChange={setInputValue}
-              onSend={handleSendMessage}
-              disabled={loading}
-              isStreaming={Boolean(streamingMessage)}
-              onStop={handleStopStreaming}
-              // Use a single clear CTA above for bulk research; keep Settings action to open dialog if needed
-              onSettings={() => setBulkResearchOpen(true)}
-              selectedAgent="Company Researcher"
-              focusSignal={focusComposerTick}
-            />
+      <div className="bg-gray-50">
+        <div className="max-w-3xl mx-auto px-6 py-4">
+          {/* Context crumb (above composer) */}
+          <div className="mb-2 flex items-center justify-between" data-testid="context-crumb">
+            <div className="text-xs text-gray-700 inline-flex items-center gap-2">
+              <button
+                type="button"
+                className="px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50"
+                onClick={() => setCrumbOpen(o => !o)}
+                aria-expanded={crumbOpen}
+              >
+                Context: {activeSubject ? activeSubject : 'None'} ▾
+              </button>
+              {canUndoSubject() && (
+                <button type="button" className="text-blue-700 hover:underline" onClick={handleUndoSubject}>Undo</button>
+              )}
+            </div>
+            {/* Header metrics (right-aligned) */}
+            <div className="text-xs text-gray-600 hidden sm:flex items-center gap-2" data-testid="header-metrics">
+              {accountStats && (
+                <>
+                  <span className="inline-flex items-center gap-1 bg-gray-100 px-2 py-0.5 rounded">📊 {accountStats.total} tracked</span>
+                  <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 px-2 py-0.5 rounded">🔥 {accountStats.hot} hot</span>
+                  <span className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-2 py-0.5 rounded">⚡ {accountStats.with_signals} with signals</span>
+                </>
+              )}
+            </div>
+
+            {crumbOpen && (
+              <div className="absolute z-30 mt-10 w-full max-w-md bg-white border border-gray-200 rounded-lg shadow-lg p-3" data-testid="context-crumb-open">
+                <div className="text-xs text-gray-600 mb-2">Switch to new subject (company/person)</div>
+                <input
+                  value={switchInput}
+                  onChange={(e) => setSwitchInput(e.target.value)}
+                  placeholder="e.g., Clari or Andy Byrne"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  data-testid="context-crumb-input"
+                />
+                <div className="mt-2 flex items-center justify-end gap-2">
+                  <button className="px-2.5 py-1.5 text-xs text-gray-700" onClick={() => setCrumbOpen(false)}>Cancel</button>
+                  <button className="px-2.5 py-1.5 text-xs text-white bg-blue-600 rounded" onClick={handleSwitchSubject}>Apply</button>
+                  {activeSubject && (
+                    <button className="px-2.5 py-1.5 text-xs text-gray-700" onClick={() => { lastSubjectRef.current = { prev: activeSubject, at: Date.now() }; setActiveSubject(null); setCrumbOpen(false); }}>Clear</button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
+          <MessageInput
+            value={inputValue}
+            onChange={setInputValue}
+            onSend={handleSendMessage}
+            disabled={loading}
+            isStreaming={Boolean(streamingMessage)}
+            onStop={handleStopStreaming}
+            // Use a single clear CTA above for bulk research; keep Settings action to open dialog if needed
+            onSettings={() => setBulkResearchOpen(true)}
+            selectedAgent="Company Researcher"
+            focusSignal={focusComposerTick}
+          />
+          {/* Empty-state panel */}
+          {messages.length === 0 && !streamingMessage && (
+            <div className="mt-2 p-3 border border-gray-200 rounded-lg bg-white" data-testid="empty-state-tasks">
+              <div className="text-xs text-gray-600 mb-2">Start with:</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" onClick={() => { setInputValue('Research '); setFocusComposerTick(t=>t+1); }}>Research a company</button>
+                <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" onClick={() => setBulkResearchOpen(true)}>Upload list</button>
+                <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" onClick={handleAddAccount}>Track account</button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
+    </div>
+    {/* Command palette */}
+    {paletteOpen && (
+      <div className="fixed inset-0 z-40 bg-black/30 flex items-start justify-center p-6" onClick={() => setPaletteOpen(false)}>
+        <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl shadow-xl p-3" onClick={e => e.stopPropagation()}>
+          <div className="text-sm font-semibold text-gray-900 mb-2">Quick actions</div>
+          <div className="flex flex-col gap-2" data-testid="command-palette">
+            <button className="text-left px-3 py-2 rounded hover:bg-gray-50" onClick={() => { setPaletteOpen(false); setInputValue('Research '); setFocusComposerTick(t=>t+1); }}>Research a company</button>
+            <button className="text-left px-3 py-2 rounded hover:bg-gray-50" onClick={() => { setPaletteOpen(false); setBulkResearchOpen(true); }}>Upload list (Bulk research)</button>
+            <button className="text-left px-3 py-2 rounded hover:bg-gray-50" onClick={() => { setPaletteOpen(false); handleAddAccount(); }}>Track account</button>
+          </div>
+          <div className="mt-2 text-xs text-gray-500">Press Esc to close</div>
+        </div>
+      </div>
+    )}
     <SaveResearchDialog
       open={saveOpen}
       initialDraft={saveDraft}
@@ -1200,6 +1499,46 @@ export function ResearchChat() {
       saving={saving}
       error={saveError}
       usage={lastUsage || undefined}
+      activeSubject={activeSubject}
+    />
+    <SubjectMismatchModal
+      open={mismatchOpen}
+      draftSubject={mismatchDraft?.subject || ''}
+      activeSubject={activeSubject}
+      markdown={mismatchDraft?.markdown_report || ''}
+      onClose={() => setMismatchOpen(false)}
+      onChoose={(choice) => {
+        if (!mismatchDraft) return;
+        if (choice.mode === 'use_draft') {
+          setMismatchOpen(false);
+          setSaveDraft({ ...mismatchDraft });
+          setSaveOpen(true);
+          return;
+        }
+        if (choice.mode === 'use_active' && activeSubject) {
+          setMismatchOpen(false);
+          setSaveDraft({ ...mismatchDraft, subject: activeSubject });
+          setSaveOpen(true);
+          return;
+        }
+        // proceed = open editor unchanged
+        setMismatchOpen(false);
+        setSaveDraft(mismatchDraft);
+        setSaveOpen(true);
+      }}
+      onSplit={async () => {
+        if (!mismatchDraft) return;
+        try {
+          await handleSaveResearch(mismatchDraft);
+          if (activeSubject && activeSubject.trim().toLowerCase() !== (mismatchDraft.subject || '').trim().toLowerCase()) {
+            await handleSaveResearch({ ...mismatchDraft, subject: activeSubject });
+          }
+          setMismatchOpen(false);
+          addToast({ type: 'success', title: 'Saved two drafts', description: 'Both subjects saved as separate entries.' });
+        } catch (e: any) {
+          addToast({ type: 'error', title: 'Split save failed', description: e?.message || 'Try saving manually from the editor.' });
+        }
+      }}
     />
     <CSVUploadDialog
       isOpen={csvUploadOpen}

@@ -12,6 +12,7 @@ interface SaveResearchDialogProps {
   saving: boolean;
   usage?: { tokens: number; credits: number };
   error?: string | null;
+  activeSubject?: string | null;
 }
 
 const RESEARCH_TYPES: ResearchDraft['research_type'][] = ['company', 'prospect', 'competitive', 'market'];
@@ -26,12 +27,15 @@ export function SaveResearchDialog({
   saving,
   usage,
   error,
+  activeSubject,
 }: SaveResearchDialogProps) {
   const [draft, setDraft] = useState<ResearchDraft | null>(initialDraft);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [sourceErrors, setSourceErrors] = useState<Record<number, string>>({});
   const [formTouched, setFormTouched] = useState(false);
   const [previewMode, setPreviewMode] = useState<'edit' | 'preview'>('edit');
+  const [subjectChoice, setSubjectChoice] = useState<'draft' | 'active' | 'custom'>('draft');
+  const [customSubject, setCustomSubject] = useState('');
 
   useEffect(() => {
     if (open && initialDraft) {
@@ -145,8 +149,15 @@ export function SaveResearchDialog({
 
     setFormTouched(true);
     if (runValidation(draft)) {
+      // Apply chosen subject if mismatch was shown
+      let finalSubject = draft.subject;
+      if (subjectMismatch) {
+        if (subjectChoice === 'active' && activeSubject) finalSubject = activeSubject;
+        if (subjectChoice === 'custom' && customSubject.trim()) finalSubject = customSubject.trim();
+      }
       await onSave({
         ...draft,
+        subject: finalSubject,
         sources: draft.sources?.map(source => ({
           url: source.url?.trim() || '',
           query: source.query?.trim() || undefined,
@@ -180,6 +191,24 @@ export function SaveResearchDialog({
     return null;
   }
 
+  // Subject mismatch detection: if activeSubject provided and different than draft.subject
+  const subjectMismatch = Boolean(activeSubject && draft.subject && activeSubject.trim().toLowerCase() !== draft.subject.trim().toLowerCase());
+
+  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const countMentions = (text: string, term: string) => {
+    if (!text || !term) return 0;
+    try {
+      const re = new RegExp(`\\b${escapeRe(term.trim().toLowerCase())}\\b`, 'g');
+      return (text.toLowerCase().match(re) || []).length;
+    } catch { return 0; }
+  };
+  const reportText = draft.markdown_report || '';
+  const subjectCount = draft.subject ? countMentions(reportText, draft.subject) : 0;
+  const activeCount = activeSubject ? countMentions(reportText, activeSubject) : 0;
+  const mentionMismatch = Boolean(activeSubject && draft.subject && activeCount > 0 && subjectCount > 0 && activeSubject.trim().toLowerCase() !== draft.subject.trim().toLowerCase());
+  const showSubjectConfirm = subjectMismatch || mentionMismatch;
+  const paragraphs = (reportText || '').split(/\n\s*\n/).filter(Boolean).slice(0, 20);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm animate-fadeIn" data-testid="save-research-dialog">
       <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col animate-slideUp">
@@ -203,9 +232,66 @@ export function SaveResearchDialog({
 
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
           <div className="px-6 py-4 space-y-5">
+            {showSubjectConfirm && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-900">
+                <div className="font-semibold mb-1">Confirm subject</div>
+                <div className="text-xs text-amber-800 mb-2">
+                  Draft subject: <span className="font-medium">{draft.subject}</span>{subjectCount ? ` (${subjectCount} mentions)` : ''}. 
+                  Active context: <span className="font-medium">{activeSubject || '—'}</span>{activeCount ? ` (${activeCount} mentions)` : ''}. 
+                  Choose which subject to save under.
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="inline-flex items-center gap-2">
+                    <input type="radio" name="subjectChoice" checked={subjectChoice==='draft'} onChange={() => setSubjectChoice('draft')} />
+                    Use draft subject: <span className="font-medium">{draft.subject}</span>
+                  </label>
+                  {activeSubject && (
+                    <label className="inline-flex items-center gap-2">
+                      <input type="radio" name="subjectChoice" checked={subjectChoice==='active'} onChange={() => setSubjectChoice('active')} />
+                      Use active context: <span className="font-medium">{activeSubject}</span>
+                    </label>
+                  )}
+                  <label className="inline-flex items-center gap-2">
+                    <input type="radio" name="subjectChoice" checked={subjectChoice==='custom'} onChange={() => setSubjectChoice('custom')} />
+                    <span>Custom:</span>
+                    <input className="border border-gray-300 rounded px-2 py-1 text-xs" value={customSubject} onChange={e=>setCustomSubject(e.target.value)} placeholder="Enter subject" />
+                  </label>
+                </div>
+                <div className="mt-2 text-xs text-amber-700">Or <button type="button" className="text-amber-900 underline" onClick={async () => {
+                  // Split into two drafts by saving twice
+                  try {
+                    await onSave({ ...draft });
+                    if (activeSubject && activeSubject.trim().toLowerCase() !== draft.subject.trim().toLowerCase()) {
+                      await onSave({ ...draft, subject: activeSubject });
+                    }
+                    onClose();
+                  } catch (e) { /* errors will be handled by parent */ }
+                }}>Split into two drafts</button></div>
+              </div>
+            )}
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
-                {error}
+                <div className="font-semibold">Save failed</div>
+                <div className="mt-1">{error}</div>
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="submit"
+                    className="px-3 py-1.5 text-xs font-medium bg-white border border-red-300 text-red-700 rounded hover:bg-red-100"
+                  >
+                    Retry save
+                  </button>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-100"
+                    onClick={() => {
+                      try { (window as any).dispatchEvent(new CustomEvent('save:continue-without')); } catch {}
+                      // Close dialog so user can continue with Draft/Track
+                      (document.activeElement as HTMLElement)?.blur?.();
+                    }}
+                  >
+                    Continue without saving
+                  </button>
+                </div>
               </div>
             )}
 
@@ -352,6 +438,30 @@ export function SaveResearchDialog({
                   </button>
                 </div>
               </div>
+              {/* Entity tagging at paragraph level (counts) */}
+              {(activeSubject || draft.subject) && (
+                <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+                  <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Entity mentions (paragraphs)</div>
+                  <div className="space-y-1 max-h-40 overflow-auto" data-testid="entity-tags">
+                    {paragraphs.length === 0 && <div className="text-xs text-gray-500">No content yet.</div>}
+                    {paragraphs.map((p, i) => {
+                      const c1 = draft.subject ? countMentions(p, draft.subject) : 0;
+                      const c2 = activeSubject ? countMentions(p, activeSubject) : 0;
+                      const has = (c1 + c2) > 0;
+                      return (
+                        <div key={i} className={`flex items-center justify-between gap-2 rounded px-2 py-1 ${has ? 'bg-amber-50' : ''}`}>
+                          <div className="text-[11px] text-gray-700 truncate max-w-[60%]">{p}</div>
+                          <div className="flex items-center gap-1 text-[11px]">
+                            {draft.subject && <span className={`px-1.5 py-0.5 rounded border ${c1>0?'border-amber-300 bg-white text-amber-900':'border-gray-200 text-gray-500'}`}>{draft.subject} ×{c1}</span>}
+                            {activeSubject && <span className={`px-1.5 py-0.5 rounded border ${c2>0?'border-orange-300 bg-white text-orange-900':'border-gray-200 text-gray-500'}`}>{activeSubject} ×{c2}</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {previewMode === 'edit' ? (
                 <textarea
                   value={draft.markdown_report}
