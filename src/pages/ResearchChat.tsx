@@ -456,12 +456,11 @@ export function ResearchChat() {
         .eq('id', chatId);
 
       setMessages(prev => {
-        // Filter out the temporary user message
         const filtered = prev.filter(m => m.id !== tempUser.id);
-        // Add the saved messages, ensuring no duplicates
-        return [...filtered, savedUser, savedAssistant].filter((m, index, self) =>
-          index === self.findIndex(msg => msg.id === m.id)
-        );
+        const next: Message[] = [...filtered];
+        if (savedUser) next.push(savedUser);
+        if (savedAssistant) next.push(savedAssistant);
+        return next.filter((m, index, self) => m && index === self.findIndex(msg => msg?.id === m.id));
       });
       setStreamingMessage('');
       setThinkingEvents([]);
