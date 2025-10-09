@@ -606,11 +606,31 @@ export default async function handler(req: any, res: any) {
 
       if (storeRun && finalResponseData?.id) {
         try {
+          // extra confirmation: create a tiny metadata entry so we can cross-reference later
+          await openai.responses.update(finalResponseData.id, {
+            metadata: {
+              last_verified_at: new Date().toISOString(),
+              verifying_route: 'vercel/api/ai/chat'
+            }
+          });
           const verify = await openai.responses.retrieve(finalResponseData.id);
           console.log('[OPENAI] Stored response status:', verify?.status);
         } catch (verifyErr: any) {
           console.error('[OPENAI] Failed to verify stored response', finalResponseData?.id, verifyErr?.message || verifyErr);
         }
+      }
+
+      try {
+        if (finalResponseData?.id) {
+          safeWrite(`data: ${JSON.stringify({
+            type: 'meta',
+            stage: 'primary',
+            event: 'finalized',
+            response_id_authoritative: finalResponseData.id
+          })}\n\n`);
+        }
+      } catch (finalMetaErr) {
+        console.error('Failed to emit final meta event', finalMetaErr);
       }
 
       console.log('[DEBUG] Stream processing complete. Total chunks:', chunkCount);
