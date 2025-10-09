@@ -31,8 +31,7 @@ These Supabase Edge Functions are **DEPRECATED** and scheduled for removal.
 
 ## Functions Affected
 
-- `/supabase/functions/chat` - Main chat endpoint (DEPRECATED)
-- All other Edge Functions in this directory
+- All remaining Edge Functions in this directory (chat has already been removed)
 
 ## Questions?
 
