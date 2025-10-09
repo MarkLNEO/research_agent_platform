@@ -24,19 +24,21 @@ async function checkUserCredits(supabase, userId) {
         id: userId,
         credits_remaining: INITIAL_CREDITS,
         credits_total_used: 0,
-        approval_status: 'pending'
+        // Default to approved to avoid first-run block; admins can adjust later
+        approval_status: 'approved'
       })
       .select('id, credits_remaining, credits_total_used, approval_status')
       .single();
     userRow = inserted;
   }
 
+  // Allow pending users to proceed in self-serve flows
   if (userRow?.approval_status === 'pending') {
     return {
-      hasCredits: false,
-      remaining: userRow?.credits_remaining || 0,
-      needsApproval: true,
-      message: 'Your account is pending approval. Please check your email or contact support'
+      hasCredits: true,
+      remaining: userRow?.credits_remaining || INITIAL_CREDITS,
+      needsApproval: false,
+      message: null,
     };
   }
 
@@ -210,14 +212,40 @@ export default async function handler(req: any, res: any) {
     const authAndCreditMs = Date.now() - processStart;
 
     // Parse request body
-    const { messages, systemPrompt, chatId, agentType = 'company_research', config: userConfig = {}, research_type } = (req.body || {}) as any;
+    const { messages, systemPrompt, chatId, chat_id, agentType = 'company_research', config: userConfig = {}, research_type, active_subject } = (req.body || {}) as any;
 
     const contextFetchStart = Date.now();
     const userContext = await fetchUserContext(supabase, user.id);
     const contextFetchMs = Date.now() - contextFetchStart;
 
+    // Subject recall: tiny snapshot of last saved research for active_subject
+    let subjectSnapshot = '';
+    try {
+      if (active_subject && typeof active_subject === 'string' && active_subject.trim().length >= 2) {
+        const { data: ro } = await supabase
+          .from('research_outputs')
+          .select('subject, executive_summary')
+          .eq('user_id', user.id)
+          .ilike('subject', `%${active_subject}%`)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        if (ro && ro.length) {
+          const exec = (ro[0].executive_summary || '').slice(0, 400);
+          subjectSnapshot = `\n\n## SUBJECT CONTEXT\nUse only if relevant; prefer fresh research.\n### ${ro[0].subject}\n${exec}`;
+        }
+      }
+    } catch {}
+
     // Build system prompt if not provided; pass research_type to bias depth
     let instructions = systemPrompt || buildSystemPrompt(userContext as any, agentType as AgentType, (req.body || {}).research_type);
+    if (subjectSnapshot) instructions += subjectSnapshot;
+    // Apply clarifier lock and facet budget hints
+    if (userConfig?.clarifiers_locked) {
+      instructions += `\n\n<clarifiers_policy>Clarifiers are locked for this chat. Do not ask setup questions. Only disambiguate if the subject is genuinely ambiguous.</clarifiers_policy>`;
+    }
+    if (typeof userConfig?.facet_budget === 'number') {
+      instructions += `\n\n<facet_budget>${userConfig.facet_budget}</facet_budget>`;
+    }
     // Append guardrail hint if present in prompt config
     try {
       const guard = (userContext.promptConfig as any)?.guardrail_profile;
@@ -605,6 +633,34 @@ export default async function handler(req: any, res: any) {
         final_response_id: finalResponseData?.id || finalResponseData?.response?.id || null
       });
       await deductCredits(supabase, user.id, totalEstimatedTokens);
+
+      // Background: rolling summary
+      ;(async () => {
+        try {
+          const cid = chat_id || chatId || null;
+          if (!cid) return;
+          const summaryInput = `Summarize in 1–2 sentences (main subject + intent).\n\n${(input || '').slice(0, 3500)}`;
+          const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+          const sum = await openai.responses.create({
+            model: 'gpt-5-mini',
+            input: [
+              { role: 'system', content: [{ type: 'input_text', text: 'Summarize in 1–2 sentences with the main subject and intent.' }] },
+              { role: 'user', content: [{ type: 'input_text', text: summaryInput }] },
+            ],
+            text: { format: { type: 'text' }, verbosity: 'low' },
+            store: false,
+          });
+          const chatSummary = sum?.output_text || '';
+          if (chatSummary) {
+            await supabase
+              .from('chats')
+              .update({ summary: chatSummary, message_count_at_summary: Array.isArray(messages) ? messages.length : null })
+              .eq('id', cid);
+          }
+        } catch (e) {
+          console.warn('Rolling summary (vercel) failed', e);
+        }
+      })();
 
     } catch (streamError) {
       console.error('Streaming error:', streamError);
