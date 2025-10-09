@@ -783,19 +783,22 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
       `Perfect! You're all set up. I'm ready to help you research companies, find prospects, and provide personalized insights based on your ICP.\n\nRedirecting you to your dashboard...`
     );
 
-    // Default the research preference to 'deep' so we don't re-ask later
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        await fetch('/api/update-profile', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({ prompt_config: { preferred_research_type: 'deep' } })
-        });
-        try { localStorage.setItem('preferred_research_type', 'deep'); } catch {}
-      }
-    } catch {}
+    // Navigate immediately; finish small profile updates in the background
     navigate('/');
+    // Best-effort: default research preference to 'deep' without blocking
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          fetch('/api/update-profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({ prompt_config: { preferred_research_type: 'deep' } })
+          }).catch(() => {});
+          try { localStorage.setItem('preferred_research_type', 'deep'); } catch {}
+        }
+      } catch {}
+    })();
   };
 
   const selectPath = (path: 'immediate' | 'guided', starter?: string) => {
