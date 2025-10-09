@@ -27,6 +27,13 @@ const MODE_HINT: Record<Exclude<ResearchMode, undefined>, string> = {
 
 const STREAMING_BEHAVIOUR = `While reasoning, surface short bullet updates ("- assessing funding rounds", "- reading tech stack coverage") so the UI can stream progress.`;
 
+const STRUCTURED_OUTPUT = `Output format (strict):
+- Always begin with a single H1 headline in the form "# {Subject} — Executive Summary" (replace {Subject} with the researched entity).
+- Follow immediately with "## TL;DR" and provide 5–8 bullet points.
+- Continue with the sections, in this order: "## Key Findings", "## Signals", "## Recommended Next Actions", "## Tech/Footprint" (or "## Operating Footprint" when more appropriate), "## Decision Makers" (if personnel data exists), "## Risks & Gaps" (optional), and "## Sources".
+- If a section has no content, keep the heading and state "None found" with a note on next steps.
+- Use bold call-outs within sections for clarity, but do not omit or rename the headings.`;
+
 function formatSection(title: string, body: string | undefined): string | null {
   if (!body || !body.trim()) return null;
   return `${title.toUpperCase()}\n${body.trim()}`;
@@ -105,5 +112,7 @@ export function buildSystemPrompt(
 
   const clarificationPolicy = `Clarification & Defaults:\n- Do not present fill-in templates or long forms.\n- Ask at most one short clarifying question only when essential; otherwise proceed using saved profile and sensible defaults.\n- If the user writes "all of the above" (or similar), interpret it as comprehensive coverage of the standard sections and proceed.\n- If a company is identified and a website/domain can be inferred or is present in the profile, do NOT ask for the domain; derive it yourself.\n- Default research depth: ${researchMode || 'deep'} unless the user specifies otherwise.\n- If profile context exists, do not re-ask "what would you like researched?" — assume defaults from the profile and mode.`;
 
-  return [header, behaviour, clarificationPolicy, contextBlock, extraBlock].filter(Boolean).join('\n\n');
+  const responseShape = `Response Shape:\n- Keep outputs concise and decision-ready; prefer bullets and short sections.\n- ${STRUCTURED_OUTPUT}`;
+
+  return [header, behaviour, clarificationPolicy, responseShape, contextBlock, extraBlock].filter(Boolean).join('\n\n');
 }

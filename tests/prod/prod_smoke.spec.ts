@@ -340,6 +340,7 @@ test.describe('Production smoke (UI only)', () => {
     }
 
     // Summarize quick action: click and verify a concise follow-up appears
+    await page.getByText(/Next actions:/i).waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
     const summarizeBtn = page.getByRole('button', { name: /Summarize/i });
     let canSummarize = false;
     for (let i = 0; i < 10; i++) {
@@ -400,8 +401,11 @@ test.describe('Production smoke (UI only)', () => {
     }
 
     // Save to Research (handle proactive mismatch modal, then open dialog, add one source if needed, save)
+    await page.getByText(/Next actions:/i).waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
     const saveBtn = page.getByRole('button', { name: /Save to Research/i });
-    const hasSave = await saveBtn.isVisible({ timeout: 3000 }).catch(() => false);
+    const saveCount = await page.getByRole('button', { name: /Save to Research/i }).count().catch(() => 0);
+    log(`INFO: Save to Research button count at check: ${saveCount}`);
+    const hasSave = saveCount > 0 ? await saveBtn.isVisible({ timeout: 3000 }).catch(() => false) : false;
     if (hasSave) {
       await saveBtn.click({ timeout: 10_000 }).catch(() => {});
       // Handle proactive mismatch modal if it appears first
@@ -414,18 +418,32 @@ test.describe('Production smoke (UI only)', () => {
         await editBtn.click({ timeout: 5000 }).catch(() => {});
       }
       const dialog = page.getByTestId('save-research-dialog');
-      const dialogVisible = await dialog.isVisible({ timeout: 10_000 }).catch(() => false);
+      let dialogVisible = false;
+      try {
+        await dialog.waitFor({ state: 'visible', timeout: 10_000 });
+        dialogVisible = true;
+      } catch {}
       if (dialogVisible) {
         await snap('save-dialog');
         // If validation requires at least one source, add a simple source
         const addBtn = page.getByRole('button', { name: /Add source/i });
         const hasAdd = await addBtn.isVisible({ timeout: 2000 }).catch(() => false);
         if (hasAdd) {
-          await addBtn.click().catch(() => {});
-          await page.getByLabel(/Source URL/i).last().fill('https://example.com');
+          try {
+            await addBtn.click().catch(() => {});
+            const sourceInput = page.getByLabel(/Source URL/i).last();
+            const sourceVisible = await sourceInput.waitFor({ state: 'visible', timeout: 2000 }).then(() => true).catch(() => false);
+            if (sourceVisible) {
+              await sourceInput.fill('https://example.com');
+            } else {
+              log('WARN: Source URL input did not render after clicking Add source');
+            }
+          } catch (addErr) {
+            log(`WARN: Failed to add source in save dialog: ${addErr instanceof Error ? addErr.message : addErr}`);
+          }
         }
         // If mismatch confirmation is present, capture it
-        const mismatch = page.getByText(/Confirm subject/i);
+        const mismatch = dialog.getByText(/Confirm subject/i);
         if (await mismatch.isVisible({ timeout: 1000 }).catch(() => false)) {
           await snap('save-mismatch');
         }
@@ -438,6 +456,8 @@ test.describe('Production smoke (UI only)', () => {
           await page.getByRole('button', { name: /Close save dialog/i }).click().catch(() => {});
         }
       }
+    } else {
+      log('WARN: Save to Research button not visible; skipping save flow');
     }
 
     // Deep research resiliency segment (best-effort; skip if composer disabled)

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -95,6 +95,14 @@ export function ResearchChat() {
   const [switchInput, setSwitchInput] = useState('');
   const lastSubjectRef = useRef<{ prev: string | null; at: number | null }>({ prev: null, at: null });
   const [paletteOpen, setPaletteOpen] = useState(false);
+
+  const lastAssistantIndex = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]?.role === 'assistant') return i;
+    }
+    return -1;
+  }, [messages]);
+  const lastAssistantMessage = lastAssistantIndex >= 0 ? messages[lastAssistantIndex] : null;
 
   useEffect(() => {
     if (user) void loadChats();
@@ -911,7 +919,8 @@ export function ResearchChat() {
     if (!lastUserMessage || !currentChatId) return;
 
     // Remove the last assistant message
-    const filteredMessages = messages.filter(m => m !== messages[messages.length - 1]);
+    if (lastAssistantIndex < 0) return;
+    const filteredMessages = messages.filter((_, idx) => idx !== lastAssistantIndex);
     setMessages(filteredMessages);
 
     // Regenerate the response
@@ -1303,7 +1312,7 @@ export function ResearchChat() {
               )}
 
               {/* Next Actions bar after a completed assistant turn */}
-              {!streamingMessage && messages.length > 0 && messages[messages.length - 1]?.role === 'assistant' && (
+              {!streamingMessage && lastAssistantMessage && (
                 <div className="mt-3 flex flex-wrap items-center gap-2 p-2 border border-gray-200 rounded-lg bg-white">
                   <span className="text-xs text-gray-600 mr-2">Next actions:</span>
                   <button className="px-2.5 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700" onClick={handleStartNewCompany}>Start new company</button>

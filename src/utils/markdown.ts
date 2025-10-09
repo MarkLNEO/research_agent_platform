@@ -50,6 +50,55 @@ export function normalizeMarkdown(raw: string): string {
 
   text = renumberOrderedLists(text);
 
+  const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // Normalize common plain-text headers into markdown headings
+  const headingMap: Array<{ pattern: RegExp; replacement: string }> = [
+    { pattern: /^\s*Executive summary(?:\s*\(.*?\))?\s*$/gim, replacement: '## Executive Summary' },
+    { pattern: /^\s*Executive Summary(?:\s*\(.*?\))?\s*$/gim, replacement: '## Executive Summary' },
+    { pattern: /^\s*TL;?\s*DR\.?\s*$/gim, replacement: '## TL;DR' },
+    { pattern: /^\s*Key facts?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Key Findings' },
+    { pattern: /^\s*Key findings?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Key Findings' },
+    { pattern: /^\s*Signals?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Signals' },
+    { pattern: /^\s*Recommended next steps?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Recommended Next Actions' },
+    { pattern: /^\s*Tech(?:\s*\/\s*footprint)?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Tech/Footprint' },
+    { pattern: /^\s*Operating footprint(?:\s*\(.*?\))?\s*$/gim, replacement: '## Tech/Footprint' },
+    { pattern: /^\s*Decision makers?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Decision Makers' },
+    { pattern: /^\s*Sources?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Sources' },
+    { pattern: /^\s*Recommended next actions?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Recommended Next Actions' },
+    { pattern: /^\s*Risks? & gaps?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Risks & Gaps' }
+  ];
+
+  for (const { pattern, replacement } of headingMap) {
+    text = text.replace(pattern, replacement);
+  }
+
+  // Ensure a top-level headline exists; promote first Executive Summary heading to H1 if needed
+  if (!/^#\s+/m.test(text)) {
+    if (/^##\s+Executive Summary/m.test(text)) {
+      text = text.replace(/^##\s+Executive Summary/m, '# Executive Summary');
+    } else {
+      text = `# Executive Summary\n\n${text.trimStart()}`;
+    }
+  }
+
+  // Ensure TL;DR section exists; if missing, add placeholder after headline
+  if (!/^##\s+TL;DR/m.test(text)) {
+    text = text.replace(/^#\s.+$/m, (match) => `${match}\n\n## TL;DR\n- No summary provided yet.\n`);
+    if (!/^##\s+TL;DR/m.test(text)) {
+      text = `${text.trim()}\n\n## TL;DR\n- No summary provided yet.\n`;
+    }
+  }
+
+  // Ensure other key sections exist; append placeholders if absent
+  const requiredSections = ['Key Findings', 'Signals', 'Recommended Next Actions'];
+  for (const section of requiredSections) {
+    const heading = `## ${section}`;
+    if (!new RegExp(`^${escapeRegExp(heading)}`, 'mi').test(text)) {
+      text = `${text.trim()}\n\n${heading}\nNone found.`;
+    }
+  }
+
   // Promote common section labels to proper headings if strict headings are missing
   const ensureHeading = (label: RegExp, heading: string) => {
     if (!new RegExp(`^#{1,3}\\s+${heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'mi').test(text)) {
