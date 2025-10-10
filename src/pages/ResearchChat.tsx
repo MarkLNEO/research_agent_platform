@@ -1168,14 +1168,6 @@ export function ResearchChat() {
                     <h2 className="text-2xl font-bold text-gray-900">
                       {greeting ? `👋 Good ${greeting.time_of_day}, ${greeting.user_name}!` : '👋 Welcome back!'}
                     </h2>
-                    {accountStats && (
-                      <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-700">
-                        <span className="inline-flex items-center gap-1 bg-gray-100 px-2 py-0.5 rounded">📊 {accountStats.total} tracked</span>
-                        <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 px-2 py-0.5 rounded">🔥 {accountStats.hot} hot</span>
-                        <span className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-2 py-0.5 rounded">⚡ {accountStats.with_signals} with signals</span>
-                        <span className="inline-flex items-center gap-1 bg-yellow-50 text-yellow-700 px-2 py-0.5 rounded">📅 {accountStats.stale} need update</span>
-                      </div>
-                    )}
                   </div>
                   {recentSignals.length > 0 && (
                     <div className="border border-gray-200 rounded-2xl p-4 bg-white">
@@ -1209,15 +1201,30 @@ export function ResearchChat() {
                     </div>
                   )}
                   <div className="flex flex-wrap gap-2">
-                    {[
-                      'Which accounts had changes this week?',
-                      'Research my top 5 accounts',
-                      'Show accounts with security incidents',
-                    ].map((q, i) => (
-                      <button key={i} onClick={() => { setInputValue(q); void handleSendMessage(); }} className="px-3 py-1.5 text-xs bg-gray-100 rounded-full hover:bg-gray-200 text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" aria-label={`Suggestion: ${q}`}>
-                        {q}
-                      </button>
-                    ))}
+                    <button
+                      onClick={() => {
+                        setInputValue('Research ');
+                        setFocusComposerTick(t => t + 1);
+                      }}
+                      className="px-3 py-1.5 text-xs bg-gray-100 rounded-full hover:bg-gray-200 text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      aria-label="Suggestion: Research a company"
+                    >
+                      Research a company
+                    </button>
+                    <button
+                      onClick={() => setBulkResearchOpen(true)}
+                      className="px-3 py-1.5 text-xs bg-gray-100 rounded-full hover:bg-gray-200 text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      aria-label="Suggestion: Upload a list"
+                    >
+                      Upload a list
+                    </button>
+                    <button
+                      onClick={handleAddAccount}
+                      className="px-3 py-1.5 text-xs bg-gray-100 rounded-full hover:bg-gray-200 text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      aria-label="Suggestion: Track an account"
+                    >
+                      Track an account
+                    </button>
                   </div>
               </div>
               
