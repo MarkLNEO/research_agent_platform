@@ -225,13 +225,13 @@ export function Sidebar({
           {isExpanded ? (
             <div className="flex-1 min-w-0 text-xs text-gray-600">
               <div className="flex items-center gap-2">
-                <img src="/logo_black.png" alt="Rebar" className="h-6 w-auto" />
-                <span className="text-sm font-semibold text-gray-900">Powered by Rebar</span>
+                <img src="/logo_black.png" alt="RebarHQ" className="h-6 w-auto" />
+                <span className="text-sm font-semibold text-gray-900">Powered by RebarHQ</span>
               </div>
               <p className="mt-1">Intelligence for every strategic meeting.</p>
             </div>
           ) : (
-            <span className="sr-only">Powered by Rebar</span>
+            <span className="sr-only">Powered by RebarHQ</span>
           )}
         </div>
       </div>

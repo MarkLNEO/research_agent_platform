@@ -9,6 +9,99 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+function resolveChatEndpoint(): string {
+  const direct = Deno.env.get('CHAT_API_URL') || Deno.env.get('VERCEL_CHAT_URL');
+  if (direct && direct.trim().length > 0) {
+    const trimmed = direct.trim();
+    return trimmed.endsWith('/api/ai/chat') ? trimmed : `${trimmed.replace(/\/$/, '')}/api/ai/chat`;
+  }
+  const base = Deno.env.get('VERCEL_API_BASE_URL') || Deno.env.get('VERCEL_URL') || Deno.env.get('NEXT_PUBLIC_VERCEL_URL');
+  if (base && base.trim().length > 0) {
+    const normalized = base.startsWith('http') ? base.trim() : `https://${base.trim()}`;
+    return `${normalized.replace(/\/$/, '')}/api/ai/chat`;
+  }
+  throw new Error('Missing chat API endpoint. Set CHAT_API_URL or VERCEL_API_BASE_URL.');
+}
+
+async function collectStreamedContent(response: Response, subject: string): Promise<string> {
+  if (!response.body) {
+    throw new Error('Chat endpoint returned no body');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let aggregated = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    while (true) {
+      const separatorIndex = buffer.indexOf('\n\n');
+      if (separatorIndex === -1) break;
+
+      const rawEvent = buffer.slice(0, separatorIndex).trim();
+      buffer = buffer.slice(separatorIndex + 2);
+      if (!rawEvent) continue;
+
+      if (rawEvent === 'data: [DONE]' || rawEvent === '[DONE]') {
+        return aggregated.trim();
+      }
+
+      const dataPrefix = 'data:';
+      if (!rawEvent.startsWith(dataPrefix)) {
+        continue;
+      }
+
+      const payload = rawEvent.slice(dataPrefix.length).trim();
+      if (!payload || payload === '[DONE]') {
+        return aggregated.trim();
+      }
+
+      try {
+        const parsed = JSON.parse(payload);
+        if (parsed?.type === 'content' && typeof parsed.content === 'string') {
+          aggregated += parsed.content;
+        } else if (parsed?.type === 'error') {
+          throw new Error(parsed.error || `Chat endpoint returned an error for ${subject}`);
+        }
+      } catch (err) {
+        console.error('Failed to parse chat SSE payload', err, payload);
+      }
+    }
+  }
+
+  return aggregated.trim();
+}
+
+async function invokeChatEndpoint(body: Record<string, unknown>, subject: string): Promise<string> {
+  const endpoint = resolveChatEndpoint();
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!serviceKey) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured');
+  }
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+      'Authorization': `Bearer ${serviceKey}`,
+      'X-Rebar-Origin': 'bulk-research-edge',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Chat endpoint error ${response.status}: ${text}`);
+  }
+
+  return collectStreamedContent(response, subject);
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -114,10 +207,10 @@ serve(async (req) => {
 })
 
 async function processCompaniesInBackground(
-  jobId: string, 
-  companies: string[], 
-  researchType: string, 
-  userId: string, 
+  jobId: string,
+  companies: string[],
+  researchType: string,
+  userId: string,
   supabase: any
 ) {
   try {
@@ -128,52 +221,47 @@ async function processCompaniesInBackground(
       .eq('id', jobId)
 
     const results = []
+    try {
+      resolveChatEndpoint()
+    } catch (endpointError) {
+      console.error('Chat endpoint resolution failed:', endpointError)
+      await supabase
+        .from('bulk_research_jobs')
+        .update({ status: 'failed', error: String(endpointError) })
+        .eq('id', jobId)
+      return
+    }
     
     for (let i = 0; i < companies.length; i++) {
       const company = companies[i]
       
       try {
         // Call the chat function for each company
-        const chatResponse = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/chat`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
-            'Content-Type': 'application/json',
-            'apikey': `${Deno.env.get('SUPABASE_ANON_KEY')}`,
-          },
-          body: JSON.stringify({
-            messages: [
-              { 
-                role: 'user', 
-                content: `Research ${company}` 
-              },
-              {
-                role: 'user',
-                content: researchType
-              }
-            ],
-            stream: false, // Non-streaming for bulk processing
-            bulk_research_job_id: jobId,
-            user_id: userId,
-          }),
-        })
-
-        if (chatResponse.ok) {
-          const researchResult = await chatResponse.text()
-          results.push({
-            company,
-            status: 'completed',
-            result: researchResult,
-            completed_at: new Date().toISOString()
-          })
-        } else {
-          results.push({
-            company,
-            status: 'failed',
-            error: `Research failed: ${chatResponse.status}`,
-            completed_at: new Date().toISOString()
-          })
+        const payload = {
+          messages: [
+            {
+              role: 'user',
+              content: `Research ${company}`,
+            },
+          ],
+          stream: true,
+          system_run: true,
+          impersonate_user_id: userId,
+          user_id: userId,
+          research_type: researchType,
+          active_subject: company,
+          bulk_research_job_id: jobId,
+          bulk_subject: company,
         }
+
+        const researchResult = await invokeChatEndpoint(payload, company)
+
+        results.push({
+          company,
+          status: 'completed',
+          result: researchResult,
+          completed_at: new Date().toISOString()
+        })
 
         // Update progress
         await supabase

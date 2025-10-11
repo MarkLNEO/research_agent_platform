@@ -10,8 +10,11 @@
     "dev:full": "concurrently -k \"npm run dev:api\" \"npm run dev:client\"",
     "build": "vite build",
     "lint": "eslint .",
+    "lint:scope": "eslint src server api scripts --ext .ts,.tsx --report-unused-disable-directives",
+    "lint:file": "eslint --ext .ts,.tsx",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
+    "typecheck:diag": "tsc --noEmit -p tsconfig.app.json --diagnostics --extendedDiagnostics --pretty false",
     "test:e2e": "playwright test",
     "test:ui": "playwright test --ui"
   },

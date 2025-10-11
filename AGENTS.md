@@ -1093,7 +1093,7 @@ async function generateMeetingPrep(meeting: DetectedMeeting) {
 
 ```tsx
 <MeetingPrepDocument>
-  {/* TL;DR - Always first */}
+  {/* High Level summary - Always first */}
   <TLDRSection>
     <OneLiner>
       Boeing is hot - recent disruption + security focus = perfect timing
@@ -1562,7 +1562,7 @@ function calculateProfileHealth(user: User): ProfileHealth {
 - [ ] Meeting type classification
 - [ ] Basic meeting prep generation
 - [ ] Email delivery system
-- [ ] Prep document UI (TL;DR, strategy, attendees)
+- [ ] Prep document UI (High Level summary, strategy, attendees)
 
 ### Phase 3: Meeting Intelligence Complete (P0 - Killer Feature)
 

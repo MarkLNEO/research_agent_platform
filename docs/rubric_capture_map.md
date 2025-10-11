@@ -115,7 +115,7 @@ Edge cases: screenshot both “no signals yet” and “critical signal” varia
 ## 8. Meeting Intelligence
 | ID | When | Purpose | Vision Prompt |
 |----|------|---------|---------------|
-| `meeting-prep-summary.png` | Meeting prep TL;DR (discovery call) | Assess prep structure (rubric §5) | Meeting TL;DR prompt |
+| `meeting-prep-summary.png` | Meeting prep High Level summary (discovery call) | Assess prep structure (rubric §5) | Meeting High Level summary prompt |
 | `meeting-prep-decision-makers.png` | Meeting prep personalization section | Evaluate alignment with rubric requirements | Same |
 | `meeting-prep-actions.png` | Meeting prep recommended actions | Same |
 

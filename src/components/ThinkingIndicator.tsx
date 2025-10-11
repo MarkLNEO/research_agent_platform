@@ -34,9 +34,16 @@ export function ThinkingIndicator({ type, content, query, sources, url, count, c
   if (type === 'reasoning') {
     // Coerce plain reasoning lines into bullets if not already formatted
     let display = content || '';
-    if (display && !/\n-\s/.test(display) && display.split(/\n+/).length > 1) {
+    if (display) {
       const lines = display.split(/\n+/).map(l => l.trim()).filter(Boolean);
-      display = lines.map(l => `- ${l}`).join('\n');
+      if (lines.length > 1) {
+        const needsBullets = lines.every(line => !line.startsWith('- '));
+        if (needsBullets) {
+          display = lines.map(l => `- ${l}`).join('\n');
+        } else {
+          display = lines.join('\n');
+        }
+      }
     }
     return (
       <div className="flex gap-3 items-start mb-4 animate-fadeIn">

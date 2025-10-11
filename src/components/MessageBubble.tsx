@@ -12,8 +12,11 @@ interface MessageBubbleProps {
   disablePromote?: boolean;
   onRetry?: () => void;
   onTrackAccount?: (company: string) => void;
+  onDraftEmail?: (markdown: string, company?: string | null) => void;
+  draftEmailPending?: boolean;
   metadata?: Record<string, unknown>;
   usage?: { tokens: number; credits: number };
+  onSummarize?: () => void | Promise<void>;
 }
 
 function MarkdownContent({ content }: { content: string }) {
@@ -48,7 +51,10 @@ export function MessageBubble({
   disablePromote,
   onRetry,
   onTrackAccount,
+  onDraftEmail,
+  draftEmailPending = false,
   usage,
+  onSummarize,
 }: MessageBubbleProps) {
   const { addToast } = useToast();
 
@@ -82,6 +88,14 @@ export function MessageBubble({
     return null;
   };
 
+  const sanitizeCompanyName = (raw: string | null) => {
+    if (!raw) return null;
+    let value = raw.replace(/\s+[–—-]\s+Executive Summary$/i, '').replace(/Executive Summary$/i, '').trim();
+    value = value.replace(/— Executive Summary$/i, '').trim();
+    if (/^executive summary$/i.test(value)) return null;
+    return value;
+  };
+
   // Gate tracking: only show Track when we have a concise, human-looking company name
   const looksLikeCompany = (name: string | null) => {
     if (!name) return false;
@@ -96,25 +110,18 @@ export function MessageBubble({
     if (s.split(/\s+/).length > 6) return false;
     return true;
   };
-  const extracted = role === 'assistant' && showActions ? extractCompanyName() : null;
+  const extracted = role === 'assistant' && showActions ? sanitizeCompanyName(extractCompanyName()) : null;
   const companyName = looksLikeCompany(extracted) ? extracted : null;
   const draftEmail = async () => {
-    try {
-      const { supabase } = await import('../lib/supabase');
-      const { data: { session } } = await supabase.auth.getSession();
-      const auth = session?.access_token;
-      const resp = await fetch('/api/outreach/draft', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(auth ? { 'Authorization': `Bearer ${auth}` } : {}) },
-        body: JSON.stringify({ research_markdown: content, company: companyName })
-      });
-      const json = await resp.json();
-      if (!resp.ok) throw new Error(json?.error || 'Draft failed');
-      await navigator.clipboard.writeText(json.email || '');
-      addToast({ type: 'success', title: 'Draft email copied' });
-    } catch (e: any) {
-      addToast({ type: 'error', title: 'Failed to draft email', description: e?.message || String(e) });
+    if (draftEmailPending) {
+      addToast({ type: 'info', title: 'Draft in progress', description: 'I’m already drafting an email for you.' });
+      return;
     }
+    if (onDraftEmail) {
+      onDraftEmail(content, companyName);
+      return;
+    }
+    addToast({ type: 'error', title: 'Draft unavailable', description: 'Email drafting is not enabled in this view.' });
   };
 
   if (role === 'user') {
@@ -201,12 +208,22 @@ export function MessageBubble({
               Save to Research
             </button>
           )}
-          <button
-            onClick={draftEmail}
-            className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 inline-flex items-center gap-1"
-            aria-label="Draft Email"
+          {onSummarize && (
+            <button
+              onClick={onSummarize}
+              className="text-xs font-semibold text-gray-600 hover:text-gray-900"
+              aria-label="Summarize this response"
+            >
+              Summarize
+            </button>
+          )}
+         <button
+           onClick={draftEmail}
+           disabled={draftEmailPending}
+           className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 inline-flex items-center gap-1 disabled:text-gray-400 disabled:cursor-not-allowed"
+           aria-label="Draft Email"
           >
-            <Mail className="w-3.5 h-3.5" /> Draft Email
+            <Mail className="w-3.5 h-3.5" /> {draftEmailPending ? 'Drafting…' : 'Draft Email'}
           </button>
           {onTrackAccount && companyName && (
             <button
