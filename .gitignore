@@ -21,3 +21,7 @@ dist-ssr
 *.sln
 *.sw?
 .env
+.vercel
+.env*.local
+playwright-report/
+test-results/

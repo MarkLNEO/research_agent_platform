@@ -64,7 +64,7 @@ This document will serve as a living document to track and prioritize potential 
 
 ##### E. Meeting Prep Generation
 - [ ] Create meeting prep document generator
-- [ ] Build TL;DR generation (1 sentence + 3-5 key bullets)
+- [ ] Build High Level summary generation (1 sentence + 3-5 key bullets)
 - [ ] Generate relationship context from past interactions
 - [ ] Summarize recent developments (signals, news, changes)
 - [ ] Create attendee intelligence profiles with personalization
@@ -856,11 +856,11 @@ POST   /api/email-forwarding/test             // Send test email
     </HeaderActions>
   </PrepHeader>
   
-  {/* TL;DR - Always first, always expanded */}
+  {/* High Level summary - Always first, always expanded */}
   <TLDRSection>
     <SectionIcon>⚡</SectionIcon>
     <SectionContent>
-      <SectionTitle>TL;DR</SectionTitle>
+      <SectionTitle>High Level</SectionTitle>
       
       <OneLineSummary>{prep.tldr.summary}</OneLineSummary>
       

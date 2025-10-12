@@ -180,6 +180,7 @@ export default async function handler(req: any, res: any) {
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const body = (req.body || {}) as any;
 
   // Get auth header
   const authHeader = req.headers.authorization;
@@ -191,13 +192,28 @@ export default async function handler(req: any, res: any) {
 
   try {
     const processStart = Date.now();
-    // Verify JWT and get user
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    const token = authHeader.replace('Bearer ', '').trim();
+    let user: any = null;
 
-    if (authError || !user) {
-      return res.status(401).json({ error: 'Invalid authentication token' });
+    if (SUPABASE_SERVICE_ROLE_KEY && token === SUPABASE_SERVICE_ROLE_KEY) {
+      const impersonateId = body?.impersonate_user_id || body?.user_id || body?.bulk_user_id;
+      if (!impersonateId || typeof impersonateId !== 'string') {
+        return res.status(400).json({ error: 'impersonate_user_id is required when using a service role token' });
+      }
+      const { data: impersonated, error: adminErr } = await supabase.auth.admin.getUserById(impersonateId);
+      if (adminErr || !impersonated?.user) {
+        console.error('Impersonation lookup failed:', adminErr);
+        return res.status(401).json({ error: 'Unable to impersonate user for service request' });
+      }
+      user = impersonated.user;
+    } else {
+      const { data, error: authError } = await supabase.auth.getUser(token);
+      if (authError || !data?.user) {
+        return res.status(401).json({ error: 'Invalid authentication token' });
+      }
+      user = data.user;
     }
+
     try { assertEmailAllowed(user.email); } catch (e: any) { return res.status(e.statusCode || 403).json({ error: e.message }); }
 
     // Check user credits
@@ -212,7 +228,7 @@ export default async function handler(req: any, res: any) {
     const authAndCreditMs = Date.now() - processStart;
 
     // Parse request body
-    const { messages, systemPrompt, chatId, chat_id, agentType = 'company_research', config: userConfig = {}, research_type, active_subject } = (req.body || {}) as any;
+    const { messages, systemPrompt, chatId, chat_id, agentType = 'company_research', config: userConfig = {}, research_type, active_subject } = body as any;
 
     const contextFetchStart = Date.now();
     const userContext = await fetchUserContext(supabase, user.id);
@@ -237,7 +253,7 @@ export default async function handler(req: any, res: any) {
     } catch {}
 
     // Build system prompt if not provided; pass research_type to bias depth
-    let instructions = systemPrompt || buildSystemPrompt(userContext as any, agentType as AgentType, (req.body || {}).research_type);
+    let instructions = systemPrompt || buildSystemPrompt(userContext as any, agentType as AgentType, body.research_type);
     if (!instructions.startsWith('Formatting re-enabled')) {
       instructions = `Formatting re-enabled\n\n${instructions}`;
     }
@@ -248,6 +264,9 @@ export default async function handler(req: any, res: any) {
     }
     if (typeof userConfig?.facet_budget === 'number') {
       instructions += `\n\n<facet_budget>${userConfig.facet_budget}</facet_budget>`;
+    }
+    if (typeof userConfig?.summary_brevity === 'string') {
+      instructions += `\n\n<summary_brevity>${userConfig.summary_brevity}</summary_brevity>`;
     }
     // Append guardrail hint if present in prompt config
     try {
@@ -352,25 +371,6 @@ export default async function handler(req: any, res: any) {
     });
 
     try {
-      // Emit a quick acknowledgment so UI shows activity immediately
-      try {
-        const lastUser = Array.isArray(messages) ? messages.filter(m => m.role === 'user').pop() : null;
-        const q = String(lastUser?.content || '').toLowerCase();
-        let ack = '';
-        if (research_type) {
-          if (research_type === 'deep') ack = 'Starting Deep Research — streaming findings…';
-          else if (research_type === 'quick') ack = 'Quick Facts — fetching essentials…';
-          else if (research_type === 'specific') ack = 'On it — answering your specific question…';
-        } else if ((req as any).__isResearchQuery) {
-          ack = "Got it — I'll research that and stream findings.";
-        } else if (q) {
-          ack = 'Okay — answering briefly.';
-        }
-        if (ack) {
-          safeWrite(`data: ${JSON.stringify({ type: 'acknowledgment', content: ack })}\n\n`);
-        }
-      } catch {}
-
       // Add more detailed debugging
       console.log('[DEBUG] System instructions length:', instructions?.length || 0);
       console.log('[DEBUG] First 500 chars of instructions:', instructions?.substring(0, 500));
@@ -402,6 +402,27 @@ export default async function handler(req: any, res: any) {
       const storeRun = true;
       const shouldPlanStream = isResearchQuery && !userConfig?.disable_fast_plan;
 
+      // Emit a hard-coded acknowledgment only if the fast plan stream is disabled
+      if (!shouldPlanStream) {
+        try {
+          const lastUser = Array.isArray(messages) ? messages.filter(m => m.role === 'user').pop() : null;
+          const q = String(lastUser?.content || '').toLowerCase();
+          let ack = '';
+          if (research_type) {
+            if (research_type === 'deep') ack = 'Starting Deep Research — streaming findings…';
+            else if (research_type === 'quick') ack = 'Quick Facts — fetching essentials…';
+            else if (research_type === 'specific') ack = 'On it — answering your specific question…';
+          } else if (isResearchQuery) {
+            ack = "Got it — I'll research that and stream findings.";
+          } else if (q) {
+            ack = 'Okay — answering briefly.';
+          }
+          if (ack) {
+            safeWrite(`data: ${JSON.stringify({ type: 'acknowledgment', content: ack })}\n\n`);
+          }
+        } catch {}
+      }
+
       console.log('[DEBUG] Creating OpenAI Responses API call with:', {
         model: selectedModel,
         hasInstructions: !!instructions,
@@ -417,9 +438,9 @@ export default async function handler(req: any, res: any) {
 
       let planPromise: Promise<void> | null = null;
       if (shouldPlanStream && lastUserMessage?.content) {
-        const planInstructions = `You are the fast planning cortex for a research assistant.\n- Respond in markdown bullet format (use "- " at line start).\n- Stream immediately with the top 2-3 investigative steps.\n- Keep each bullet under 12 words.\n- Reference saved preferences if they materially impact sequencing.\n- Do not add introductions or closing statements.`;
+        const planInstructions = `You are the fast planning cortex for a research assistant.\n- Start with a single standalone acknowledgement sentence that confirms you are beginning now, states the research mode (deep/quick/specific/auto), and gives a realistic ETA (deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈1-2 min).\n- Immediately follow with 2-3 markdown bullet steps (prefix each with "- ") describing the investigative actions you will take.\n- Keep bullets under 12 words, action-oriented, and reference saved preferences when they change sequencing.\n- Do not ask the user questions or request clarifications; assume sensible defaults.\n- Do not add closing statements or extra blank lines.`;
         const contextSummary = summarizeContextForPlan(userContext).slice(0, 600);
-        const planInput = `Research mode: ${research_type || (isResearchQuery ? 'auto' : 'general')}\nUser request: ${lastUserMessage.content}\nRelevant context:\n${contextSummary || 'No saved profile context yet.'}`;
+        const planInput = `Research mode: ${research_type || (isResearchQuery ? 'auto' : 'general')}\nUser request: ${lastUserMessage.content}\nETA guide: deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈90 sec.\nRelevant context:\n${contextSummary || 'No saved profile context yet.'}`;
 
         planPromise = (async () => {
           try {
@@ -508,6 +529,9 @@ export default async function handler(req: any, res: any) {
       let chunkCount = 0;
       let metaSent = false;
       let firstContentSent = false;
+      let firstContentAt: number | null = null;
+      let reasoningStartedAt: number | null = null;
+      let contentLatencyEmitted = false;
 
       let keepAliveDelay = 2000;
       const scheduleKeepAlive = () => {
@@ -540,6 +564,10 @@ export default async function handler(req: any, res: any) {
         if (chunk.type === 'response.reasoning_summary_text.delta' || chunk.type === 'response.reasoning.delta') {
           const delta = chunk.delta || '';
           if (delta) {
+            if (reasoningStartedAt == null) {
+              reasoningStartedAt = Date.now();
+              safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'reasoning_start', ms_since_request: reasoningStartedAt - processStart })}\n\n`);
+            }
             // Encourage bullet separation in client by sending as-is; client renders markdown
             safeWrite(`data: ${JSON.stringify({ type: 'reasoning', content: delta })}\n\n`);
           }
@@ -551,6 +579,19 @@ export default async function handler(req: any, res: any) {
               type: 'content',
               content: chunk.delta
             })}\n\n`);
+            if (!firstContentSent) {
+              firstContentSent = true;
+              firstContentAt = Date.now();
+              safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'primary', event: 'first_delta', ttfb_ms: firstContentAt - processStart })}\n\n`);
+              if (!contentLatencyEmitted && reasoningStartedAt != null) {
+                contentLatencyEmitted = true;
+                safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'content_latency', reasoning_to_content_ms: firstContentAt - reasoningStartedAt })}\n\n`);
+              }
+              if (keepAlive) {
+                clearTimeout(keepAlive);
+                keepAlive = null;
+              }
+            }
           }
         } else if (
           chunk.type?.includes('tool') ||
@@ -587,14 +628,6 @@ export default async function handler(req: any, res: any) {
           console.log('[DEBUG] Chunk', chunkCount, 'type:', chunk.type);
         }
 
-        if (!firstContentSent && (chunk.type === 'response.output_text.delta' || chunk.type === 'response.reasoning.delta' || chunk.type === 'response.reasoning_summary_text.delta')) {
-          firstContentSent = true;
-          safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'primary', event: 'first_delta', ttfb_ms: Date.now() - processStart })}\n\n`);
-          if (keepAlive) {
-            clearTimeout(keepAlive);
-            keepAlive = null;
-          }
-        }
       }
 
       let finalResponseData: any = null;

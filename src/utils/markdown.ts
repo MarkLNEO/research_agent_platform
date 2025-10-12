@@ -56,7 +56,8 @@ export function normalizeMarkdown(raw: string): string {
   const headingMap: Array<{ pattern: RegExp; replacement: string }> = [
     { pattern: /^\s*Executive summary(?:\s*\(.*?\))?\s*$/gim, replacement: '## Executive Summary' },
     { pattern: /^\s*Executive Summary(?:\s*\(.*?\))?\s*$/gim, replacement: '## Executive Summary' },
-    { pattern: /^\s*TL;?\s*DR\.?\s*$/gim, replacement: '## TL;DR' },
+    { pattern: /^\s*TL;?\s*DR\.?\s*$/gim, replacement: '## High Level' },
+    { pattern: /^\s*High\s*Level:?$/gim, replacement: '## High Level' },
     { pattern: /^\s*Key facts?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Key Findings' },
     { pattern: /^\s*Key findings?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Key Findings' },
     { pattern: /^\s*Signals?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Signals' },
@@ -82,11 +83,11 @@ export function normalizeMarkdown(raw: string): string {
     }
   }
 
-  // Ensure TL;DR section exists; if missing, add placeholder after headline
-  if (!/^##\s+TL;DR/m.test(text)) {
-    text = text.replace(/^#\s.+$/m, (match) => `${match}\n\n## TL;DR\n- No summary provided yet.\n`);
-    if (!/^##\s+TL;DR/m.test(text)) {
-      text = `${text.trim()}\n\n## TL;DR\n- No summary provided yet.\n`;
+  // Ensure High Level section exists; if missing, add placeholder after headline
+  if (!/^##\s+High Level/m.test(text)) {
+    text = text.replace(/^#\s.+$/m, (match) => `${match}\n\n## High Level\n- No high-level summary provided yet.\n`);
+    if (!/^##\s+High Level/m.test(text)) {
+      text = `${text.trim()}\n\n## High Level\n- No high-level summary provided yet.\n`;
     }
   }
 

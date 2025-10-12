@@ -23,7 +23,6 @@ export function LoadingGate({
   autoContinueMs = 10000,
   showContinueAfterMs = 3000,
 }: LoadingGateProps) {
-  const [now, setNow] = useState<number>(() => Date.now());
   const [showContinue, setShowContinue] = useState(false);
   const autoTimerRef = useRef<number | null>(null);
   const continueTimerRef = useRef<number | null>(null);
@@ -31,11 +30,9 @@ export function LoadingGate({
   useEffect(() => {
     continueTimerRef.current = window.setTimeout(() => setShowContinue(true), showContinueAfterMs);
     autoTimerRef.current = window.setTimeout(() => onContinueNow(), autoContinueMs);
-    const tick = window.setInterval(() => setNow(Date.now()), 1000);
     return () => {
       if (continueTimerRef.current) window.clearTimeout(continueTimerRef.current);
       if (autoTimerRef.current) window.clearTimeout(autoTimerRef.current);
-      window.clearInterval(tick);
     };
   }, [autoContinueMs, onContinueNow, showContinueAfterMs]);
 
@@ -87,4 +84,3 @@ export function LoadingGate({
     </div>
   );
 }
-

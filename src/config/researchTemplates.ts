@@ -102,7 +102,7 @@ export const USE_CASE_TEMPLATES: UseCaseTemplate[] = [
       }
     },
     sections: [
-      { id: 'tldr', label: 'TL;DR', required: true, description: 'Executive summary with three punchy bullets.' },
+      { id: 'tldr', label: 'High Level', required: true, description: 'High-level executive summary with three punchy bullets.' },
       {
         id: 'leadership',
         label: 'Leadership',
@@ -494,7 +494,7 @@ export function getDefaultTemplate(): UseCaseTemplate {
 
 export function buildDefaultTemplateInputs(template: UseCaseTemplate): Record<string, unknown> {
   const defaults: Record<string, unknown> = {};
-  Object.values(template.inputs).forEach(input => {
+  for (const input of Object.values(template.inputs)) {
     if (input.default !== undefined) {
       defaults[input.key] = input.default;
     } else if (input.type === 'enum[]' || input.type === 'string[]') {
@@ -506,6 +506,6 @@ export function buildDefaultTemplateInputs(template: UseCaseTemplate): Record<st
     } else {
       defaults[input.key] = '';
     }
-  });
+  }
   return defaults;
 }

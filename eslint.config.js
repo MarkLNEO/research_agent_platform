@@ -5,7 +5,21 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'supabase/functions/**'] },
+  {
+    ignores: [
+      'dist',
+      'dist-ssr',
+      'server-build/**',
+      'supabase/functions/**',
+      'supabase/migrations/**',
+      'playwright-report/**',
+      'test-results/**',
+      'test-artifacts/**',
+      'public/**',
+      'tmp/**',
+      '.vercel/**',
+    ],
+  },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],

@@ -44,6 +44,10 @@ export interface PromptConfig {
   include_decision_maker_targets?: boolean;
   include_disqualifying_criteria?: boolean;
   custom_prompt_additions?: string;
+  preferred_research_type?: 'quick' | 'deep' | 'specific' | null;
+  default_output_brevity?: 'short' | 'standard' | 'long' | null;
+  always_tldr?: boolean;
+  summary_preference_set?: boolean;
 }
 
 export interface ReportPreference {

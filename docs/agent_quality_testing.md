@@ -48,7 +48,7 @@
 - 1-3: Dense paragraphs, unclear structure, buries the lede
 - 4-6: Organized but requires reading everything
 - 7-8: Clear hierarchy, bold key facts, bullets where appropriate
-- 9-10: TL;DR up front, scannable format, can get value without reading everything
+- 9-10: High Level summary up front, scannable format, can get value without reading everything
 
 ### 8. Actionability
 **Are next steps obvious and easy to execute?**

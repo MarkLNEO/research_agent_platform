@@ -954,7 +954,7 @@ class SignalMonitorService {
       </CardHeader>
 
       <KeyInsight>
-        {/* AI-generated TL;DR */}
+        {/* AI-generated High Level summary */}
         Boeing is experiencing heightened focus on security due to recent 
         operational challenges, creating opportunity for infrastructure 
         conversations.

@@ -36,6 +36,7 @@ export function SaveResearchDialog({
   const [previewMode, setPreviewMode] = useState<'edit' | 'preview'>('edit');
   const [subjectChoice, setSubjectChoice] = useState<'draft' | 'active' | 'custom'>('draft');
   const [customSubject, setCustomSubject] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     if (open && initialDraft) {
@@ -336,75 +337,93 @@ export function SaveResearchDialog({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">ICP Fit Score</label>
-                <input
-                  type="number"
-                  value={draft.icp_fit_score ?? ''}
-                  onChange={(event) => updateField('icp_fit_score', event.target.value ? Number(event.target.value) : undefined)}
-                  min={0}
-                  max={100}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
 
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Signal Score</label>
-                <input
-                  type="number"
-                  value={draft.signal_score ?? ''}
-                  onChange={(event) => updateField('signal_score', event.target.value ? Number(event.target.value) : undefined)}
-                  min={0}
-                  max={100}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Composite Score</label>
-                <input
-                  type="number"
-                  value={draft.composite_score ?? ''}
-                  onChange={(event) => updateField('composite_score', event.target.value ? Number(event.target.value) : undefined)}
-                  min={0}
-                  max={100}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
+            <div className="flex items-center justify-between text-xs text-gray-600">
+              <span>Optional: add scoring and confidence details.</span>
+              <button
+                type="button"
+                className="text-blue-600 hover:text-blue-700 font-semibold"
+                onClick={() => setShowAdvanced(prev => !prev)}
+              >
+                {showAdvanced ? 'Hide advanced fields' : 'Show advanced fields'}
+              </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Priority</label>
-                <select
-                  value={draft.priority_level || 'standard'}
-                  onChange={(event) => updateField('priority_level', event.target.value as ResearchDraft['priority_level'])}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {PRIORITIES.map(level => (
-                    <option key={level} value={level}>
-                      {level.charAt(0).toUpperCase() + level.slice(1)}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            {showAdvanced && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">ICP Fit Score</label>
+                    <input
+                      type="number"
+                      value={draft.icp_fit_score ?? ''}
+                      onChange={(event) => updateField('icp_fit_score', event.target.value ? Number(event.target.value) : undefined)}
+                      min={0}
+                      max={100}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Confidence</label>
-                <select
-                  value={draft.confidence_level || 'medium'}
-                  onChange={(event) => updateField('confidence_level', event.target.value as ResearchDraft['confidence_level'])}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {CONFIDENCE_LEVELS.map(level => (
-                    <option key={level} value={level}>
-                      {level.charAt(0).toUpperCase() + level.slice(1)}
-                    </option>
-                  ))}
-                </select>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Signal Score</label>
+                    <input
+                      type="number"
+                      value={draft.signal_score ?? ''}
+                      onChange={(event) => updateField('signal_score', event.target.value ? Number(event.target.value) : undefined)}
+                      min={0}
+                      max={100}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Composite Score</label>
+                    <input
+                      type="number"
+                      value={draft.composite_score ?? ''}
+                      onChange={(event) => updateField('composite_score', event.target.value ? Number(event.target.value) : undefined)}
+                      min={0}
+                      max={100}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Priority</label>
+                    <select
+                      value={draft.priority_level || 'standard'}
+                      onChange={(event) => updateField('priority_level', event.target.value as ResearchDraft['priority_level'])}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {PRIORITIES.map(level => (
+                        <option key={level} value={level}>
+                          {level.charAt(0).toUpperCase() + level.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Confidence</label>
+                    <select
+                      value={draft.confidence_level || 'medium'}
+                      onChange={(event) => updateField('confidence_level', event.target.value as ResearchDraft['confidence_level'])}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {CONFIDENCE_LEVELS.map(level => (
+                        <option key={level} value={level}>
+                          {level.charAt(0).toUpperCase() + level.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
+
+            <p className="text-xs text-gray-600">This summary is what teammates will skim first—highlight the why and next step.</p>
 
             <div className="space-y-2">
               <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Executive Summary</label>
@@ -438,7 +457,6 @@ export function SaveResearchDialog({
                   </button>
                 </div>
               </div>
-              {/* Entity tagging at paragraph level (counts) */}
               {(activeSubject || draft.subject) && (
                 <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
                   <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Entity mentions (paragraphs)</div>
@@ -461,7 +479,6 @@ export function SaveResearchDialog({
                   </div>
                 </div>
               )}
-
               {previewMode === 'edit' ? (
                 <textarea
                   value={draft.markdown_report}
@@ -470,7 +487,7 @@ export function SaveResearchDialog({
                 />
               ) : (
                 <div className="border border-gray-200 rounded-lg px-4 py-3 max-h-64 overflow-y-auto bg-gray-50">
-                  <Streamdown className="prose prose-sm max-w-none">
+                  <Streamdown className="prose prose-sm max-w-none text-gray-900">
                     {draft.markdown_report?.trim() || '_Nothing to preview yet._'}
                   </Streamdown>
                 </div>

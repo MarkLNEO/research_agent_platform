@@ -21,4 +21,15 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src"]
+  ,
+  "exclude": [
+    "server-build",
+    "supabase",
+    "playwright-report",
+    "test-results",
+    "test-artifacts",
+    "public",
+    ".vercel",
+    "tmp"
+  ]
 }

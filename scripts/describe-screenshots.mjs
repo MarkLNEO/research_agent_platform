@@ -232,7 +232,7 @@ Recommend two UI tweaks.`],
 1. Does it concisely summarize the report (subject, summary, score, recency)?
 2. Are selection and bulk actions accessible?
 3. Identify opportunities to highlight account changes since last research.`],
-  ['test-artifacts/rubric/meeting-prep-summary.png', `Review the meeting prep TL;DR:
+  ['test-artifacts/rubric/meeting-prep-summary.png', `Review the meeting prep High Level summary:
 1. Does it capture timing, objective, and critical insights in <5 bullets?
 2. Would an AE feel confident walking into the call after reading this?
 3. Suggest enhancements to sharpen relevance.`],

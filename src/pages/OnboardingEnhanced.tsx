@@ -177,7 +177,7 @@ export function OnboardingEnhanced() {
   const getStepMessage = (step: number): string => {
     switch (step) {
       case 1:
-        return "Hi! I'm your Welcome Agent. I'll use this setup to auto‑fill firmographics, monitor signals, and tailor every briefing for you. Besides company research, I can: run bulk research from CSV, track accounts and monitor signals, save/export reports, draft outreach, and summarize with a TL;DR.\n\nLet's start — what's your company name? You can paste the website if that's easier and I'll detect it automatically.";
+        return "Hi! I'm your Welcome Agent. I'll use this setup to auto‑fill firmographics, monitor signals, and tailor every briefing for you. Besides company research, I can: run bulk research from CSV, track accounts and monitor signals, save/export reports, draft outreach, and give you a high-level summary up front.\n\nLet's start — what's your company name? You can paste the website if that's easier and I'll detect it automatically.";
       case 2:
         return `Great! I'll use the official domain to pull logo, news, and verified firmographics.\n\nWhat's your website address?`;
       case 3:
@@ -199,7 +199,7 @@ export function OnboardingEnhanced() {
     }
   };
 
-  const addAgentMessage = async (content: string, withDelay: boolean = true) => {
+  const addAgentMessage = async (content: string, withDelay: boolean = true, animate: boolean = true) => {
     if (withDelay) {
       setIsTyping(true);
       await new Promise(resolve => setTimeout(resolve, 800));
@@ -209,16 +209,20 @@ export function OnboardingEnhanced() {
     setMessages(prev => [...prev, { id: msgId, role: 'agent', content: '', streaming: true }]);
     setIsTyping(false);
 
-    const words = content.split(' ');
-    for (let i = 0; i < words.length; i++) {
-      await new Promise(resolve => setTimeout(resolve, 30));
-      setMessages(prev =>
-        prev.map(msg =>
-          msg.id === msgId
-            ? { ...msg, content: words.slice(0, i + 1).join(' ') }
-            : msg
-        )
-      );
+    if (animate) {
+      const words = content.split(' ');
+      for (let i = 0; i < words.length; i++) {
+        await new Promise(resolve => setTimeout(resolve, 30));
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === msgId
+              ? { ...msg, content: words.slice(0, i + 1).join(' ') }
+              : msg
+          )
+        );
+      }
+    } else {
+      setMessages(prev => prev.map(msg => (msg.id === msgId ? { ...msg, content } : msg)));
     }
 
     setMessages(prev =>
@@ -780,7 +784,9 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
       });
 
     await addAgentMessage(
-      `Perfect! You're all set up. I'm ready to help you research companies, find prospects, and provide personalized insights based on your ICP.\n\nRedirecting you to your dashboard...`
+      `Perfect! You're all set up. I'm ready to help you research companies, find prospects, and provide personalized insights based on your ICP.\n\nRedirecting you to your dashboard...`,
+      false,
+      false
     );
 
     // Navigate immediately; finish small profile updates in the background
@@ -888,7 +894,7 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
                       <li>Run <span className="font-medium">bulk research</span> from a CSV for many companies</li>
                       <li><span className="font-medium">Track accounts</span> and monitor signals (breaches, leadership changes, funding)</li>
                       <li><span className="font-medium">Save reports</span>, export to PDF, and <span className="font-medium">draft outreach</span></li>
-                      <li><span className="font-medium">Summarize</span> any response (TL;DR + key bullets)</li>
+                      <li><span className="font-medium">Summarize</span> any response (High Level + key bullets)</li>
                     </ul>
                     <div className="mt-2"><span className="font-semibold">How it works:</span> Ask me anything and I’ll adapt — or set me up in 5 minutes.</div>
                   </div>

@@ -35,11 +35,11 @@ export function Login() {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4">
             <Search className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">Rebar Research Agent</h1>
+          <h1 className="text-3xl font-bold text-gray-900">RebarHQ Research Agent</h1>
           <p className="text-gray-600 mt-2">AI-powered sales intelligence platform</p>
           <div className="mt-4 flex flex-col items-center justify-center gap-1 text-sm text-gray-600">
             <span className="uppercase tracking-wide text-xs text-gray-500">Powered by</span>
-            <img src="/logo_black.png" alt="Rebar" className="h-8 w-auto drop-shadow-sm" />
+            <img src="/logo_black.png" alt="RebarHQ" className="h-8 w-auto drop-shadow-sm" />
           </div>
         </div>
 
@@ -129,7 +129,7 @@ export function Login() {
             </Link>
           </div>
         </div>
-        <p className="mt-6 text-center text-xs text-gray-500">© {new Date().getFullYear()} Rebar. All rights reserved.</p>
+        <p className="mt-6 text-center text-xs text-gray-500">© {new Date().getFullYear()} RebarHQ. All rights reserved.</p>
       </div>
     </div>
   );
