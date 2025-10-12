@@ -20,7 +20,7 @@ const AGENT_ROLE: Record<AgentType, string> = {
 };
 
 const MODE_HINT: Record<Exclude<ResearchMode, undefined>, string> = {
-  quick: 'Prioritise speed. Deliver a concise overview with the top 3 insights, leadership, and any urgent signals. Avoid deep dives unless explicitly requested. Keep response under 10 bullet points.',
+  quick: 'Quick Facts mode: output ONLY essential facts. Keep total length ≤ 150 words. No extra sections, no preamble, no filler. Prefer bullets over prose.',
   deep: 'Perform thorough research. Cover executive summary, ICP fit, qualifying criteria status, decision makers with personalization, recent signals, tech stack, competitors, and recommended next steps. Use evidence-backed statements with short source references.',
   specific: 'Answer the specific question directly. Pull only the supporting facts that justify the answer. If information is unavailable, say so and suggest where to investigate next.'
 };
@@ -35,6 +35,17 @@ const STRUCTURED_OUTPUT = `Output format (strict):
 - If a section has no content, keep the heading and state "None found" with a note on next steps.
 - Use bold call-outs within sections for clarity, but do not omit or rename the headings.
 - When saved follow-up questions exist, add "## Saved Follow-up Answers" after the core sections and answer each saved question in 1-2 concise bullets.`;
+
+const QUICK_OUTPUT = `Quick Facts format (strict):
+- Do not include an Executive Summary heading or long sections.
+- Output only these items, in this order, as short bullets (no subheadings):
+  1) Company size and revenue (if unknown, say "unknown").
+  2) Industry and headquarters city/state.
+  3) Leadership (2–3 names with titles).
+  4) Recent major news (≤2 bullets, last 3–6 months max).
+  5) One‑line ICP fit assessment.
+- Total length ≤ 150 words. Refuse extra content beyond these bullets.
+- Cite source keywords inline in parentheses when relevant (e.g., "(WSJ, Sep 2025)").`;
 
 const DEFAULT_CRITERIA_GUIDANCE = `Default Qualifying Criteria (assume when none supplied):
 1. Recent security or operational incidents (breach, ransomware, downtime).
@@ -168,7 +179,9 @@ Always answer them after the main sections inside "Saved Follow-up Answers".`);
 
   const clarificationPolicy = `Clarification & Defaults:\n- Do not present fill-in templates or long forms.\n- Ask at most one short clarifying question only when essential; otherwise proceed using saved profile and sensible defaults.\n- If the user writes "all of the above" (or similar), interpret it as comprehensive coverage of the standard sections and proceed.\n- If a company is identified and a website/domain can be inferred or is present in the profile, do NOT ask for the domain; derive it yourself.\n- Default research depth: ${resolvedMode} unless the user specifies otherwise.\n- If profile context exists or an active subject is provided, do not re-ask "what would you like researched?" — assume defaults from the profile and mode.`;
 
-  const responseShape = `Response Shape:\n- Keep outputs concise and decision-ready; prefer bullets and short sections.\n- ${STRUCTURED_OUTPUT}`;
+  const responseShape = resolvedMode === 'quick'
+    ? `Response Shape:\n- Keep outputs concise and decision-ready; prefer bullets.\n- ${QUICK_OUTPUT}`
+    : `Response Shape:\n- Keep outputs concise and decision-ready; prefer bullets and short sections.\n- ${STRUCTURED_OUTPUT}`;
 
   return [header, behaviour, clarificationPolicy, responseShape, contextBlock, extraBlock, summaryPreferenceTag].filter(Boolean).join('\n\n');
 }

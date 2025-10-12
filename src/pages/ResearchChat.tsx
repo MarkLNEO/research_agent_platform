@@ -95,6 +95,8 @@ export function ResearchChat() {
   const [switchInput, setSwitchInput] = useState('');
   const lastSubjectRef = useRef<{ prev: string | null; at: number | null }>({ prev: null, at: null });
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [lastRunMode, setLastRunMode] = useState<'deep'|'quick'|'specific'|'auto'|null>(null);
+  const skipInitialLoadRef = useRef(false);
 
   const lastAssistantIndex = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -109,8 +111,15 @@ export function ResearchChat() {
   }, [user]);
 
   useEffect(() => {
-    if (currentChatId) void loadMessages(currentChatId);
-    else setMessages([]);
+    if (!currentChatId) {
+      setMessages([]);
+      return;
+    }
+    if (skipInitialLoadRef.current) {
+      skipInitialLoadRef.current = false;
+      return;
+    }
+    void loadMessages(currentChatId);
   }, [currentChatId]);
 
   useEffect(() => {
@@ -358,14 +367,6 @@ export function ResearchChat() {
     }
   };
 
-  const countMentions = (text: string, term?: string | null) => {
-    if (!text || !term) return 0;
-    try {
-      const re = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\b`, 'gi');
-      return (text.match(re) || []).length;
-    } catch { return 0; }
-  };
-
   const loadMessages = async (chatId: string) => {
     const { data } = await supabase
       .from('messages')
@@ -386,6 +387,7 @@ export function ResearchChat() {
       setChats([data, ...chats]);
       setCurrentChatId(data.id);
       setMessages([]);
+      skipInitialLoadRef.current = true;
       return data.id;
     }
     return null;
@@ -492,7 +494,7 @@ export function ResearchChat() {
               const detail = `Failed with status ${profileUpdate.status}`;
               console.warn('[ProfileCoach] prompt_config update failed:', detail);
               addToast({
-                type: 'warning',
+                type: 'error',
                 title: 'Could not save research preferences',
                 description: detail,
               });
@@ -670,6 +672,7 @@ export function ResearchChat() {
       } catch {}
       // Build config to influence model depth based on user preference/clarifier
       const depth = preferredResearchType || (needsClarification(userMessage) ? null : 'specific');
+      setLastRunMode((depth as any) || 'auto');
       const cfg: any = {};
       if (depth === 'deep') cfg.model = 'gpt-5';
       if (depth === 'quick') cfg.model = 'gpt-5-mini';
@@ -875,10 +878,24 @@ export function ResearchChat() {
         // Trigger credit display refresh
         window.dispatchEvent(new CustomEvent('credits-updated'));
       }
-      // Try to set active subject from simple patterns like "Research X"
+      // Update active subject from the user message or assistant output
       try {
-        const m = userMessage.match(/research\s+([\w\s.&-]{2,})/i);
-        if (m && m[1]) setActiveSubject(m[1].trim());
+        const m = userMessage.match(/\bresearch\s+([\w\s.&-]{2,})/i);
+        if (m && m[1]) {
+          setActiveSubject(m[1].trim());
+        } else if (lastAssistantMessage?.content || full) {
+          const text = (lastAssistantMessage?.content || full || '').slice(0, 800);
+          const patterns = [
+            /researching\s+([A-Z][\w\s&.-]{2,}?)(?:[\s,:.-]|$)/i,
+            /found about\s+([A-Z][\w\s&.-]{2,}?)(?:[\s,:.-]|$)/i,
+            /analysis of\s+([A-Z][\w\s&.-]{2,}?)(?:[\s,:.-]|$)/i,
+            /^#\s+([^\n]+)/m,
+          ];
+          for (const p of patterns) {
+            const mm = text.match(p);
+            if (mm && mm[1] && mm[1].trim().length >= 2) { setActiveSubject(mm[1].trim()); break; }
+          }
+        }
       } catch {}
       try {
         const endedAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -1262,6 +1279,8 @@ export function ResearchChat() {
                     content={m.content}
                     userName={getUserInitial()}
                     showActions={isLastAssistant}
+                    collapseEnabled={isLastAssistant && lastRunMode === 'quick'}
+                    collapseThresholdWords={150}
                     onTrackAccount={handleTrackAccount}
                     onPromote={isLastAssistant ? () => {
                       // Find the user message that triggered this response

@@ -380,6 +380,7 @@ export default async function handler(req: any, res: any) {
       const isResearchQuery = research_type ? true : !!req.__isResearchQuery;
       const selectedModel = research_type === 'deep' ? 'gpt-5' : (userConfig.model || 'gpt-5-mini');
       const reasoningEffort = research_type === 'deep' ? 'medium' : 'low';
+      const isQuick = research_type === 'quick';
 
       const wantsFreshIntel = /recent|latest|today|yesterday|this week|signals?|news|breach|breaches|leadership|funding|acquisition|hiring|layoff|changed|update|report/i.test(requestText.toLowerCase());
       let useTools = research_type === 'deep' || (!research_type && isResearchQuery);
@@ -496,6 +497,8 @@ export default async function handler(req: any, res: any) {
         reasoning: { effort: reasoningEffort },
         tools: useTools ? [{ type: 'web_search' }] : [],
         parallel_tool_calls: useTools,
+        temperature: isQuick ? 0.2 : undefined,
+        max_output_tokens: isQuick ? 450 : undefined,
         store: storeRun,
         metadata: {
           agent: 'company_research',

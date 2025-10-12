@@ -231,8 +231,8 @@ export function SaveResearchDialog({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
-          <div className="px-6 py-4 space-y-5">
+        <form onSubmit={handleSubmit} className="flex flex-col h-full">
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
             {showSubjectConfirm && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-900">
                 <div className="font-semibold mb-1">Confirm subject</div>
@@ -577,23 +577,25 @@ export function SaveResearchDialog({
             )}
           </div>
 
-          <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
-              disabled={saving}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-blue-300"
-            >
-              {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-              {saving ? 'Saving...' : 'Save research output'}
-            </button>
+          <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sticky bottom-0 bg-gray-50">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 w-full sm:w-auto text-center"
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-blue-300 w-full sm:w-auto"
+              >
+                {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                {saving ? 'Saving...' : 'Save research output'}
+              </button>
+            </div>
           </div>
         </form>
       </div>

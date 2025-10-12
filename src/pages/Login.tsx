@@ -16,13 +16,22 @@ export function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setInfo('');
     setLoading(true);
 
     try {
       await signIn(email, password);
+      // small delay to let auth state propagate
+      await new Promise(r => setTimeout(r, 300));
       navigate('/');
     } catch (err: any) {
-      setError(err.message || 'Failed to sign in');
+      console.error('Login error:', err);
+      const raw = String(err?.message || err || '');
+      let msg = 'Failed to sign in. Please try again.';
+      if (/Invalid login credentials/i.test(raw)) msg = 'Invalid email or password. Please try again.';
+      else if (/Email not confirmed/i.test(raw)) msg = 'Please confirm your email address before signing in.';
+      else if (/Too many requests/i.test(raw)) msg = 'Too many attempts. Please wait a few minutes and try again.';
+      setError(msg);
     } finally {
       setLoading(false);
     }

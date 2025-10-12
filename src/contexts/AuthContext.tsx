@@ -13,7 +13,7 @@ interface AuthContextType {
   refreshCredits: () => Promise<void>;
   approvalStatus: 'pending' | 'approved' | 'rejected' | null;
   approvalChecked: boolean;
-  refreshUser: () => Promise<void>;
+  refreshUser: (overrideUser?: User | null) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -26,8 +26,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [approvalStatus, setApprovalStatus] = useState<'pending' | 'approved' | 'rejected' | null>(null);
   const [approvalChecked, setApprovalChecked] = useState(false);
 
-  const refreshUser = async () => {
-    if (!user) {
+  const refreshUser = async (overrideUser?: User | null) => {
+    const targetUser = overrideUser ?? user;
+    if (!targetUser) {
       setApprovalStatus(null);
       setApprovalChecked(true);
       return;
@@ -37,7 +38,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { data, error } = await supabase
         .from('users')
         .select('credits_remaining, approval_status')
-        .eq('id', user.id)
+        .eq('id', targetUser.id)
         .maybeSingle();
 
       if (error) {
@@ -52,7 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           const INITIAL_CREDITS = 1000;
           await supabase.from('users').insert({
-            id: user.id,
+            id: targetUser.id,
             credits_remaining: INITIAL_CREDITS,
             credits_total_used: 0,
             // Default to approved for first-run UX; admins can adjust later
@@ -62,7 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const { data: created } = await supabase
             .from('users')
             .select('credits_remaining, approval_status')
-            .eq('id', user.id)
+            .eq('id', targetUser.id)
             .maybeSingle();
           if (created) {
             setCredits(created.credits_remaining ?? INITIAL_CREDITS);
@@ -134,8 +135,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    setLoading(true);
+    setApprovalChecked(false);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        throw error;
+      }
+
+      if (!data?.user || !data.session) {
+        throw new Error('Unable to complete sign-in. Please try again.');
+      }
+
+      // Update state immediately so protected routes don't redirect before the auth listener fires
+      setSession(data.session);
+      setUser(data.user);
+      await refreshUser(data.user);
+      setLoading(false);
+    } catch (error) {
+      setSession(null);
+      setUser(null);
+      setApprovalChecked(true);
+      setLoading(false);
+      throw error;
+    }
   };
 
   const signUp = async (email: string, password: string, name: string) => {

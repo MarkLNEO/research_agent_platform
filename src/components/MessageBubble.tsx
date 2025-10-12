@@ -1,4 +1,5 @@
 import { ThumbsUp, ThumbsDown, Copy, RotateCcw, Coins, Building2, Mail } from 'lucide-react';
+import { useState } from 'react';
 import { Streamdown } from 'streamdown';
 import { useToast } from './ToastProvider';
 
@@ -17,6 +18,8 @@ interface MessageBubbleProps {
   metadata?: Record<string, unknown>;
   usage?: { tokens: number; credits: number };
   onSummarize?: () => void | Promise<void>;
+  collapseEnabled?: boolean;
+  collapseThresholdWords?: number;
 }
 
 function MarkdownContent({ content }: { content: string }) {
@@ -55,8 +58,34 @@ export function MessageBubble({
   draftEmailPending = false,
   usage,
   onSummarize,
+  collapseEnabled = false,
+  collapseThresholdWords = 150,
 }: MessageBubbleProps) {
   const { addToast } = useToast();
+  const [expanded, setExpanded] = useState(false);
+
+  // Simple markdown-stripping for word count
+  const stripMd = (s: string) => s
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`]*`/g, ' ')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*|__/g, '')
+    .replace(/\*|_/g, '')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/[>|-]{1,}\s?/g, ' ');
+  const wordCount = (() => {
+    try { return stripMd(content).trim().split(/\s+/).filter(Boolean).length; } catch { return 0; }
+  })();
+  const shouldCollapse = !streaming && collapseEnabled && wordCount > collapseThresholdWords;
+  const truncated = (() => {
+    if (!shouldCollapse) return content;
+    try {
+      const words = stripMd(content).trim().split(/\s+/);
+      const head = words.slice(0, collapseThresholdWords).join(' ');
+      // Keep markdown structure light by not attempting to preserve code fences; this is a visual preview only.
+      return `${head} …`;
+    } catch { return content; }
+  })();
 
   // Extract company name from research content if applicable
   const extractCompanyName = () => {
@@ -140,7 +169,7 @@ export function MessageBubble({
   return (
     <div className="space-y-3" data-testid="message-assistant">
       <div className="relative">
-        <MarkdownContent content={content} />
+        <MarkdownContent content={shouldCollapse && !expanded ? truncated : content} />
         {streaming && content && (
           <span className="inline-block w-0.5 h-4 bg-blue-600 ml-1 animate-pulse" />
         )}
@@ -152,6 +181,21 @@ export function MessageBubble({
           </div>
         )}
       </div>
+
+      {shouldCollapse && (
+        <div className="flex items-center justify-end">
+          <button
+            type="button"
+            className="text-xs text-blue-700 hover:text-blue-900"
+            onClick={() => setExpanded((prev: boolean) => !prev)}
+            aria-expanded={expanded}
+            aria-label={expanded ? 'Show less' : 'Show more'}
+            data-testid="collapse-toggle"
+          >
+            {expanded ? 'Show less' : 'Show more'}
+          </button>
+        </div>
+      )}
 
       {showActions && (
         <div className="flex items-center gap-4">
