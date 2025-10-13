@@ -29,26 +29,33 @@ export function ProfileCompletenessBanner() {
     localStorage.setItem('profileBannerDismissedAt', Date.now().toString());
   };
 
-  const { completion, requiredMissing, importantMissing, optionalMissing } = useMemo(() => {
+  const { completion, requiredMissing, importantMissing, optionalMissing, coreComplete } = useMemo(() => {
     if (!profile) {
       return {
         completion: 0,
         requiredMissing: ['Company name', 'Company website', 'Industry', 'Ideal customer profile'],
         importantMissing: [],
         optionalMissing: [],
+        coreComplete: false,
       };
     }
 
     const requiredMissing: string[] = [];
     const importantMissing: string[] = [];
     const optionalMissing: string[] = [];
+    let coreScore = 0;
+    let coreTotal = 0;
+    let optionalScore = 0;
+    let optionalTotal = 0;
 
-    let score = 0;
-    let total = 0;
+    const addCore = (condition: boolean, value: number) => {
+      coreTotal += value;
+      if (condition) coreScore += value;
+    };
 
-    const addWeighted = (condition: boolean, value: number) => {
-      total += value;
-      if (condition) score += value;
+    const addOptional = (condition: boolean, value: number) => {
+      optionalTotal += value;
+      if (condition) optionalScore += value;
     };
 
     const hasCompanyName = Boolean(profile.company_name);
@@ -61,10 +68,10 @@ export function ProfileCompletenessBanner() {
     if (!hasIndustry) requiredMissing.push('Industry');
     if (!hasICP) requiredMissing.push('Ideal customer profile');
 
-    addWeighted(hasCompanyName, 20);
-    addWeighted(hasCompanyUrl, 15);
-    addWeighted(hasIndustry, 15);
-    addWeighted(hasICP, 20);
+    addCore(hasCompanyName, 20);
+    addCore(hasCompanyUrl, 15);
+    addCore(hasIndustry, 15);
+    addCore(hasICP, 20);
 
     const hasRole = Boolean(profile.user_role);
     const hasUseCase = Boolean(profile.use_case);
@@ -78,11 +85,11 @@ export function ProfileCompletenessBanner() {
     if (!hasCustomCriteria) importantMissing.push('Qualifying criteria');
     if (!hasSignalPrefs) importantMissing.push('Buying signal preferences');
 
-    addWeighted(hasRole, 10);
-    addWeighted(hasUseCase, 10);
-    addWeighted(hasTargets, 8);
-    addWeighted(hasCustomCriteria, 4);
-    addWeighted(hasSignalPrefs, 4);
+    addCore(hasRole, 10);
+    addCore(hasUseCase, 10);
+    addCore(hasTargets, 8);
+    addCore(hasCustomCriteria, 10);
+    addCore(hasSignalPrefs, 8);
 
     const hasCompetitors = Array.isArray(profile.competitors) && profile.competitors.length > 0;
     const hasResearchFocus = Array.isArray(profile.research_focus) && profile.research_focus.length > 0;
@@ -90,12 +97,18 @@ export function ProfileCompletenessBanner() {
     if (!hasCompetitors) optionalMissing.push('Competitors');
     if (!hasResearchFocus) optionalMissing.push('Preferred research focus');
 
-    addWeighted(hasCompetitors, 4);
-    addWeighted(hasResearchFocus, 4);
+    addOptional(hasCompetitors, 4);
+    addOptional(hasResearchFocus, 4);
 
-    const completion = total > 0 ? Math.round((score / total) * 100) : 0;
+    let completion = coreTotal > 0 ? Math.round((coreScore / coreTotal) * 100) : 0;
+    const coreComplete = completion === 100;
 
-    return { completion, requiredMissing, importantMissing, optionalMissing };
+    if (coreComplete && optionalTotal > 0 && optionalScore > 0) {
+      const bonus = Math.round((optionalScore / optionalTotal) * 10); // up to +10
+      completion = Math.min(100, completion + bonus);
+    }
+
+    return { completion, requiredMissing, importantMissing, optionalMissing, coreComplete };
   }, [profile, customCriteriaCount, signalPreferencesCount]);
 
   if (loading || !profile || isDismissed) return null;
@@ -112,6 +125,8 @@ export function ProfileCompletenessBanner() {
     ? 'Add these essentials so I can qualify companies accurately:'
     : hasImportant
     ? 'Add these details to sharpen recommendations:'
+    : coreComplete
+    ? 'Core profile complete! Add optional details to personalize research even further:'
     : 'Optional enhancements to personalize research even further:';
 
   const missingList = hasRequired ? requiredMissing : hasImportant ? importantMissing : optionalMissing;

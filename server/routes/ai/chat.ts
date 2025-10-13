@@ -152,6 +152,40 @@ function summarizeContextForPlan(userContext: any) {
   return bits.join('\n');
 }
 
+function extractCompanyName(raw: string | null | undefined) {
+  if (!raw) return '';
+  let text = String(raw || '').trim();
+  if (!text) return '';
+
+  const leadingVerb = /^(research|analy[sz]e|investigate|look\s*up|deep\s*dive|tell me about|find|discover|explore|dig into)\s+/i;
+  text = text.replace(leadingVerb, '').trim();
+  text = text.replace(/\?/g, '').trim();
+
+  const stopMatch = text.match(/\s+(?:in|at|for|with|that|who|which|using|focused|within)\s+/i);
+  if (stopMatch?.index) {
+    text = text.slice(0, stopMatch.index).trim();
+  }
+
+  text = text.replace(/^[^A-Za-z0-9(]+/, '').replace(/[^A-Za-z0-9)&.\-\s]+$/, '').trim();
+  if (!text) return '';
+
+  const words = text.split(/\s+/).slice(0, 6);
+  if (!words.length) return '';
+
+  const formatted = words
+    .map((word) => {
+      if (!word) return '';
+      if (word.toUpperCase() === word) return word;
+      return word[0].toUpperCase() + word.slice(1);
+    })
+    .join(' ')
+    .trim();
+
+  if (/^\d+$/.test(formatted)) return '';
+  if (formatted.length > 80) return '';
+  return formatted;
+}
+
 export const config = {
   runtime: 'nodejs',
   maxDuration: 30, // 30 seconds for streaming
@@ -416,7 +450,15 @@ export default async function handler(req: any, res: any) {
 
       if (isResearchQuery) {
         const contextSummary = summarizeContextForPlan(userContext).replace(/\s+/g, ' ').trim();
-        const preview = contextSummary ? `Planning next steps using: ${contextSummary.slice(0, 160)}${contextSummary.length > 160 ? '…' : ''}` : 'Planning next steps using your saved preferences…';
+        const detectedCompany = extractCompanyName(lastUserMessage?.content);
+        let preview = '';
+        if (detectedCompany) {
+          preview = `Researching ${detectedCompany} using your saved profile and qualifying criteria…`;
+        } else if (contextSummary) {
+          preview = `Researching using your saved profile: ${contextSummary.slice(0, 160)}${contextSummary.length > 160 ? '…' : ''}`;
+        } else {
+          preview = 'Researching using your saved profile and preferences…';
+        }
         safeWrite(`data: ${JSON.stringify({ type: 'reasoning_progress', content: preview })}\n\n`);
       }
       const storeRun = true;
@@ -460,7 +502,8 @@ export default async function handler(req: any, res: any) {
       if (shouldPlanStream && lastUserMessage?.content) {
         const planInstructions = `You are the fast planning cortex for a research assistant.\n- Start with a single standalone acknowledgement sentence that confirms you are beginning now, states the research mode (deep/quick/specific/auto), and gives a realistic ETA (deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈1-2 min).\n- Immediately follow with 2-3 markdown bullet steps (prefix each with "- ") describing the investigative actions you will take.\n- Keep bullets under 12 words, action-oriented, and reference saved preferences when they change sequencing.\n- Do not ask the user questions or request clarifications; assume sensible defaults.\n- Do not add closing statements or extra blank lines.`;
         const contextSummary = summarizeContextForPlan(userContext).slice(0, 600);
-        const planInput = `Research mode: ${research_type || (isResearchQuery ? 'auto' : 'general')}\nUser request: ${lastUserMessage.content}\nETA guide: deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈90 sec.\nRelevant context:\n${contextSummary || 'No saved profile context yet.'}`;
+        const detectedCompany = extractCompanyName(lastUserMessage.content);
+        const planInput = `Research mode: ${research_type || (isResearchQuery ? 'auto' : 'general')}\nCompany: ${detectedCompany || 'Not specified'}\nUser request: ${lastUserMessage.content}\nETA guide: deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈90 sec.\nRelevant context:\n${contextSummary || 'No saved profile context yet.'}`;
 
         planPromise = (async () => {
           try {

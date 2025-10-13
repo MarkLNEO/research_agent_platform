@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -21,6 +21,8 @@ import { buildResearchDraft } from '../utils/researchOutput';
 import type { ResearchDraft } from '../utils/researchOutput';
 import type { TrackedAccount } from '../services/accountService';
 import { useUserProfile } from '../hooks/useUserProfile';
+import { ResearchActionBar, type ResearchAction } from '../components/ResearchActionBar';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
 const ALL_REFINE_FACETS = ['leadership', 'funding', 'tech stack', 'news', 'competitors', 'hiring'] as const;
 
@@ -205,6 +207,8 @@ export function ResearchChat() {
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState('');
+  const [actionBarVisible, setActionBarVisible] = useState(false);
+  const [actionBarCompany, setActionBarCompany] = useState<string | null>(null);
   const streamingAbortRef = useRef<AbortController | null>(null);
   // acknowledgment messages are displayed via ThinkingIndicator events
   const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([]);
@@ -254,6 +258,35 @@ export function ResearchChat() {
     () => generateSuggestions(userProfile, customCriteria, signalPreferences),
     [userProfile, customCriteria, signalPreferences]
   );
+  const icpQuickSuggestions = useMemo(() => {
+    if (!userProfile) return [] as Array<{ title: string; description: string; prompt: string }>;
+    const items: Array<{ title: string; description: string; prompt: string }> = [];
+    const icp = userProfile.icp_definition || userProfile.icp || '';
+    if (icp) {
+      items.push({
+        title: 'Companies that match your ICP',
+        description: icp.length > 140 ? `${icp.slice(0, 137)}…` : icp,
+        prompt: `Find companies that match this ICP: ${icp}`,
+      });
+    }
+    const criticalCriteria = customCriteria.filter((c: any) => (c?.importance || '').toLowerCase() === 'critical').map((c: any) => c.name).filter(Boolean);
+    if (criticalCriteria.length) {
+      items.push({
+        title: 'Accounts hitting your critical criteria',
+        description: `Surface companies where ${criticalCriteria.slice(0, 2).join(' & ')} are true.`,
+        prompt: `Show companies with ${criticalCriteria.join(', ')} signals in the last 90 days`,
+      });
+    }
+    const signalTypes = signalPreferences.map((s: any) => s?.signal_type).filter(Boolean);
+    if (signalTypes.length) {
+      items.push({
+        title: 'Accounts with buying signals',
+        description: `Focus on ${signalTypes.slice(0, 2).join(' & ')} signals this week.`,
+        prompt: `Which tracked accounts triggered ${signalTypes.join(', ')} signals this week?`,
+      });
+    }
+    return items.slice(0, 3);
+  }, [userProfile, customCriteria, signalPreferences]);
   const dismissContextTooltip = () => {
     setShowContextTooltip(false);
     if (typeof window !== 'undefined') {
@@ -269,10 +302,17 @@ export function ResearchChat() {
     return -1;
   }, [messages]);
   const lastAssistantMessage = lastAssistantIndex >= 0 ? messages[lastAssistantIndex] : null;
+  const chatPaddingClass = actionBarVisible && !streamingMessage ? 'pb-32 md:pb-40' : '';
 
   useEffect(() => {
     if (user) void loadChats();
   }, [user]);
+
+  useEffect(() => {
+    if (!lastAssistantMessage) {
+      setActionBarVisible(false);
+    }
+  }, [lastAssistantMessage]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -641,6 +681,8 @@ export function ResearchChat() {
     setLoading(true);
     setStreamingMessage('');
     setThinkingEvents([]);
+    setActionBarVisible(false);
+    setActionBarCompany(null);
     assistantInsertedRef.current = false;
 
     const tempUser: Message = {
@@ -739,6 +781,12 @@ export function ResearchChat() {
       setStreamingMessage('');
       setThinkingEvents([]);
       lastResearchSummaryRef.current = summarizeForMemory(assistant);
+
+      if (assistant?.trim()) {
+        const nextCompany = detectedCompany || activeSubject || extractCompanyNameFromQuery(assistant) || null;
+        setActionBarCompany(nextCompany);
+        setActionBarVisible(true);
+      }
 
       // JIT prompts based on usage milestones and profile state
       try {
@@ -853,6 +901,7 @@ export function ResearchChat() {
       setMessages(prev => prev.filter(m => m.id !== tempUser.id).concat([tempUser, errorMsg] as any));
       setStreamingMessage('');
       setThinkingEvents([]);
+      setActionBarVisible(false);
     } finally {
       setLoading(false);
       try { localStorage.removeItem('last_research_message'); } catch {}
@@ -1292,6 +1341,44 @@ export function ResearchChat() {
     }
   };
 
+  const handleActionBarAction = useCallback(async (action: ResearchAction) => {
+    switch (action) {
+      case 'dismiss':
+        setActionBarVisible(false);
+        return;
+      case 'new':
+        handleStartNewCompany();
+        return;
+      case 'continue':
+        handleContinueCompany();
+        return;
+      case 'summarize':
+        await handleSummarizeLast();
+        return;
+      case 'email':
+        await handleEmailDraftFromLast();
+        return;
+      case 'refine':
+        setShowRefine(true);
+        return;
+      default:
+        return;
+    }
+  }, [handleStartNewCompany, handleContinueCompany, handleSummarizeLast, handleEmailDraftFromLast, setShowRefine, setActionBarVisible]);
+
+  const shortcutHandlers = useMemo<Record<string, () => void>>(() => {
+    if (!actionBarVisible || streamingMessage) return {};
+    return {
+      n: () => { void handleActionBarAction('new'); },
+      c: () => { void handleActionBarAction('continue'); },
+      s: () => { void handleActionBarAction('summarize'); },
+      e: () => { void handleActionBarAction('email'); },
+      r: () => { void handleActionBarAction('refine'); },
+    };
+  }, [actionBarVisible, streamingMessage, handleActionBarAction]);
+
+  useKeyboardShortcuts(shortcutHandlers);
+
   const handleOpenRefine = () => {
     setRefineFacets(prev => (prev.length ? prev : Array.from(ALL_REFINE_FACETS)));
     setShowRefine(true);
@@ -1506,7 +1593,7 @@ export function ResearchChat() {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto" data-testid="chat-surface">
-          <div className="max-w-3xl mx-auto px-6 py-8">
+          <div className={`max-w-3xl mx-auto px-6 py-8 ${chatPaddingClass}`}>
             <div className="space-y-6">
               {/* Profile completeness banner */}
               <ProfileCompletenessBanner />
@@ -1526,6 +1613,11 @@ export function ResearchChat() {
                           <p className="text-xs text-gray-600">
                             ICP focus: <span className="font-medium text-gray-900">{userProfile.icp_definition || userProfile.icp || 'Not specified yet'}</span>
                           </p>
+                          {(customCriteria.length > 0 || signalPreferences.length > 0) && (
+                            <p className="text-xs text-gray-600 mt-2">
+                              I’ll emphasise your <span className="font-medium text-gray-800">critical criteria</span> and flag <span className="font-medium text-gray-800">priority signals</span> every time you run research.
+                            </p>
+                          )}
                         </div>
                         {customCriteria.length > 0 && (
                           <div className="flex flex-wrap gap-2">
@@ -1543,6 +1635,25 @@ export function ResearchChat() {
                                   ⭐ {c.name}
                                 </span>
                               ))}
+                          </div>
+                        )}
+                        {icpQuickSuggestions.length > 0 && (
+                          <div className="grid gap-3 md:grid-cols-2">
+                            {icpQuickSuggestions.map((item, idx) => (
+                              <button
+                                key={`${item.title}-${idx}`}
+                                onClick={() => startSuggestion(item.prompt)}
+                                className="w-full text-left border border-blue-100 hover:border-blue-300 hover:shadow-md transition-all rounded-xl p-3 bg-blue-50/60"
+                              >
+                                <div className="flex items-start gap-3">
+                                  <span className="text-lg">💡</span>
+                                  <div className="flex-1">
+                                    <div className="text-sm font-semibold text-gray-900 mb-1">{item.title}</div>
+                                    <p className="text-xs text-gray-600">{item.description}</p>
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
                           </div>
                         )}
                         {suggestions.length > 0 && (
@@ -1977,6 +2088,13 @@ export function ResearchChat() {
           <div className="mt-2 text-xs text-gray-500">Press Esc to close</div>
         </div>
       </div>
+    )}
+    {actionBarVisible && !streamingMessage && lastAssistantMessage && (
+      <ResearchActionBar
+        companyName={actionBarCompany}
+        disabled={loading}
+        onAction={handleActionBarAction}
+      />
     )}
     <SaveResearchDialog
       open={saveOpen}
