@@ -21,7 +21,8 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 // Follow .windsurf/rules/gpt-5-responses-api.md — default to GPT‑5 Responses API model
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini';
 
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+const OPENAI_PROJECT = process.env.OPENAI_PROJECT;
+const openai = new OpenAI({ apiKey: OPENAI_API_KEY, project: OPENAI_PROJECT });
 const serviceSupabase = SUPABASE_SERVICE_ROLE_KEY
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
   : null;

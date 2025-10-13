@@ -393,6 +393,7 @@ export default async function handler(req: any, res: any) {
     // Initialize OpenAI
     const openai = new OpenAI({
       apiKey: OPENAI_API_KEY,
+      project: process.env.OPENAI_PROJECT,
     });
 
     // Set up streaming response headers
@@ -595,6 +596,7 @@ export default async function handler(req: any, res: any) {
         text: { format: { type: 'text' }, verbosity: 'low' },
         reasoning: { effort: reasoningEffort },
         tools: useTools ? [{ type: 'web_search' }] : [],
+        include: ['reasoning.encrypted_content', 'web_search_call.results'],
         parallel_tool_calls: useTools,
         temperature: isQuick ? 0.2 : undefined,
         max_output_tokens: isQuick ? 450 : undefined,
@@ -740,11 +742,21 @@ export default async function handler(req: any, res: any) {
       }
 
       if (storeRun && finalResponseData?.id) {
-        try {
-          const verify = await openai.responses.retrieve(finalResponseData.id);
-          console.log('[OPENAI] Stored response status:', verify?.status);
-        } catch (verifyErr: any) {
-          console.error('[OPENAI] Failed to verify stored response', finalResponseData?.id, verifyErr?.message || verifyErr);
+        const id = finalResponseData.id;
+        const delays = [200, 400, 800, 1500, 2500];
+        let verified: any = null;
+        for (const d of delays) {
+          try {
+            verified = await openai.responses.retrieve(id);
+            break;
+          } catch (e) {
+            await new Promise(r => setTimeout(r, d));
+          }
+        }
+        if (verified?.status) {
+          console.log('[OPENAI] Stored response status:', verified.status);
+        } else {
+          console.warn('[OPENAI] Response not yet visible for id:', id);
         }
       }
 
@@ -847,7 +859,7 @@ export default async function handler(req: any, res: any) {
           const cid = chat_id || chatId || null;
           if (!cid) return;
           const summaryInput = `Summarize in 1–2 sentences (main subject + intent).\n\n${(input || '').slice(0, 3500)}`;
-          const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+          const openai = new OpenAI({ apiKey: OPENAI_API_KEY, project: process.env.OPENAI_PROJECT });
           const sum = await openai.responses.create({
             model: 'gpt-5-mini',
             input: [

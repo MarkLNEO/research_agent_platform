@@ -285,6 +285,14 @@ export function buildResearchDraft(input: ResearchDraftInput): ResearchDraft {
     }
   }
   const executiveSummary = buildSummary(markdown);
+  const stripExecSection = (md: string): string => {
+    // Remove canonical section
+    let out = md.replace(/^##\s+Executive Summary\s*[\r\n]+[\s\S]*?(?=^##\s+|$)/gim, '').trim();
+    // Remove alt headings like "Company — Executive Summary"
+    out = out.replace(/^#{1,3}\s+.*?executive\s+summary.*?[\r\n]+[\s\S]*?(?=^#{1,3}\s+|$)/gim, '').trim();
+    return out;
+  };
+  const cleanedMarkdown = stripExecSection(markdown);
   const companyData = extractCompanyData(markdown);
   const { icpFit, signalScore, composite, priority, confidence } = computeScores(markdown, normalizedSources.length);
 
@@ -292,7 +300,7 @@ export function buildResearchDraft(input: ResearchDraftInput): ResearchDraft {
     subject,
     research_type: researchType,
     executive_summary: executiveSummary,
-    markdown_report: markdown,
+    markdown_report: cleanedMarkdown,
     icp_fit_score: icpFit,
     signal_score: signalScore,
     composite_score: composite,

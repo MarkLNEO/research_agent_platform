@@ -21,7 +21,7 @@ export default async function handler(req: any, res: any) {
     const { data: { user } } = await supabase.auth.getUser(token);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+    const openai = new OpenAI({ apiKey: OPENAI_API_KEY, project: process.env.OPENAI_PROJECT });
     const instructions = `Write a concise, personalized outreach email for a sales AE.
 Use the research markdown to extract 1–2 specific hooks. Keep to 120–180 words.
 Structure: subject line, greeting, 2 short paragraphs, 1 CTA, sign-off.

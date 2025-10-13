@@ -21,7 +21,7 @@ export default async function handler(req: any, res: any) {
     const { data: { user } } = await supabase.auth.getUser(token);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+    const openai = new OpenAI({ apiKey: OPENAI_API_KEY, project: process.env.OPENAI_PROJECT });
     const instructions = `Extract a SIGNAL PREFERENCE from the natural language. Return strict JSON:
 {
   "signal_type": "security_breach|leadership_change|funding_round|hiring_surge|product_launch|custom_keyword",
