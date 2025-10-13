@@ -272,6 +272,7 @@ export function ResearchChat() {
   const [refineTimeframe, setRefineTimeframe] = useState<string>('last 12 months');
   const [crumbOpen, setCrumbOpen] = useState(false);
   const [switchInput, setSwitchInput] = useState('');
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const lastSubjectRef = useRef<{ prev: string | null; at: number | null }>({ prev: null, at: null });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [lastRunMode, setLastRunMode] = useState<'deep'|'quick'|'specific'|'auto'|null>(null);
@@ -2224,6 +2225,54 @@ useEffect(() => {
                   <span className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-2 py-0.5 rounded">⚡ {accountStats.with_signals} with signals</span>
                 </>
               )}
+              {/* Research mode selector (persists preference) */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setModeMenuOpen(v => !v)}
+                  className="ml-2 inline-flex items-center gap-1 bg-white border border-gray-200 px-2 py-0.5 rounded hover:bg-gray-50"
+                  aria-expanded={modeMenuOpen}
+                  title="Preferred research mode"
+                >
+                  <span className="text-gray-700">Mode:</span>
+                  <span className="font-semibold text-gray-900">
+                    {preferredResearchType ? (preferredResearchType === 'deep' ? 'Deep' : preferredResearchType === 'quick' ? 'Quick' : 'Specific') : 'Auto'}
+                  </span>
+                  ▾
+                </button>
+                {modeMenuOpen && (
+                  <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-20">
+                    {([
+                      { id: 'deep', label: 'Deep' },
+                      { id: 'quick', label: 'Quick' },
+                      { id: 'specific', label: 'Specific' },
+                      { id: 'auto', label: 'Auto (ask/decide)' },
+                    ] as Array<{id: 'deep'|'quick'|'specific'|'auto', label: string}>).map(opt => (
+                      <button
+                        key={opt.id}
+                        className={`w-full text-left text-xs px-3 py-2 hover:bg-gray-50 ${
+                          (preferredResearchType || 'auto') === opt.id ? 'font-semibold text-gray-900' : 'text-gray-700'
+                        }`}
+                        onClick={async () => {
+                          setModeMenuOpen(false);
+                          if (opt.id === 'auto') {
+                            try {
+                              localStorage.removeItem('preferred_research_type');
+                            } catch {}
+                            setPreferredResearchType(null);
+                            addToast({ type: 'success', title: 'Mode set to Auto', description: 'I will clarify or infer per request.' });
+                            return;
+                          }
+                          await persistPreference(opt.id);
+                          addToast({ type: 'success', title: `Mode set to ${opt.label}` });
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {crumbOpen && (
