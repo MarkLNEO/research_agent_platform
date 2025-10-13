@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import {
   USE_CASE_TEMPLATES,
   buildDefaultTemplateInputs,
@@ -6,7 +6,6 @@ import {
   getUseCaseTemplateById,
   type UseCaseTemplate
 } from '../config/researchTemplates';
-import { supabase } from '../lib/supabase';
 import { GUARDRAIL_PROFILES, getGuardrailProfileById, type GuardrailProfile } from '../config/guardrails';
 import { SIGNAL_SETS, getSignalSetById, type SignalSet } from '../config/signalEngine';
 import { PLAYBOOKS, type Playbook } from '../config/playbooks';
@@ -77,7 +76,6 @@ function deriveDefaultSignalSetId(template?: UseCaseTemplate): string {
 }
 
 export function ResearchEngineProvider({ children }: { children: ReactNode }) {
-  const [remoteTemplates, setRemoteTemplates] = useState<UseCaseTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(() => getDefaultTemplate().id);
   const [templateInputs, setTemplateInputs] = useState<Record<string, unknown>>(() =>
     buildDefaultTemplateInputs(getDefaultTemplate())
@@ -90,19 +88,9 @@ export function ResearchEngineProvider({ children }: { children: ReactNode }) {
   );
   const [selectedPlaybookId, setSelectedPlaybookId] = useState<string | null>(null);
 
-  const catalog = useMemo<UseCaseTemplate[]>(() => {
-    // Merge remote templates (user/system) with built-ins; ID wins from remote
-    const byId: Record<string, UseCaseTemplate> = {};
-    for (const t of USE_CASE_TEMPLATES) byId[t.id] = t;
-    for (const r of remoteTemplates) byId[r.id] = r;
-    return Object.values(byId);
-  }, [remoteTemplates]);
-
-  const getById = useCallback((id: string) => catalog.find(t => t.id === id), [catalog]);
-
   const selectedTemplate = useMemo(
-    () => getById(selectedTemplateId) ?? getDefaultTemplate(),
-    [selectedTemplateId, getById]
+    () => getUseCaseTemplateById(selectedTemplateId) ?? getDefaultTemplate(),
+    [selectedTemplateId]
   );
 
   const selectedGuardrailProfile = useMemo(
@@ -180,7 +168,7 @@ export function ResearchEngineProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value: ResearchEngineContextValue = {
-    templates: catalog,
+    templates: USE_CASE_TEMPLATES,
     selectedTemplate,
     selectedTemplateId,
     selectTemplate,
@@ -213,38 +201,4 @@ export function useResearchEngine() {
 
 export const CAPABILITY_REGISTRY = CAPABILITY_DEFINITIONS;
 export const QUALITY_REGISTRY = QUALITY_EVALUATOR;
-  // Load remote templates from Supabase (use_case_templates)
-  const loadRemoteTemplates = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('use_case_templates')
-        .select('id, version, label, category, json_spec, is_system')
-        .order('label', { ascending: true });
-      if (error) throw error;
-      const normalized: UseCaseTemplate[] = (data || []).map((row: any) => {
-        const spec = row.json_spec || {};
-        return {
-          id: row.id,
-          version: row.version,
-          label: row.label,
-          category: row.category as any,
-          description: spec.description ?? '',
-          inputs: spec.inputs ?? {},
-          quality_bar: spec.quality_bar ?? { must_include: [], heuristics: [] },
-          tools_policy: spec.tools_policy ?? { allowed: [] },
-          default_signal_set: spec.default_signal_set ?? 'default_signals_v1',
-          guardrails_profile: spec.guardrails_profile ?? 'secure',
-          sections: spec.sections ?? [],
-          export: spec.export ?? [],
-        } as UseCaseTemplate;
-      });
-      setRemoteTemplates(normalized);
-    } catch (e) {
-      // Non-fatal in client; fall back to built-ins
-      console.warn('[templates] failed to load remote templates', e);
-      setRemoteTemplates([]);
-    }
-  }, []);
-
-  // Load once on mount
-  useEffect(() => { void loadRemoteTemplates(); }, [loadRemoteTemplates]);
+  // Note: remote template loading is disabled for stability; using built-ins only.
