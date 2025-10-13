@@ -15,7 +15,7 @@ export interface ChatRequestBody {
   chatId?: string;
   agentType?: AgentType;
   config?: {
-    model?: 'gpt-5-mini' | 'gpt-5' | string;
+    model?: 'gpt-5-nano' | 'gpt-5-mini' | 'gpt-5' | string;
     reasoning_effort?: 'low' | 'medium' | 'high';
   };
 }
@@ -35,4 +35,3 @@ export interface UsageLogMetadata {
   api?: 'responses' | 'completions';
   chunks?: number;
 }
-

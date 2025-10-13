@@ -117,10 +117,60 @@ function inferSubject(input: ResearchDraftInput): string {
   return 'Research Insight';
 }
 
+const EXEC_HEADING = 'Executive Summary';
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const stripMarkdown = (text: string): string => {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ') // remove code fences
+    .replace(/`[^`]*`/g, ' ') // inline code
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1') // links
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/^[#>\-]+\s*/gm, '') // headings / blockquotes / lists
+    .replace(/^\d+\.\s*/gm, '')
+    .replace(/^\(?[a-zA-Z0-9]\)\s*/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const extractSection = (markdown: string, heading: string): string | null => {
+  const pattern = new RegExp(`^##\\s+${escapeRegExp(heading)}\\s*\n([\\s\\S]*?)(?=^##\\s+|$)`, 'im');
+  const match = pattern.exec(markdown);
+  if (match) {
+    return match[1].trim();
+  }
+  return null;
+};
+
+const normalizeLinesToSentences = (text: string): string => {
+  return text
+    .replace(/\r/g, '')
+    .split(/\n+/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => line.replace(/^[-*•\u2022]+\s*/, ''))
+    .map(line => line.replace(/^\d+[\.)]\s*/, ''))
+    .map(line => (/[.!?]$/.test(line) ? line : `${line}.`))
+    .join(' ');
+};
+
 function buildSummary(markdown: string): string {
-  const cleanText = markdown.replace(/\s+/g, ' ').trim();
-  const sentences = cleanText.split(/(?<=[.!?])\s+/).filter(Boolean);
-  return sentences.slice(0, 2).join(' ').slice(0, 400);
+  const executiveBlock = extractSection(markdown, EXEC_HEADING);
+  const sourceText = executiveBlock || markdown;
+  const normalized = normalizeLinesToSentences(sourceText);
+  const stripped = stripMarkdown(normalized);
+  const sentences = stripped.split(/(?<=[.!?])\s+/).filter(sentence => sentence && sentence.length > 12);
+
+  if (sentences.length > 0) {
+    const summary = sentences.slice(0, 3).join(' ');
+    return summary.length > 400 ? `${summary.slice(0, 397).trimEnd()}…` : summary;
+  }
+
+  const fallback = stripMarkdown(markdown).slice(0, 320);
+  return fallback ? `${fallback}${fallback.length >= 320 ? '…' : ''}` : '';
 }
 
 function clampScore(value: number): number {

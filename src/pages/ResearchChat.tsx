@@ -9,7 +9,6 @@ import { MessageInput } from '../components/MessageInput';
 import { ThinkingIndicator } from '../components/ThinkingIndicator';
 import { SaveResearchDialog } from '../components/SaveResearchDialog';
 import { CSVUploadDialog } from '../components/CSVUploadDialog';
-import { SubjectMismatchModal } from '../components/SubjectMismatchModal';
 import { BulkResearchDialog } from '../components/BulkResearchDialog';
 import { BulkResearchStatus } from '../components/BulkResearchStatus';
 import { ProfileCompletenessBanner } from '../components/ProfileCompletenessBanner';
@@ -248,8 +247,6 @@ export function ResearchChat() {
   const [preferredResearchType, setPreferredResearchType] = useState<'deep' | 'quick' | 'specific' | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveDraft, setSaveDraft] = useState<ResearchDraft | null>(null);
-  const [mismatchOpen, setMismatchOpen] = useState(false);
-  const [mismatchDraft, setMismatchDraft] = useState<ResearchDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastUsage, setLastUsage] = useState<{ tokens: number; credits: number } | null>(null);
@@ -1939,17 +1936,17 @@ useEffect(() => {
                         activeSubject,
                       });
 
-                      // Proactive subject mismatch handling (before Save dialog)
-                      const subj = (draft.subject || '').trim();
-                      const active = (activeSubject || '').trim();
-                      const isMismatch = Boolean(active && subj && active.toLowerCase() !== subj.toLowerCase());
-                      if (isMismatch) {
-                        setMismatchDraft(draft);
-                        setMismatchOpen(true);
-                        return;
-                      }
+                      const normalizedDraft = (() => {
+                        const active = activeSubject?.trim();
+                        if (!active) return draft;
+                        const current = (draft.subject || '').trim();
+                        if (current && current.toLowerCase() === active.toLowerCase()) {
+                          return draft;
+                        }
+                        return { ...draft, subject: active };
+                      })();
 
-                      setSaveDraft(draft);
+                      setSaveDraft(normalizedDraft);
                       setSaveOpen(true);
                     } : undefined}
                     onSummarize={isLastAssistant ? async () => {
@@ -2291,45 +2288,6 @@ useEffect(() => {
       error={saveError}
       usage={lastUsage || undefined}
       activeSubject={activeSubject}
-    />
-    <SubjectMismatchModal
-      open={mismatchOpen}
-      draftSubject={mismatchDraft?.subject || ''}
-      activeSubject={activeSubject}
-      markdown={mismatchDraft?.markdown_report || ''}
-      onClose={() => setMismatchOpen(false)}
-      onChoose={(choice) => {
-        if (!mismatchDraft) return;
-        if (choice.mode === 'use_draft') {
-          setMismatchOpen(false);
-          setSaveDraft({ ...mismatchDraft });
-          setSaveOpen(true);
-          return;
-        }
-        if (choice.mode === 'use_active' && activeSubject) {
-          setMismatchOpen(false);
-          setSaveDraft({ ...mismatchDraft, subject: activeSubject });
-          setSaveOpen(true);
-          return;
-        }
-        // proceed = open editor unchanged
-        setMismatchOpen(false);
-        setSaveDraft(mismatchDraft);
-        setSaveOpen(true);
-      }}
-      onSplit={async () => {
-        if (!mismatchDraft) return;
-        try {
-          await handleSaveResearch(mismatchDraft);
-          if (activeSubject && activeSubject.trim().toLowerCase() !== (mismatchDraft.subject || '').trim().toLowerCase()) {
-            await handleSaveResearch({ ...mismatchDraft, subject: activeSubject });
-          }
-          setMismatchOpen(false);
-          addToast({ type: 'success', title: 'Saved two drafts', description: 'Both subjects saved as separate entries.' });
-        } catch (e: any) {
-          addToast({ type: 'error', title: 'Split save failed', description: e?.message || 'Try saving manually from the editor.' });
-        }
-      }}
     />
     <CSVUploadDialog
       isOpen={csvUploadOpen}

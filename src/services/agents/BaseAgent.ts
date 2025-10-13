@@ -321,10 +321,10 @@ When a user requests company research, check if they have a 'research_depth' pre
 For company research requests, structure your response with these sections:
 
 ### 1. EXECUTIVE SUMMARY
-- 2-3 sentence overview
-- ICP Fit Score (0-100)
-- Signal Score (0-100)
-- Overall Recommendation (Hot/Warm/Standard)
+- 2-3 complete sentences written for an Account Executive
+- Lead with why the timing matters and the recommended action
+- Include ICP Fit Score (0-100), Signal Score (0-100), and Overall Recommendation (Hot/Warm/Standard) inline
+- Absolutely no shorthand, bullet fragments, internal reasoning, or source citations in this section
 
 ### 2. COMPANY OVERVIEW
 - Industry & business model
@@ -371,6 +371,7 @@ For company research requests, structure your response with these sections:
   protected buildGuidelinesSection(): string {
     return `## GUIDELINES
 - Be direct, helpful, and professional
+- Keep internal planning inside hidden reasoning; the markdown must read like a polished briefing
 - ALWAYS use markdown formatting in ALL responses
 - Use ## for main section headings, ### for subsection headings
 - Use **bold** for emphasis and bullet lists extensively
