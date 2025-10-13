@@ -322,7 +322,7 @@ export default async function handler(req: any, res: any) {
       const guard = (userContext.promptConfig as any)?.guardrail_profile;
       if (guard) instructions += `\n\n<guardrails>Use guardrail profile: ${guard}. Respect source allowlists and safety constraints.</guardrails>`;
     } catch {}
-    instructions += `\n\n<streaming_guidance>Stream your thinking immediately in short bullet updates. Narrate progress while research tasks run. Keep each update concise.</streaming_guidance>`;
+    // Avoid encouraging verbose internal narration; let the model decide when brief progress helps.
     let input;
     let lastUserMessage: any = null;
     let effectiveRequest = '';
@@ -596,7 +596,7 @@ export default async function handler(req: any, res: any) {
         text: { format: { type: 'text' }, verbosity: 'low' },
         reasoning: { effort: reasoningEffort },
         tools: useTools ? [{ type: 'web_search' }] : [],
-        include: ['reasoning.encrypted_content', 'web_search_call.results'],
+        include: ['reasoning.encrypted_content', 'web_search_call.results'] as any,
         parallel_tool_calls: useTools,
         temperature: isQuick ? 0.2 : undefined,
         max_output_tokens: isQuick ? 450 : undefined,
@@ -655,6 +655,9 @@ export default async function handler(req: any, res: any) {
 
       console.log('[DEBUG] Starting to process stream...');
 
+      // Configure whether to forward internal reasoning to the client
+      const forwardReasoning = !isQuick; // hide verbose reasoning in Quick mode
+
       // Process the stream
       for await (const chunk of stream as any) {
         chunkCount++;
@@ -665,9 +668,9 @@ export default async function handler(req: any, res: any) {
           safeWrite(`data: ${JSON.stringify({ type: 'meta', response_id: chunk.response.id, model: selectedModel })}\n\n`);
           metaSent = true;
         }
-        if (chunk.type === 'response.reasoning_summary_text.delta' || chunk.type === 'response.reasoning.delta') {
+        if ((chunk.type === 'response.reasoning_summary_text.delta' || chunk.type === 'response.reasoning.delta')) {
           const delta = chunk.delta || '';
-          if (delta) {
+          if (delta && forwardReasoning) {
             if (reasoningStartedAt == null) {
               reasoningStartedAt = Date.now();
               safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'reasoning_start', ms_since_request: reasoningStartedAt - processStart })}\n\n`);
