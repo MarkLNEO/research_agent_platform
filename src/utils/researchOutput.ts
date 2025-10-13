@@ -150,6 +150,26 @@ function computeScores(markdown: string, sourcesCount: number) {
   };
 }
 
+export function deriveIcpMeta(markdown: string): { score: number; confidence: number; verdict: string; rationale: string } {
+  const text = (markdown || '').trim();
+  const sourcesDetected = (text.match(/https?:\/\/\S+/g) || []).length;
+  const { icpFit, confidence } = computeScores(text, sourcesDetected);
+  const verdict = icpFit >= 80 ? 'Excellent' : icpFit >= 65 ? 'Strong' : icpFit >= 45 ? 'Moderate' : 'Weak';
+  const rationale = verdict === 'Excellent'
+    ? 'High overlap with ICP priorities and strong recent activity.'
+    : verdict === 'Strong'
+      ? 'Most ICP signals present with solid supporting evidence.'
+      : verdict === 'Moderate'
+        ? 'Partial ICP alignment; investigate gaps before pursuing.'
+        : 'Limited ICP alignment detected; proceed cautiously.';
+  return {
+    score: icpFit,
+    confidence,
+    verdict,
+    rationale,
+  };
+}
+
 function extractCompanyData(markdown: string): Record<string, string> {
   const result: Record<string, string> = {};
   const patterns: { key: string; regex: RegExp }[] = [
