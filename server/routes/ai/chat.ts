@@ -695,8 +695,11 @@ export default async function handler(req: any, res: any) {
 
       console.log('[DEBUG] Starting to process stream...');
 
-      // Configure whether to forward internal reasoning to the client
-      const forwardReasoning = !isQuick; // hide verbose reasoning in Quick mode
+      // Configure reasoning streaming behaviour
+      // We keep reasoning visible in all modes. For quick mode, we throttle/compact updates.
+      const forwardReasoning = true;
+      let quickReasoningBuffer = '';
+      let quickReasoningLastEmit = 0;
 
       // Process the stream
       for await (const chunk of stream as any) {
@@ -715,8 +718,24 @@ export default async function handler(req: any, res: any) {
               reasoningStartedAt = Date.now();
               safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'reasoning_start', ms_since_request: reasoningStartedAt - processStart })}\n\n`);
             }
-            // Encourage bullet separation in client by sending as-is; client renders markdown
-            safeWrite(`data: ${JSON.stringify({ type: 'reasoning', content: delta })}\n\n`);
+            if (isQuick) {
+              // Throttle and compact reasoning updates for quick mode
+              quickReasoningBuffer += delta;
+              const now = Date.now();
+              if (now - quickReasoningLastEmit >= 800) {
+                const lines = quickReasoningBuffer.split(/\n+/).filter(Boolean);
+                const lastLine = lines.length ? lines[lines.length - 1] : quickReasoningBuffer;
+                const compact = (lastLine || quickReasoningBuffer).trim().slice(-200);
+                if (compact) {
+                  safeWrite(`data: ${JSON.stringify({ type: 'reasoning', content: compact })}\n\n`);
+                  quickReasoningLastEmit = now;
+                  quickReasoningBuffer = '';
+                }
+              }
+            } else {
+              // Deep/specific: stream as-is
+              safeWrite(`data: ${JSON.stringify({ type: 'reasoning', content: delta })}\n\n`);
+            }
           }
         } else if (chunk.type === 'response.output_text.delta') {
           // This is a text delta event - send the content
@@ -762,6 +781,16 @@ export default async function handler(req: any, res: any) {
             safeWrite(`data: ${JSON.stringify({ type: 'web_search', query, sources })}\n\n`);
           }
         } else if (chunk.type === 'response.completed') {
+          // Flush any remaining compacted quick-mode reasoning
+          if (quickReasoningBuffer.trim()) {
+            const lines = quickReasoningBuffer.split(/\n+/).filter(Boolean);
+            const lastLine = lines.length ? lines[lines.length - 1] : quickReasoningBuffer;
+            const compact = (lastLine || quickReasoningBuffer).trim().slice(-200);
+            if (compact) {
+              safeWrite(`data: ${JSON.stringify({ type: 'reasoning', content: compact })}\n\n`);
+            }
+            quickReasoningBuffer = '';
+          }
           // Response is complete
           safeWrite(`data: ${JSON.stringify({
             type: 'done',
