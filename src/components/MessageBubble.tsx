@@ -18,6 +18,7 @@ interface MessageBubbleProps {
   metadata?: Record<string, unknown>;
   usage?: { tokens: number; credits: number };
   onSummarize?: () => void | Promise<void>;
+  onNextAction?: (action: string) => void;
   collapseEnabled?: boolean;
   collapseThresholdWords?: number;
 }
@@ -58,6 +59,7 @@ export function MessageBubble({
   draftEmailPending = false,
   usage,
   onSummarize,
+  onNextAction,
   collapseEnabled = false,
   collapseThresholdWords = 150,
 }: MessageBubbleProps) {
@@ -132,6 +134,18 @@ export function MessageBubble({
     } catch { return content; }
   }, [enableCollapse, content, collapseThresholdWords]);
   const displayContent = enableCollapse && !expanded ? truncated : content;
+
+  const nextActions = useMemo(() => {
+    const source = content || '';
+    const sectionMatch = source.match(/##\s+(Next Actions?|Next Steps?)[\s\S]*?(?=\n##\s+|$)/i);
+    if (!sectionMatch) return [] as string[];
+    const lines = sectionMatch[0].split(/\n+/).slice(1); // skip heading
+    const actions = lines
+      .map(line => line.replace(/^[-*•\d.\)\s]+/, '').trim())
+      .filter(text => text.length > 0 && text.length <= 140)
+    const unique = Array.from(new Set(actions));
+    return unique.slice(0, 6);
+  }, [content]);
 
   // Extract company name from research content if applicable
   const extractCompanyName = () => {
@@ -257,6 +271,23 @@ export function MessageBubble({
               </div>
             </div>
           )}
+          {nextActions.length > 0 && onNextAction && (
+            <div className="bg-white border border-blue-100 rounded-2xl px-4 py-3 shadow-sm">
+              <div className="text-xs font-semibold text-blue-900 uppercase tracking-wide mb-2">Suggested next steps</div>
+              <div className="flex flex-wrap items-center gap-2">
+                {nextActions.map((action, idx) => (
+                  <button
+                    key={`${action}-${idx}`}
+                    type="button"
+                    onClick={() => onNextAction(action)}
+                    className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-full hover:bg-blue-100 transition-colors"
+                  >
+                    {action}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {!remainingMarkdown && !execBody && content && (
             <MarkdownContent content={content} />
           )}
@@ -274,6 +305,24 @@ export function MessageBubble({
               <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></div>
             </div>
           )}
+        </div>
+      )}
+
+      {!structured && nextActions.length > 0 && onNextAction && !streaming && (
+        <div className="bg-white border border-blue-100 rounded-2xl px-4 py-3 shadow-sm">
+          <div className="text-xs font-semibold text-blue-900 uppercase tracking-wide mb-2">Suggested next steps</div>
+          <div className="flex flex-wrap items-center gap-2">
+            {nextActions.map((action, idx) => (
+              <button
+                key={`${action}-${idx}`}
+                type="button"
+                onClick={() => onNextAction(action)}
+                className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-full hover:bg-blue-100 transition-colors"
+              >
+                {action}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

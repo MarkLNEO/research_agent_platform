@@ -1341,6 +1341,11 @@ export function ResearchChat() {
     }
   };
 
+  const handleNextAction = async (action: string) => {
+    if (!currentChatId) return;
+    await handleSendMessageWithChat(currentChatId, `Help me with this next step: ${action}`);
+  };
+
   const handleActionBarAction = useCallback(async (action: ResearchAction) => {
     switch (action) {
       case 'dismiss':
@@ -1364,7 +1369,7 @@ export function ResearchChat() {
       default:
         return;
     }
-  }, [handleStartNewCompany, handleContinueCompany, handleSummarizeLast, handleEmailDraftFromLast, setShowRefine, setActionBarVisible]);
+  }, [handleStartNewCompany, handleContinueCompany, handleSummarizeLast, handleEmailDraftFromLast, setShowRefine]);
 
   const shortcutHandlers = useMemo<Record<string, () => void>>(() => {
     if (!actionBarVisible || streamingMessage) return {};
@@ -1824,6 +1829,7 @@ export function ResearchChat() {
                       void sendPreferenceSignal('length', { kind: 'categorical', choice: 'brief' }, { weight: 1.5 });
                       setPostSummarizeNudge(true);
                     } : undefined}
+                    onNextAction={isLastAssistant ? handleNextAction : undefined}
                     disablePromote={saving}
                     onRetry={isLastAssistant ? handleRetry : undefined}
                     usage={isLastAssistant ? lastUsage || undefined : undefined}
@@ -2187,3 +2193,8 @@ export function ResearchChat() {
     </>
   );
 }
+  useEffect(() => {
+    if (showRefine && refineFacets.length === 0) {
+      setRefineFacets([...ALL_REFINE_FACETS]);
+    }
+  }, [showRefine, refineFacets.length]);

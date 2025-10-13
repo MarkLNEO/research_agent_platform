@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X, Loader2, Plus, Trash2, Sparkles } from 'lucide-react';
+import { X, Loader2, Plus, Trash2, Sparkles, ChevronDown } from 'lucide-react';
 import { Streamdown } from 'streamdown';
 import type { ResearchDraft, ResearchSource } from '../utils/researchOutput';
 import { normalizeSourceEvents } from '../utils/researchOutput';
@@ -37,6 +37,11 @@ export function SaveResearchDialog({
   const [subjectChoice, setSubjectChoice] = useState<'draft' | 'active' | 'custom'>('draft');
   const [customSubject, setCustomSubject] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [sectionOpen, setSectionOpen] = useState({ markdown: false, sources: false });
+
+  const toggleSection = (name: 'markdown' | 'sources') => {
+    setSectionOpen(prev => ({ ...prev, [name]: !prev[name] }));
+  };
 
   useEffect(() => {
     if (open && initialDraft) {
@@ -46,6 +51,10 @@ export function SaveResearchDialog({
       setSourceErrors({});
       setFormTouched(false);
       setPreviewMode('edit');
+      setSectionOpen({ markdown: false, sources: false });
+      setSubjectChoice('draft');
+      setCustomSubject('');
+      setShowAdvanced(false);
     }
   }, [open, initialDraft]);
 
@@ -437,136 +446,163 @@ export function SaveResearchDialog({
               )}
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Markdown Report</label>
-                <div className="inline-flex items-center rounded-lg border border-gray-200 text-xs font-medium overflow-hidden">
-                  <button
-                    type="button"
-                    className={`px-3 py-1.5 ${previewMode === 'edit' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:text-gray-900'}`}
-                    onClick={() => setPreviewMode('edit')}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    className={`px-3 py-1.5 ${previewMode === 'preview' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:text-gray-900'}`}
-                    onClick={() => setPreviewMode('preview')}
-                  >
-                    Preview
-                  </button>
+            <div className="border border-gray-200 rounded-xl overflow-hidden">
+              <button
+                type="button"
+                onClick={() => toggleSection('markdown')}
+                className="w-full flex items-center justify-between px-4 py-3 text-left bg-white hover:bg-gray-50 transition-colors"
+              >
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">Full research report</div>
+                  <div className="text-xs text-gray-500">{stats.wordCount.toLocaleString()} words • {stats.sourceCount} sources referenced</div>
                 </div>
-              </div>
-              {(activeSubject || draft.subject) && (
-                <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
-                  <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Entity mentions (paragraphs)</div>
-                  <div className="space-y-1 max-h-40 overflow-auto" data-testid="entity-tags">
-                    {paragraphs.length === 0 && <div className="text-xs text-gray-500">No content yet.</div>}
-                    {paragraphs.map((p, i) => {
-                      const c1 = draft.subject ? countMentions(p, draft.subject) : 0;
-                      const c2 = activeSubject ? countMentions(p, activeSubject) : 0;
-                      const has = (c1 + c2) > 0;
-                      return (
-                        <div key={i} className={`flex items-center justify-between gap-2 rounded px-2 py-1 ${has ? 'bg-amber-50' : ''}`}>
-                          <div className="text-[11px] text-gray-700 truncate max-w-[60%]">{p}</div>
-                          <div className="flex items-center gap-1 text-[11px]">
-                            {draft.subject && <span className={`px-1.5 py-0.5 rounded border ${c1>0?'border-amber-300 bg-white text-amber-900':'border-gray-200 text-gray-500'}`}>{draft.subject} ×{c1}</span>}
-                            {activeSubject && <span className={`px-1.5 py-0.5 rounded border ${c2>0?'border-orange-300 bg-white text-orange-900':'border-gray-200 text-gray-500'}`}>{activeSubject} ×{c2}</span>}
-                          </div>
-                        </div>
-                      );
-                    })}
+                <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${sectionOpen.markdown ? 'rotate-180' : ''}`} />
+              </button>
+              {sectionOpen.markdown && (
+                <div className="px-4 py-4 space-y-3 border-t border-gray-100">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Markdown Report</span>
+                    <div className="inline-flex items-center rounded-lg border border-gray-200 text-xs font-medium overflow-hidden">
+                      <button
+                        type="button"
+                        className={`px-3 py-1.5 ${previewMode === 'edit' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:text-gray-900'}`}
+                        onClick={() => setPreviewMode('edit')}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className={`px-3 py-1.5 ${previewMode === 'preview' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:text-gray-900'}`}
+                        onClick={() => setPreviewMode('preview')}
+                      >
+                        Preview
+                      </button>
+                    </div>
+                  </div>
+                  {(activeSubject || draft.subject) && (
+                    <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+                      <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Entity mentions (paragraphs)</div>
+                      <div className="space-y-1 max-h-40 overflow-auto" data-testid="entity-tags">
+                        {paragraphs.length === 0 && <div className="text-xs text-gray-500">No content yet.</div>}
+                        {paragraphs.map((p, i) => {
+                          const c1 = draft.subject ? countMentions(p, draft.subject) : 0;
+                          const c2 = activeSubject ? countMentions(p, activeSubject) : 0;
+                          const has = (c1 + c2) > 0;
+                          return (
+                            <div key={i} className={`flex items-center justify-between gap-2 rounded px-2 py-1 ${has ? 'bg-amber-50' : ''}`}>
+                              <div className="text-[11px] text-gray-700 truncate max-w-[60%]">{p}</div>
+                              <div className="flex items-center gap-1 text-[11px]">
+                                {draft.subject && <span className={`px-1.5 py-0.5 rounded border ${c1>0?'border-amber-300 bg-white text-amber-900':'border-gray-200 text-gray-500'}`}>{draft.subject} ×{c1}</span>}
+                                {activeSubject && <span className={`px-1.5 py-0.5 rounded border ${c2>0?'border-orange-300 bg-white text-orange-900':'border-gray-200 text-gray-500'}`}>{activeSubject} ×{c2}</span>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {previewMode === 'edit' ? (
+                    <textarea
+                      value={draft.markdown_report}
+                      onChange={(event) => updateField('markdown_report', event.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[220px] font-mono"
+                    />
+                  ) : (
+                    <div className="border border-gray-200 rounded-lg px-4 py-3 max-h-64 overflow-y-auto bg-gray-50">
+                      <Streamdown className="prose prose-sm max-w-none text-gray-900">
+                        {draft.markdown_report?.trim() || '_Nothing to preview yet._'}
+                      </Streamdown>
+                    </div>
+                  )}
+                  {validationErrors.markdown_report && (
+                    <p className="text-xs text-red-600">{validationErrors.markdown_report}</p>
+                  )}
+                  <div className="flex items-center gap-4 text-xs text-gray-500">
+                    <span>{stats.wordCount.toLocaleString()} words</span>
+                    <span>{stats.sentenceCount} sentences</span>
+                    <span>{stats.sourceCount} sources referenced</span>
                   </div>
                 </div>
               )}
-              {previewMode === 'edit' ? (
-                <textarea
-                  value={draft.markdown_report}
-                  onChange={(event) => updateField('markdown_report', event.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[220px] font-mono"
-                />
-              ) : (
-                <div className="border border-gray-200 rounded-lg px-4 py-3 max-h-64 overflow-y-auto bg-gray-50">
-                  <Streamdown className="prose prose-sm max-w-none text-gray-900">
-                    {draft.markdown_report?.trim() || '_Nothing to preview yet._'}
-                  </Streamdown>
-                </div>
-              )}
-              {validationErrors.markdown_report && (
-                <p className="text-xs text-red-600">{validationErrors.markdown_report}</p>
-              )}
-              <div className="flex items-center gap-4 text-xs text-gray-500">
-                <span>{stats.wordCount.toLocaleString()} words</span>
-                <span>{stats.sentenceCount} sentences</span>
-                <span>{stats.sourceCount} sources referenced</span>
-              </div>
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Sources</label>
-                <button
-                  type="button"
-                  onClick={addSource}
-                  className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Add source
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between text-xs text-gray-500">
-                <span>Add reputable URLs that back up the findings.</span>
-                {(draft.sources?.length || 0) > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleNormalizeSources}
-                    className="text-blue-600 hover:text-blue-700 font-medium"
-                  >
-                    Clean &amp; dedupe
-                  </button>
-                )}
-              </div>
-
-              <div className="space-y-3">
-                {(draft.sources || []).length === 0 && (
-                  <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                    No sources were captured from this run. You can add links that support this research, or save without sources.
+            <div className="border border-gray-200 rounded-xl overflow-hidden">
+              <button
+                type="button"
+                onClick={() => toggleSection('sources')}
+                className="w-full flex items-center justify-between px-4 py-3 text-left bg-white hover:bg-gray-50 transition-colors"
+              >
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">Sources</div>
+                  <div className="text-xs text-gray-500">{(draft.sources?.length || 0) === 0 ? 'No sources added yet' : `${stats.sourceCount} source${stats.sourceCount === 1 ? '' : 's'} referenced`}</div>
+                </div>
+                <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${sectionOpen.sources ? 'rotate-180' : ''}`} />
+              </button>
+              {sectionOpen.sources && (
+                <div className="px-4 py-4 space-y-3 border-t border-gray-100">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-500">Add reputable URLs that back up the findings.</span>
+                    <div className="flex items-center gap-2">
+                      {(draft.sources?.length || 0) > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleNormalizeSources}
+                          className="text-xs text-blue-600 hover:text-blue-700"
+                        >
+                          Clean &amp; dedupe
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={addSource}
+                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Add source
+                      </button>
+                    </div>
                   </div>
-                )}
 
-                {(draft.sources || []).map((source, index) => (
-                  <div key={`${source.url}-${index}`} className="grid grid-cols-1 md:grid-cols-6 gap-3 items-center">
-                    <input
-                      type="url"
-                      value={source.url}
-                      onChange={(event) => updateSource(index, 'url', event.target.value)}
-                      placeholder="https://..."
-                      className="md:col-span-4 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      required
-                    />
-                    <input
-                      type="text"
-                      value={source.query || ''}
-                      onChange={(event) => updateSource(index, 'query', event.target.value)}
-                      placeholder="Search query"
-                      className="md:col-span-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeSource(index)}
-                      className="md:col-span-1 p-2 text-gray-500 hover:text-red-600 rounded-lg hover:bg-red-50"
-                      aria-label="Remove source"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                    {sourceErrors[index] && (
-                      <p className="md:col-span-6 text-xs text-red-600">{sourceErrors[index]}</p>
+                  <div className="space-y-3">
+                    {(draft.sources || []).length === 0 && (
+                      <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                        No sources were captured from this run. You can add links that support this research, or save without sources.
+                      </div>
                     )}
+
+                    {(draft.sources || []).map((source, index) => (
+                      <div key={`${source.url}-${index}`} className="grid grid-cols-1 md:grid-cols-6 gap-3 items-center">
+                        <input
+                          type="url"
+                          value={source.url}
+                          onChange={(event) => updateSource(index, 'url', event.target.value)}
+                          placeholder="https://..."
+                          className="md:col-span-4 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          required
+                        />
+                        <input
+                          type="text"
+                          value={source.query || ''}
+                          onChange={(event) => updateSource(index, 'query', event.target.value)}
+                          placeholder="Search query"
+                          className="md:col-span-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeSource(index)}
+                          className="md:col-span-1 p-2 text-gray-500 hover:text-red-600 rounded-lg hover:bg-red-50"
+                          aria-label="Remove source"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                        {sourceErrors[index] && (
+                          <p className="md:col-span-6 text-xs text-red-600">{sourceErrors[index]}</p>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              {/* Non-blocking: no hard error when sources are empty */}
+                </div>
+              )}
             </div>
 
             {usage && (

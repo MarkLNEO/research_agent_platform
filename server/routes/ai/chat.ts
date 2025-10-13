@@ -264,6 +264,7 @@ export default async function handler(req: any, res: any) {
 
     // Parse request body
     const { messages, systemPrompt, chatId, chat_id, agentType = 'company_research', config: userConfig = {}, research_type, active_subject } = body as any;
+    const activeContextCompany = typeof active_subject === 'string' ? active_subject.trim() : '';
 
     const contextFetchStart = Date.now();
     const userContext = await fetchUserContext(supabase, user.id);
@@ -335,6 +336,16 @@ export default async function handler(req: any, res: any) {
         const _isResearchQuery = classifyResearchIntent(_text);
         req.__isResearchQuery = _isResearchQuery;
 
+        let effectiveRequest = lastUserMessage.content || '';
+        if (_isResearchQuery && activeContextCompany) {
+          const extractedCompanyName = extractCompanyName(lastUserMessage.content);
+          const pronounMatch = /\b(their|they|them|it|its)\b/i.test(lastUserMessage.content);
+          const followUpMatch = /\b(ceo|cto|cfo|founder|leadership|headquarters|hq|revenue|funding|employees|valuation|security|stack|product|roadmap)\b/i.test(lastUserMessage.content);
+          if (!extractedCompanyName && (pronounMatch || followUpMatch)) {
+            effectiveRequest = `${lastUserMessage.content}\n\nContext: The company in focus is ${activeContextCompany}.`;
+          }
+        }
+
         if (_isResearchQuery) {
           // Build explicit research task input and include brief recent context
           const recent = (messages || []).slice(-4).map((m: any) => {
@@ -342,7 +353,7 @@ export default async function handler(req: any, res: any) {
             const text = String(m.content || '').replace(/\s+/g, ' ').trim();
             return `${role}: ${text}`;
           }).join('\n');
-          input = `Task: Perform company research as specified in the instructions.\n\nRecent context (last turns):\n${recent}\n\nRequest: ${lastUserMessage.content}\n\nPlease use the web_search tool to research this company and provide a concise, well-formatted analysis following the output structure defined in the instructions.`;
+          input = `Task: Perform company research as specified in the instructions.\n\nRecent context (last turns):\n${recent}\n\nRequest: ${effectiveRequest}\n\nPlease use the web_search tool to research this company and provide a concise, well-formatted analysis following the output structure defined in the instructions.`;
         } else {
           // Generic small talk / non-research: short helpful reply only (no web_search)
           instructions = 'You are a concise assistant for a company research tool. Respond briefly and help the user formulate a research request. Do not perform web_search unless explicitly asked for research.';
@@ -454,6 +465,8 @@ export default async function handler(req: any, res: any) {
         let preview = '';
         if (detectedCompany) {
           preview = `Researching ${detectedCompany} using your saved profile and qualifying criteria…`;
+        } else if (activeContextCompany) {
+          preview = `Researching ${activeContextCompany} using your saved profile and qualifying criteria…`;
         } else if (contextSummary) {
           preview = `Researching using your saved profile: ${contextSummary.slice(0, 160)}${contextSummary.length > 160 ? '…' : ''}`;
         } else {
@@ -502,8 +515,8 @@ export default async function handler(req: any, res: any) {
       if (shouldPlanStream && lastUserMessage?.content) {
         const planInstructions = `You are the fast planning cortex for a research assistant.\n- Start with a single standalone acknowledgement sentence that confirms you are beginning now, states the research mode (deep/quick/specific/auto), and gives a realistic ETA (deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈1-2 min).\n- Immediately follow with 2-3 markdown bullet steps (prefix each with "- ") describing the investigative actions you will take.\n- Keep bullets under 12 words, action-oriented, and reference saved preferences when they change sequencing.\n- Do not ask the user questions or request clarifications; assume sensible defaults.\n- Do not add closing statements or extra blank lines.`;
         const contextSummary = summarizeContextForPlan(userContext).slice(0, 600);
-        const detectedCompany = extractCompanyName(lastUserMessage.content);
-        const planInput = `Research mode: ${research_type || (isResearchQuery ? 'auto' : 'general')}\nCompany: ${detectedCompany || 'Not specified'}\nUser request: ${lastUserMessage.content}\nETA guide: deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈90 sec.\nRelevant context:\n${contextSummary || 'No saved profile context yet.'}`;
+        const detectedCompany = extractCompanyName(lastUserMessage.content) || activeContextCompany;
+        const planInput = `Research mode: ${research_type || (isResearchQuery ? 'auto' : 'general')}\nCompany: ${detectedCompany || 'Not specified'}\nUser request: ${effectiveRequest}\nETA guide: deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈90 sec.\nRelevant context:\n${contextSummary || 'No saved profile context yet.'}`;
 
         planPromise = (async () => {
           try {
