@@ -268,21 +268,9 @@ export function MessageBubble({
           <div className="text-xs text-emerald-800 mt-1">
             Confidence: {icpMeta.confidence}%
           </div>
-          <div className="mt-2 flex items-center gap-3">
-            {icpMeta.rationale && (
-              <span className="text-[11px] text-emerald-800">{icpMeta.rationale}</span>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                try { window.dispatchEvent(new CustomEvent('icp:optimize')); } catch {}
-              }}
-              className="text-[11px] font-semibold text-blue-700 hover:text-blue-900 underline"
-              title="Adjust ICP criteria"
-            >
-              Optimize ICP
-            </button>
-          </div>
+          {icpMeta.rationale && (
+            <div className="mt-2 text-[11px] text-emerald-800">{icpMeta.rationale}</div>
+          )}
         </div>
       </div>
     </div>
