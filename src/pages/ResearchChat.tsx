@@ -379,35 +379,64 @@ export function ResearchChat() {
     }
   }, [lastAssistantMessage]);
 
-  useEffect(() => {
+  const fetchUserPreferences = useCallback(async () => {
     if (!user?.id) return;
-    const fetchPreferences = async () => {
-      try {
-        const { data: criteria } = await supabase
+    try {
+      const [{ data: criteria }, { data: signals }] = await Promise.all([
+        supabase
           .from('user_custom_criteria')
-          .select('id, field_name, importance')
+          .select('id, field_name, field_type, importance, hints, display_order')
           .eq('user_id', user.id)
-          .order('importance', { ascending: true });
-        if (criteria) {
-          setCustomCriteria(
-            (criteria as any[]).map(item => ({
-              ...item,
-              name: item.field_name ?? item.name ?? ''
-            }))
-          );
-        }
-
-        const { data: signals } = await supabase
+          .order('display_order', { ascending: true }),
+        supabase
           .from('user_signal_preferences')
           .select('id, signal_type, importance')
-          .eq('user_id', user.id);
-        if (signals) setSignalPreferences(signals as any[]);
-      } catch (error) {
-        console.error('Failed to load user preferences', error);
+          .eq('user_id', user.id),
+      ]);
+
+      if (criteria) {
+        setCustomCriteria(
+          (criteria as any[]).map((item: any) => ({
+            ...item,
+            name: item.field_name ?? item.name ?? '',
+          }))
+        );
+      } else {
+        setCustomCriteria([]);
+      }
+
+      if (signals) {
+        setSignalPreferences(signals as any[]);
+      } else {
+        setSignalPreferences([]);
+      }
+    } catch (error) {
+      console.error('Failed to load user preferences', error);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    void fetchUserPreferences();
+  }, [user?.id, fetchUserPreferences]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ criteria?: any[] }>).detail;
+      if (detail?.criteria) {
+        setCustomCriteria(
+          detail.criteria.map((item: any) => ({
+            ...item,
+            name: item.field_name ?? item.name ?? '',
+          }))
+        );
+      } else {
+        void fetchUserPreferences();
       }
     };
-    void fetchPreferences();
-  }, [user?.id]);
+    window.addEventListener('icp:criteria-updated', handler as EventListener);
+    return () => window.removeEventListener('icp:criteria-updated', handler as EventListener);
+  }, [fetchUserPreferences]);
 
   useEffect(() => {
     if (!currentChatId) {

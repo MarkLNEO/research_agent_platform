@@ -1,10 +1,6 @@
-<<<<<<< HEAD
 import { useState } from 'react';
 import { Download, FileText, TrendingUp, Zap, Users, Target, Lightbulb, HelpCircle } from 'lucide-react';
 import { OptimizeICPModal } from './OptimizeICPModal';
-=======
-import { Download, FileText, TrendingUp, Zap, Users, Target, Lightbulb } from 'lucide-react';
->>>>>>> parent of 2cd62b0 (ICP Fit: add 'Why this score?' explainer with criteria list and Optimize ICP link)
 
 interface ResearchOutputProps {
   research: {
@@ -71,11 +67,8 @@ function PriorityBadge({ level }: { level?: string }) {
 }
 
 export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchOutputProps) {
-<<<<<<< HEAD
   const [showIcpWhy, setShowIcpWhy] = useState(false);
   const [optimizeOpen, setOptimizeOpen] = useState(false);
-=======
->>>>>>> parent of 2cd62b0 (ICP Fit: add 'Why this score?' explainer with criteria list and Optimize ICP link)
   return (
     <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 space-y-6" data-testid="research-output">
       {/* Header */}
@@ -139,7 +132,6 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
         />
       </div>
 
-<<<<<<< HEAD
       {/* ICP explanation */}
       {(typeof research.icp_fit_score === 'number') && (
         <div className="-mt-2">
@@ -187,8 +179,6 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
       {/* Optimize ICP modal */}
       <OptimizeICPModal isOpen={optimizeOpen} onClose={() => setOptimizeOpen(false)} />
 
-=======
->>>>>>> parent of 2cd62b0 (ICP Fit: add 'Why this score?' explainer with criteria list and Optimize ICP link)
       {/* Company Data */}
       {research.company_data && Object.keys(research.company_data).length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl p-5" data-testid="research-section-company-overview">
