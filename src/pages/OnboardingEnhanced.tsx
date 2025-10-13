@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Send, Sparkles } from 'lucide-react';
+import { invalidateUserProfileCache } from '../hooks/useUserProfile';
 
 interface Message {
   id: string;
@@ -785,6 +786,7 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
         onConflict: 'user_id'
       });
 
+    invalidateUserProfileCache(user.id);
     navigate('/', { replace: true });
     // Best-effort: default research preference to 'deep' without blocking
     (async () => {

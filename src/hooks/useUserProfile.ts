@@ -178,3 +178,12 @@ export function useUserProfile(forceRefresh = false) {
     getCompletionPercentage,
   };
 }
+
+export function invalidateUserProfileCache(userId: string | null | undefined) {
+  if (!userId) return;
+  profileCache.delete(userId);
+  if (typeof window === 'undefined') return;
+  window.setTimeout(() => {
+    window.dispatchEvent(new CustomEvent('profile:updated', { detail: { userId } }));
+  }, 0);
+}
