@@ -2193,8 +2193,3 @@ export function ResearchChat() {
     </>
   );
 }
-  useEffect(() => {
-    if (showRefine && refineFacets.length === 0) {
-      setRefineFacets([...ALL_REFINE_FACETS]);
-    }
-  }, [showRefine, refineFacets.length]);
