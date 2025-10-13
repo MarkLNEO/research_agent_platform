@@ -454,16 +454,14 @@ export default async function handler(req: any, res: any) {
       if (summarizeSource && typeof summarizeSource === 'string' && summarizeSource.trim().length > 0) {
         const sumInstructions = [
           'You write crisp executive summaries for sales research.',
-          'Output format strictly:
+          `Output format strictly:
 ## Executive Summary
 <2 short sentences with headline>
 
 ## Key Takeaways
-- 5–8 bullets, each ≤18 words, decision-focused, grounded in the source
-',
+- 5–8 bullets, each ≤18 words, decision-focused, grounded in the source`,
           'Do not add extra sections. Do not use web_search. No boilerplate.',
-        ].join('\n');
-        const sumInput = `SOURCE\n---\n${summarizeSource}\n---\nSummarize for an Account Executive.`;
+        ].join('\n');        const sumInput = `SOURCE\n---\n${summarizeSource}\n---\nSummarize for an Account Executive.`;
 
         const stream = await openai.responses.stream({
           model: 'gpt-5-mini',
