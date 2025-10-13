@@ -295,6 +295,13 @@ export function ResearchChat() {
   const [lastRunMode, setLastRunMode] = useState<'deep'|'quick'|'specific'|'auto'|null>(null);
   const skipInitialLoadRef = useRef(false);
   const { profile: userProfile } = useUserProfile();
+  const {
+    selectedTemplate,
+    selectedTemplateId,
+    templateInputs,
+    selectedGuardrailProfile,
+    selectedSignalSet
+  } = useResearchEngine();
   const [customCriteria, setCustomCriteria] = useState<any[]>([]);
   const [signalPreferences, setSignalPreferences] = useState<any[]>([]);
   const [creatingNewChat, setCreatingNewChat] = useState(false);
@@ -2507,11 +2514,3 @@ useEffect(() => {
     </>
   );
 }
-  // Research template context (global provider)
-  const {
-    selectedTemplate,
-    selectedTemplateId,
-    templateInputs,
-    selectedGuardrailProfile,
-    selectedSignalSet
-  } = useResearchEngine();
