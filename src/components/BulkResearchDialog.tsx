@@ -55,12 +55,18 @@ export function BulkResearchDialog({ isOpen, onClose, onSuccess }: BulkResearchD
       return;
     }
 
-    setFile(selectedFile);
     setError(null);
 
     try {
       const csvText = await selectedFile.text();
       const accounts = parseAccountsCSV(csvText);
+      if (accounts.length === 0) {
+        setError('No companies detected in this file. Please include at least one row with a company_name.');
+        setFile(null);
+        setPreview([]);
+        return;
+      }
+      setFile(selectedFile);
       setPreview(accounts.slice(0, 10)); // Show first 10 for preview
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to parse CSV file');
@@ -282,7 +288,7 @@ export function BulkResearchDialog({ isOpen, onClose, onSuccess }: BulkResearchD
                 </button>
               </div>
 
-              {preview.length > 0 && (
+              {preview.length > 0 ? (
                 <div>
                   <p className="text-sm font-medium text-gray-700 mb-2">Preview (first 10 rows)</p>
                   <div className="overflow-x-auto">
@@ -316,6 +322,16 @@ export function BulkResearchDialog({ isOpen, onClose, onSuccess }: BulkResearchD
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4 flex items-start gap-3">
+                  <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-yellow-900">No companies detected</p>
+                    <p className="text-xs text-yellow-800 mt-1">
+                      Ensure your CSV includes at least one row with a <code className="font-mono">company_name</code> value. Optional columns like industry and employee_count can improve results but are not required.
+                    </p>
                   </div>
                 </div>
               )}
