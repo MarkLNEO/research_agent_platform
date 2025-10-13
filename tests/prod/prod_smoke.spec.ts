@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import * as fs from 'fs';
+import { spawnSync } from 'node:child_process';
 
 const EMAIL = process.env.E2E_EMAIL || 'mark+55@nevereverordinary.com';
 const PASSWORD = process.env.E2E_PASSWORD || 'Codex123!';
@@ -14,7 +15,6 @@ test.describe('Production smoke (UI only)', () => {
   test('new user signup → onboarding → research → bulk → signals → logout/login', async ({ page }) => {
     // Prune old artifacts (> PRUNE_MAX_AGE_HOURS, default 24h)
     try {
-      const { spawnSync } = require('node:child_process');
       spawnSync('node', ['scripts/prune-artifacts.js'], { stdio: 'ignore' });
     } catch {}
 
@@ -281,7 +281,7 @@ test.describe('Production smoke (UI only)', () => {
       const summarizeNow = page.getByRole('button', { name: /Summarize/i });
       if (await summarizeNow.isVisible({ timeout: 2000 }).catch(() => false)) {
         await summarizeNow.click({ timeout: 10_000 }).catch(() => {});
-        const assistantAfterSum = page.locator('[data-testid=\"message-assistant\"]').last();
+        const assistantAfterSum = page.locator('[data-testid="message-assistant"]').last();
         await assistantAfterSum.waitFor({ state: 'visible', timeout: 60_000 });
         await snap('summary');
       }

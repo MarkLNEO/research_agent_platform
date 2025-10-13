@@ -21,10 +21,11 @@ import { buildResearchDraft } from '../utils/researchOutput';
 import type { ResearchDraft } from '../utils/researchOutput';
 import type { TrackedAccount } from '../services/accountService';
 import { useUserProfile } from '../hooks/useUserProfile';
-import { ResearchActionBar, type ResearchAction } from '../components/ResearchActionBar';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
 const ALL_REFINE_FACETS = ['leadership', 'funding', 'tech stack', 'news', 'competitors', 'hiring'] as const;
+
+type ResearchAction = 'new' | 'continue' | 'summarize' | 'email' | 'refine';
 
 type Suggestion = {
   icon: string;
@@ -44,6 +45,13 @@ const extractCompanyNameFromQuery = (raw: string): string | null => {
     .replace(/^what is\s+/i, '')
     .trim();
   if (!cleaned) return null;
+
+  const actionPrefix = /^(summarize|continue|draft|write|compose|email|refine|save|track|start|begin|generate|rerun|retry|copy|share|compare)\b/i;
+  if (actionPrefix.test(cleaned)) {
+    return null;
+  }
+
+  if (!cleaned) return null;
   const stopPattern = /\s+(in|at|for|with|that|who|which)\s+/i;
   const parts = cleaned.split(stopPattern);
   const candidate = (parts[0] || '').replace(/[^A-Za-z0-9&.\s-]/g, '').trim();
@@ -61,6 +69,25 @@ const deriveChatTitle = (text: string): string => {
   if (company) return `Research: ${company}`;
   const trimmed = text.trim();
   return trimmed.length > 60 ? `${trimmed.slice(0, 57)}…` : trimmed || 'New Chat';
+};
+
+const formatDisplaySubject = (subject: string | null | undefined): string => {
+  if (!subject) return 'None';
+  const trimmed = subject.trim();
+  if (!trimmed) return 'None';
+  return trimmed.length > 30 ? `${trimmed.slice(0, 27)}…` : trimmed;
+};
+
+const isLikelySubject = (value: string | null | undefined): boolean => {
+  if (!value) return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (/^(summarize|continue|draft|write|compose|email|refine|help me|start|begin|generate|retry|rerun)/i.test(trimmed)) {
+    return false;
+  }
+  if (trimmed.length > 80) return false;
+  if (/\s{2,}/.test(trimmed)) return false;
+  return true;
 };
 
 const DEFAULT_AGENT = 'company_research';
@@ -240,6 +267,8 @@ export function ResearchChat() {
   const [postSummarizeNudge, setPostSummarizeNudge] = useState(false);
   const [clarifiersLocked, setClarifiersLocked] = useState(false);
   const [activeSubject, setActiveSubject] = useState<string | null>(null);
+  const currentActionCompany = actionBarCompany || activeSubject;
+  const displayActionCompany = currentActionCompany ? formatDisplaySubject(currentActionCompany) : null;
   const [showRefine, setShowRefine] = useState(false);
   const [refineFacets, setRefineFacets] = useState<string[]>([]);
   const [refineTimeframe, setRefineTimeframe] = useState<string>('last 12 months');
@@ -719,12 +748,22 @@ useEffect(() => {
     };
     setMessages(prev => [...prev, tempUser]);
 
-    const detectedCompany = extractCompanyNameFromQuery(normalized);
-    if (detectedCompany) setActiveSubject(detectedCompany);
-    if (detectedCompany && detectedCompany !== activeSubject) {
+    const looksLikeResearch = isResearchPrompt(normalized);
+    const continuationMatch = normalized.match(/^(?:continue|resume)\s+(?:research(?:\s+on)?\s+)?(.+)/i);
+    const continuationTarget = continuationMatch?.[1]?.trim() || null;
+
+    let detectedCompany = extractCompanyNameFromQuery(normalized);
+    if (!detectedCompany && continuationTarget) {
+      detectedCompany = extractCompanyNameFromQuery(`research ${continuationTarget}`);
+    }
+
+    if ((looksLikeResearch || continuationTarget) && isLikelySubject(detectedCompany)) {
+      setActiveSubject(detectedCompany);
+    }
+    if ((looksLikeResearch || continuationTarget) && isLikelySubject(detectedCompany) && detectedCompany && detectedCompany !== activeSubject) {
       lastResearchSummaryRef.current = '';
     }
-    const looksLikeResearch = isResearchPrompt(normalized);
+
     if (looksLikeResearch && userProfile) {
       const criticalNames = customCriteria
         .filter((c: any) => (c?.importance || '').toLowerCase() === 'critical')
@@ -809,7 +848,14 @@ useEffect(() => {
       lastResearchSummaryRef.current = summarizeForMemory(assistant);
 
       if (assistant?.trim()) {
-        const nextCompany = detectedCompany || activeSubject || extractCompanyNameFromQuery(assistant) || null;
+        const assistantCandidate = extractCompanyNameFromQuery(assistant);
+        const nextCompany = isLikelySubject(detectedCompany)
+          ? detectedCompany
+          : isLikelySubject(activeSubject)
+            ? activeSubject
+            : isLikelySubject(assistantCandidate)
+              ? assistantCandidate
+              : null;
         setActionBarCompany(nextCompany);
         setActionBarVisible(true);
       }
@@ -1141,7 +1187,8 @@ useEffect(() => {
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      let full = '';
+      let mainContent = '';
+      let tldrBuffer = '';
       let buffer = '';
       let usedTokens: number | null = null;
       let firstDeltaAt: number | null = null;
@@ -1154,6 +1201,33 @@ useEffect(() => {
             console.log('[LLM][research] first-delta', { ttfbMs: firstDeltaAt - startedAt });
           } catch {}
         }
+      };
+      const composeOutput = () => {
+        const trimmedTldr = tldrBuffer.trim();
+        if (!mainContent) {
+          return trimmedTldr;
+        }
+        const lines = mainContent.split('\n');
+        let ackLine = '';
+        let remainder = mainContent;
+        if (lines.length > 0) {
+          const first = lines[0].trim();
+          if (first && !first.startsWith('#')) {
+            ackLine = lines[0];
+            remainder = lines.slice(1).join('\n').trimStart();
+          }
+        }
+        if (!trimmedTldr) {
+          return ackLine ? `${ackLine}\n${remainder}`.trim() : mainContent;
+        }
+        const parts: string[] = [];
+        if (ackLine) parts.push(ackLine.trim());
+        parts.push(trimmedTldr);
+        if (remainder) parts.push(remainder);
+        return parts.join('\n\n').trim();
+      };
+      const updateStreaming = () => {
+        setStreamingMessage(composeOutput());
       };
 
       if (reader) {
@@ -1241,9 +1315,26 @@ useEffect(() => {
                   const delta = parsed.delta || parsed.content;
                   if (delta) {
                     markFirstDelta();
-                    full += delta;
-                    setStreamingMessage(full);
+                    mainContent += delta;
+                    updateStreaming();
                   }
+                } else if (parsed.type === 'tldr') {
+                  if (typeof parsed.content === 'string') {
+                    tldrBuffer += parsed.content;
+                    updateStreaming();
+                  }
+                } else if (parsed.type === 'tldr_status') {
+                  setThinkingEvents(prev => [...prev.filter(e => e.type !== 'reasoning_progress'), {
+                    id: `tldr-${Date.now()}`,
+                    type: 'reasoning_progress',
+                    content: parsed.content || 'Generating TL;DR…'
+                  }]);
+                } else if (parsed.type === 'tldr_error') {
+                  addToast({
+                    type: 'error',
+                    title: 'TL;DR unavailable',
+                    description: parsed.message || 'Could not create summary.'
+                  });
                 } else if (parsed.type === 'response.completed' && parsed.response?.usage?.total_tokens) {
                   usedTokens = Number(parsed.response.usage.total_tokens) || usedTokens;
                 } else if (parsed.type === 'response' && parsed.usage?.total_tokens) {
@@ -1264,10 +1355,10 @@ useEffect(() => {
       // Update active subject from the user message or assistant output
       try {
         const m = userMessage.match(/\bresearch\s+([\w\s.&-]{2,})/i);
-        if (m && m[1]) {
+        if (m && m[1] && isLikelySubject(m[1])) {
           setActiveSubject(m[1].trim());
-        } else if (lastAssistantMessage?.content || full) {
-          const text = (lastAssistantMessage?.content || full || '').slice(0, 800);
+        } else if (lastAssistantMessage?.content || mainContent) {
+          const text = (lastAssistantMessage?.content || mainContent || '').slice(0, 800);
           const patterns = [
             /researching\s+([A-Z][\w\s&.-]{2,}?)(?:[\s,:.-]|$)/i,
             /found about\s+([A-Z][\w\s&.-]{2,}?)(?:[\s,:.-]|$)/i,
@@ -1276,7 +1367,7 @@ useEffect(() => {
           ];
           for (const p of patterns) {
             const mm = text.match(p);
-            if (mm && mm[1] && mm[1].trim().length >= 2) { setActiveSubject(mm[1].trim()); break; }
+            if (mm && mm[1] && mm[1].trim().length >= 2 && isLikelySubject(mm[1])) { setActiveSubject(mm[1].trim()); break; }
           }
         }
       } catch {}
@@ -1292,7 +1383,7 @@ useEffect(() => {
         }));
         console.log('[LLM][research] complete', { totalMs: endedAt - startedAt, ttfbMs: firstDeltaAt != null ? (firstDeltaAt - startedAt) : null, tokens: usedTokens });
       } catch {}
-      return full;
+      return composeOutput();
     } catch (e: any) {
       // Swallow abort errors as user-initiated stops
       if (e?.name === 'AbortError') {
@@ -1374,9 +1465,6 @@ useEffect(() => {
 
   const handleActionBarAction = useCallback(async (action: ResearchAction) => {
     switch (action) {
-      case 'dismiss':
-        setActionBarVisible(false);
-        return;
       case 'new':
         handleStartNewCompany();
         return;
@@ -1897,32 +1985,74 @@ useEffect(() => {
               )}
 
               {/* Next Actions bar after a completed assistant turn */}
-              {!streamingMessage && lastAssistantMessage && (
-                <div className="mt-3 flex flex-wrap items-center gap-2 p-3 border border-gray-200 rounded-xl bg-white shadow-sm">
-                  <span className="text-xs text-gray-600 mr-2 font-semibold uppercase tracking-wide">Next actions</span>
-                  <button className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 text-gray-800 rounded-lg hover:border-gray-300 hover:bg-gray-50" onClick={handleStartNewCompany}>
-                    + Start new company
-                  </button>
-                  <button className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 text-gray-800 rounded-lg hover:border-gray-300 hover:bg-gray-50" onClick={handleContinueCompany}>
-                    ↺ Continue {activeSubject ? activeSubject : 'current company'}
-                  </button>
-                  <button className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 text-gray-800 rounded-lg hover:border-gray-300 hover:bg-gray-50" onClick={async () => { await handleSummarizeLast(); }}>
-                    📝 Summarize
-                  </button>
-                  <button className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 text-gray-800 rounded-lg hover:border-gray-300 hover:bg-gray-50" onClick={handleEmailDraftFromLast}>
-                    ✉️ Draft email
-                  </button>
-                  <button className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 text-gray-800 rounded-lg hover:border-gray-300 hover:bg-gray-50" aria-label="Save to Research" onClick={openSaveForLastAssistant}>
-                    💾 Save to Research
-                  </button>
-                  <button className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 text-gray-800 rounded-lg hover:border-gray-300 hover:bg-gray-50" onClick={handleOpenRefine}>
-                    🎯 Refine focus
-                  </button>
-                  <label className="ml-auto text-xs text-gray-500 inline-flex items-center gap-1">
-                    <input type="checkbox" checked={clarifiersLocked} onChange={(e) => setClarifiersLocked(e.target.checked)} />
-                    No more setup questions this chat
+              {actionBarVisible && !streamingMessage && lastAssistantMessage && (
+                <section className="mt-6 mb-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Next actions</h3>
+                    <div className="hidden sm:block text-xs text-gray-500">
+                      Shortcuts:&nbsp;
+                      <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">N</kbd> new •{' '}
+                      <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">C</kbd>{' '}
+                      continue •{' '}
+                      <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">S</kbd>{' '}
+                      summarize •{' '}
+                      <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">E</kbd> email •{' '}
+                      <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">R</kbd> refine
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                      onClick={handleStartNewCompany}
+                    >
+                      ➕ Start new company
+                    </button>
+                    <button
+                      className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      onClick={handleContinueCompany}
+                    >
+                      ↺ Continue {displayActionCompany ?? 'current company'}
+                    </button>
+                    <button
+                      className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-amber-600 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      onClick={async () => { await handleSummarizeLast(); }}
+                    >
+                      📝 Summarize
+                    </button>
+                    <button
+                      className="inline-flex items-center gap-2 rounded-lg bg-rose-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-400"
+                      onClick={handleEmailDraftFromLast}
+                    >
+                      ✉️ Draft email
+                    </button>
+                    <button
+                      className="inline-flex items-center gap-2 rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                      aria-label="Save to Research"
+                      onClick={openSaveForLastAssistant}
+                    >
+                      💾 Save to Research
+                    </button>
+                    <button
+                      className="inline-flex items-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                      onClick={handleOpenRefine}
+                    >
+                      🎯 Refine focus
+                    </button>
+                  </div>
+                  <div className="mt-3 text-xs text-gray-500 sm:hidden">
+                    Shortcuts: N new • C continue • S summarize • E email • R refine
+                  </div>
+                  <label className="mt-3 inline-flex items-center gap-2 text-xs text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={clarifiersLocked}
+                      onChange={(e) => setClarifiersLocked(e.target.checked)}
+                    />
+                    <span title="Prevents the agent from asking profile/setup follow-up questions in this chat.">
+                      Skip preference follow-ups this chat
+                    </span>
                   </label>
-                </div>
+                </section>
               )}
 
               {/* Post-summarize nudge: offer to persist summary or brevity preference */}
@@ -2059,7 +2189,7 @@ useEffect(() => {
                   }}
                   aria-expanded={crumbOpen}
                 >
-                  Context: {activeSubject ? activeSubject : 'None'} ▾
+                  Context: {formatDisplaySubject(activeSubject)} ▾
                 </button>
               </div>
               {canUndoSubject() && (
@@ -2144,13 +2274,6 @@ useEffect(() => {
           <div className="mt-2 text-xs text-gray-500">Press Esc to close</div>
         </div>
       </div>
-    )}
-    {actionBarVisible && !streamingMessage && lastAssistantMessage && (
-      <ResearchActionBar
-        companyName={actionBarCompany}
-        disabled={loading}
-        onAction={handleActionBarAction}
-      />
     )}
     <SaveResearchDialog
       open={saveOpen}

@@ -128,7 +128,7 @@ function summarizeContextForPlan(userContext: any) {
   if (!userContext) return '';
   const bits: string[] = [];
   const profile = userContext.profile || {};
-  if (profile.company_name) bits.push(`Company: ${profile.company_name}`);
+  if (profile.company_name) bits.push(`Your org: ${profile.company_name}`);
   if (profile.industry) bits.push(`Industry: ${profile.industry}`);
   if (Array.isArray(profile.target_titles) && profile.target_titles.length) {
     bits.push(`Target titles: ${profile.target_titles.slice(0, 4).join(', ')}`);
@@ -156,6 +156,11 @@ function extractCompanyName(raw: string | null | undefined) {
   if (!raw) return '';
   let text = String(raw || '').trim();
   if (!text) return '';
+
+  const actionPrefix = /^(summarize|continue|resume|draft|write|compose|email|refine|save|track|start|generate|rerun|retry|copy|share|compare)\b/i;
+  if (actionPrefix.test(text)) {
+    return '';
+  }
 
   const leadingVerb = /^(research|analy[sz]e|investigate|look\s*up|deep\s*dive|tell me about|find|discover|explore|dig into)\s+/i;
   text = text.replace(leadingVerb, '').trim();
@@ -513,10 +518,23 @@ export default async function handler(req: any, res: any) {
 
       let planPromise: Promise<void> | null = null;
       if (shouldPlanStream && lastUserMessage?.content) {
-        const planInstructions = `You are the fast planning cortex for a research assistant.\n- Start with a single standalone acknowledgement sentence that confirms you are beginning now, states the research mode (deep/quick/specific/auto), and gives a realistic ETA (deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈1-2 min).\n- Immediately follow with 2-3 markdown bullet steps (prefix each with "- ") describing the investigative actions you will take.\n- Keep bullets under 12 words, action-oriented, and reference saved preferences when they change sequencing.\n- Do not ask the user questions or request clarifications; assume sensible defaults.\n- Do not add closing statements or extra blank lines.`;
+        const planInstructions = `You are the fast planning cortex for a research assistant.\n- Start with a single standalone acknowledgement sentence that confirms you are beginning now, states the research mode (deep/quick/specific/auto), mentions the **research subject** from the input, and gives a realistic ETA (deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈1-2 min).\n- Immediately follow with 2-3 markdown bullet steps (prefix each with "- ") describing the investigative actions you will take.\n- Keep bullets under 12 words, action-oriented, and reference saved preferences when they change sequencing.\n- When referencing the company you are researching, always use the "Research subject" field from the input (never the profile context labels).\n- Do not ask the user questions or request clarifications; assume sensible defaults.\n- Do not add closing statements or extra blank lines.`;
         const contextSummary = summarizeContextForPlan(userContext).slice(0, 600);
-        const detectedCompany = extractCompanyName(lastUserMessage.content) || activeContextCompany;
-        const planInput = `Research mode: ${research_type || (isResearchQuery ? 'auto' : 'general')}\nCompany: ${detectedCompany || 'Not specified'}\nUser request: ${effectiveRequest}\nETA guide: deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈90 sec.\nRelevant context:\n${contextSummary || 'No saved profile context yet.'}`;
+        const detectedCompanyRaw = extractCompanyName(lastUserMessage.content);
+        const fallbackCompany = typeof activeContextCompany === 'string' ? activeContextCompany.trim() : '';
+        const isLikelySubject = (value: string | undefined): boolean => {
+          if (!value) return false;
+          const trimmed = value.trim();
+          if (!trimmed) return false;
+          if (trimmed.length > 80) return false;
+          return !/^(summarize|continue|resume|draft|write|compose|email|refine|help me|start|begin|generate|rerun|retry)/i.test(trimmed);
+        };
+        const detectedCompany = isLikelySubject(detectedCompanyRaw)
+          ? detectedCompanyRaw
+          : isLikelySubject(fallbackCompany)
+            ? fallbackCompany
+            : '';
+        const planInput = `Research mode: ${research_type || (isResearchQuery ? 'auto' : 'general')}\nResearch subject: ${detectedCompany || 'Not specified'}\nUser request: ${effectiveRequest}\nETA guide: deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈90 sec.\nSaved profile context (do not confuse with research subject):\n${contextSummary || 'No saved profile context yet.'}`;
 
         planPromise = (async () => {
           try {
@@ -739,6 +757,53 @@ export default async function handler(req: any, res: any) {
 
       console.log('[DEBUG] Stream processing complete. Total chunks:', chunkCount);
       console.log('[DEBUG] Total content length:', accumulatedContent.length);
+
+      const shouldGenerateTldr = isResearchQuery && estimateTokens(accumulatedContent) > 350;
+      if (shouldGenerateTldr) {
+        try {
+          safeWrite(`data: ${JSON.stringify({ type: 'tldr_status', content: 'Generating executive TL;DR…' })}\n\n`);
+          const trimmedForSummary = accumulatedContent.length > 24000
+            ? accumulatedContent.slice(0, 24000)
+            : accumulatedContent;
+          const summaryStream = await openai.responses.stream({
+            model: 'gpt-5-mini',
+            instructions: 'You craft concise executive TL;DRs for sales research. Output format:\n## TL;DR\n**Headline:** <<=140 char headline>\n- Bullet 1\n- Bullet 2\n(5-8 bullets, each ≤18 words, action-focused, referencing concrete facts.)\nDo not add extra sections.',
+            input: [
+              {
+                role: 'user',
+                content: [{
+                  type: 'input_text',
+                  text: `Create an executive TL;DR for the following research. Do not repeat the full report, focus on headline insight and 5-8 decision-ready bullets.\n\n${trimmedForSummary}`
+                }]
+              },
+            ],
+            text: { format: { type: 'text' }, verbosity: 'low' },
+            store: false,
+            metadata: {
+              agent: 'company_research',
+              stage: 'auto_tldr',
+              chat_id: chatId || null,
+              user_id: user.id
+            }
+          });
+
+          for await (const summaryChunk of summaryStream as any) {
+            if (responseClosed) break;
+            if (summaryChunk.type === 'response.output_text.delta' && summaryChunk.delta) {
+              safeWrite(`data: ${JSON.stringify({ type: 'tldr', content: summaryChunk.delta })}\n\n`);
+            }
+          }
+
+          try {
+            await summaryStream.finalResponse();
+          } catch (summaryFinalizeErr) {
+            console.error('TL;DR finalization error:', summaryFinalizeErr);
+          }
+        } catch (summaryErr) {
+          console.error('Auto TL;DR generation failed:', summaryErr);
+          safeWrite(`data: ${JSON.stringify({ type: 'tldr_error', message: 'TL;DR unavailable' })}\n\n`);
+        }
+      }
 
       if (planPromise) {
         try {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, SplitSquareHorizontal, GitCommit, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface SubjectMismatchModalProps {
@@ -28,13 +28,20 @@ export function SubjectMismatchModal({
   onChoose,
   onSplit,
 }: SubjectMismatchModalProps) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const show = open && draftSubject && activeSubject && draftSubject.trim().toLowerCase() !== activeSubject.trim().toLowerCase();
+
+  useEffect(() => {
+    if (!show && detailsOpen) {
+      setDetailsOpen(false);
+    }
+  }, [show, detailsOpen]);
+
   if (!show) return null;
 
   const subjectCount = countMentions(markdown, draftSubject);
   const activeCount = activeSubject ? countMentions(markdown, activeSubject) : 0;
   const paragraphs = (markdown || '').split(/\n\s*\n/).filter(Boolean).slice(0, 14);
-  const [detailsOpen, setDetailsOpen] = useState(false);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm" data-testid="subject-mismatch-modal">

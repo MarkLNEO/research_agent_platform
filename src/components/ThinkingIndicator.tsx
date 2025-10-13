@@ -31,6 +31,40 @@ function formatSourceTitle(url: string): string {
   return parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
 }
 
+function ReasoningProgressIndicator({ content }: { content?: string }) {
+  const [elapsed, setElapsed] = useState(0);
+  // Conservative ETA for deep/auto; quick usually completes before 30s.
+  const ESTIMATE_SECONDS = 90;
+
+  useEffect(() => {
+    const id = setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const pct = Math.min(95, Math.round((elapsed / ESTIMATE_SECONDS) * 100));
+  const format = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+  return (
+    <div className="flex gap-3 items-start mb-4 animate-fadeIn">
+      <div className="px-4 py-3 bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 rounded-xl text-sm shadow-sm min-w-[260px]">
+        <div className="flex items-center gap-2">
+          <Loader2 className="w-4 h-4 text-purple-600 animate-spin" />
+          <span className="text-purple-900 text-xs font-medium truncate">{content || 'Thinking...'}</span>
+        </div>
+        <div className="mt-2">
+          <div className="flex items-center justify-between text-[10px] text-purple-800 mb-1">
+            <span>⏱ {format(elapsed)} / ~{format(ESTIMATE_SECONDS)}</span>
+            <span>{pct}%</span>
+          </div>
+          <div className="w-full bg-purple-200/50 rounded-full h-1.5">
+            <div className="bg-purple-600 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ThinkingIndicator({ type, content, query, sources, url, count, companies, company: previewCompany, icp, critical, important }: ThinkingIndicatorProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const toggle = () => { setIsExpanded(v => !v); };
@@ -135,34 +169,7 @@ export function ThinkingIndicator({ type, content, query, sources, url, count, c
   }
 
   if (type === 'reasoning_progress') {
-    const [elapsed, setElapsed] = useState(0);
-    // Conservative ETA for deep/auto; quick usually completes before 30s.
-    const ESTIMATE_SECONDS = 90;
-    useEffect(() => {
-      const id = setInterval(() => setElapsed((e) => e + 1), 1000);
-      return () => clearInterval(id);
-    }, []);
-    const pct = Math.min(95, Math.round((elapsed / ESTIMATE_SECONDS) * 100));
-    const format = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-    return (
-      <div className="flex gap-3 items-start mb-4 animate-fadeIn">
-        <div className="px-4 py-3 bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 rounded-xl text-sm shadow-sm min-w-[260px]">
-          <div className="flex items-center gap-2">
-            <Loader2 className="w-4 h-4 text-purple-600 animate-spin" />
-            <span className="text-purple-900 text-xs font-medium truncate">{content || 'Thinking...'}</span>
-          </div>
-          <div className="mt-2">
-            <div className="flex items-center justify-between text-[10px] text-purple-800 mb-1">
-              <span>⏱ {format(elapsed)} / ~{format(ESTIMATE_SECONDS)}</span>
-              <span>{pct}%</span>
-            </div>
-            <div className="w-full bg-purple-200/50 rounded-full h-1.5">
-              <div className="bg-purple-600 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${pct}%` }} />
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return <ReasoningProgressIndicator content={content} />;
   }
 
   if (type === 'acknowledgment') {
