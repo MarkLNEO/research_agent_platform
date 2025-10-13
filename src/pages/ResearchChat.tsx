@@ -22,6 +22,8 @@ import type { ResearchDraft } from '../utils/researchOutput';
 import type { TrackedAccount } from '../services/accountService';
 import { useUserProfile } from '../hooks/useUserProfile';
 
+const ALL_REFINE_FACETS = ['leadership', 'funding', 'tech stack', 'news', 'competitors', 'hiring'] as const;
+
 type Suggestion = {
   icon: string;
   title: string;
@@ -373,6 +375,12 @@ export function ResearchChat() {
       if (hideTimer) window.clearTimeout(hideTimer);
     };
   }, [dismissContextTooltip]);
+
+  useEffect(() => {
+    if (showRefine && refineFacets.length === 0) {
+      setRefineFacets(Array.from(ALL_REFINE_FACETS));
+    }
+  }, [showRefine, refineFacets.length]);
 
   // Allow tests and power users to open the signals drawer programmatically
   useEffect(() => {
@@ -877,7 +885,17 @@ export function ResearchChat() {
       const history = messages
         .filter(m => m.role === 'user' || m.role === 'assistant')
         .map(m => ({ role: m.role, content: m.content }));
-      history.push({ role: 'user', content: userMessage });
+
+      const looksLikeResearch = isResearchPrompt(userMessage);
+      const referencesActive = activeSubject
+        ? userMessage.toLowerCase().includes(activeSubject.toLowerCase())
+        : false;
+      const enrichedMessage =
+        activeSubject && !looksLikeResearch && !referencesActive
+          ? `${userMessage}\n\n[Context: The company in focus is ${activeSubject}.]`
+          : userMessage;
+
+      history.push({ role: 'user', content: enrichedMessage });
 
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('No session');
@@ -914,7 +932,14 @@ export function ResearchChat() {
           'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ messages: history, stream: true, chatId: chatId ?? currentChatId, config: cfg, research_type: depth }),
+        body: JSON.stringify({
+          messages: history,
+          stream: true,
+          chatId: chatId ?? currentChatId,
+          config: cfg,
+          research_type: depth,
+          active_subject: activeSubject || null
+        }),
         signal: controller.signal,
       });
       console.log('[DEBUG] Response status:', response.status, response.statusText);
@@ -1169,11 +1194,17 @@ export function ResearchChat() {
 
   // Next Actions helpers
   const handleStartNewCompany = () => {
-    setInputValue('');
     setActiveSubject(null);
+    setInputValue('Research ');
+    setShowClarify(false);
     setFocusComposerTick(t => t + 1);
   };
   const handleContinueCompany = () => {
+    if (activeSubject) {
+      setInputValue(`Continue research on ${activeSubject}`);
+    } else {
+      setInputValue('Research ');
+    }
     setFocusComposerTick(t => t + 1);
   };
   const handleSummarizeLast = async () => {
@@ -1198,6 +1229,11 @@ export function ResearchChat() {
     } catch (e: any) {
       addToast({ type: 'error', title: 'Failed to draft email', description: e?.message || String(e) });
     }
+  };
+
+  const handleOpenRefine = () => {
+    setRefineFacets(prev => (prev.length ? prev : Array.from(ALL_REFINE_FACETS)));
+    setShowRefine(true);
   };
 
   const canUndoSubject = () => {
@@ -1614,7 +1650,20 @@ export function ResearchChat() {
               {thinkingEvents.length > 0 && (
                 <div className="space-y-2">
                   {thinkingEvents.map(ev => (
-                    <ThinkingIndicator key={ev.id} type={ev.type} content={ev.content} query={ev.query} sources={ev.sources} url={ev.url} count={ev.count} companies={ev.companies} />
+                    <ThinkingIndicator
+                      key={ev.id}
+                      type={ev.type}
+                      content={ev.content}
+                      query={ev.query}
+                      sources={ev.sources}
+                      url={ev.url}
+                      count={ev.count}
+                      companies={ev.companies}
+                      company={ev.company}
+                      icp={ev.icp}
+                      critical={ev.critical}
+                      important={ev.important}
+                    />
                   ))}
                 </div>
               )}
@@ -1625,15 +1674,27 @@ export function ResearchChat() {
 
               {/* Next Actions bar after a completed assistant turn */}
               {!streamingMessage && lastAssistantMessage && (
-                <div className="mt-3 flex flex-wrap items-center gap-2 p-2 border border-gray-200 rounded-lg bg-white">
-                  <span className="text-xs text-gray-600 mr-2">Next actions:</span>
-                  <button className="px-2.5 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700" onClick={handleStartNewCompany}>Start new company</button>
-                  <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" onClick={handleContinueCompany}>Continue {activeSubject ? `with ${activeSubject}` : 'this company'}</button>
-                  <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" onClick={async () => { await handleSummarizeLast(); }}>Summarize</button>
-                  <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" onClick={handleEmailDraftFromLast}>Email draft</button>
-                  <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" aria-label="Save to Research" onClick={openSaveForLastAssistant}>Save to Research</button>
-                  <button className="px-2.5 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" onClick={() => setShowRefine(true)}>Refine scope</button>
-                  <label className="ml-auto text-xs text-gray-700 inline-flex items-center gap-1">
+                <div className="mt-3 flex flex-wrap items-center gap-2 p-3 border border-gray-200 rounded-xl bg-white shadow-sm">
+                  <span className="text-xs text-gray-600 mr-2 font-semibold uppercase tracking-wide">Next actions</span>
+                  <button className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 text-gray-800 rounded-lg hover:border-gray-300 hover:bg-gray-50" onClick={handleStartNewCompany}>
+                    + Start new company
+                  </button>
+                  <button className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 text-gray-800 rounded-lg hover:border-gray-300 hover:bg-gray-50" onClick={handleContinueCompany}>
+                    ↺ Continue {activeSubject ? activeSubject : 'current company'}
+                  </button>
+                  <button className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 text-gray-800 rounded-lg hover:border-gray-300 hover:bg-gray-50" onClick={async () => { await handleSummarizeLast(); }}>
+                    📝 Summarize
+                  </button>
+                  <button className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 text-gray-800 rounded-lg hover:border-gray-300 hover:bg-gray-50" onClick={handleEmailDraftFromLast}>
+                    ✉️ Draft email
+                  </button>
+                  <button className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 text-gray-800 rounded-lg hover:border-gray-300 hover:bg-gray-50" aria-label="Save to Research" onClick={openSaveForLastAssistant}>
+                    💾 Save to Research
+                  </button>
+                  <button className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 text-gray-800 rounded-lg hover:border-gray-300 hover:bg-gray-50" onClick={handleOpenRefine}>
+                    🎯 Refine focus
+                  </button>
+                  <label className="ml-auto text-xs text-gray-500 inline-flex items-center gap-1">
                     <input type="checkbox" checked={clarifiersLocked} onChange={(e) => setClarifiersLocked(e.target.checked)} />
                     No more setup questions this chat
                   </label>

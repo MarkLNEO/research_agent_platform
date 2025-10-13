@@ -113,6 +113,8 @@ test.describe('End-to-end UX flow (Quick)', () => {
       const cancel = page.getByRole('button', { name: /^Cancel$/i })
       await cancel.click()
       await expect(dialog).toBeHidden()
+    } else {
+      await page.keyboard.press('Escape').catch(() => {})
     }
 
     // 5) Logout → Login
