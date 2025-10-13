@@ -593,7 +593,7 @@ export default async function handler(req: any, res: any) {
         model: selectedModel,
         instructions,
         input,
-        text: { format: { type: 'text' }, verbosity: 'low' },
+        text: { format: { type: 'text' }, verbosity: isQuick ? 'low' : 'medium' },
         reasoning: { effort: reasoningEffort },
         tools: useTools ? [{ type: 'web_search' }] : [],
         include: ['reasoning.encrypted_content', 'web_search_call.results'] as any,

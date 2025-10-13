@@ -1105,7 +1105,7 @@ useEffect(() => {
       if (depth === 'quick') cfg.model = 'gpt-5-mini';
       if (depth === 'specific') cfg.model = 'gpt-5';
       cfg.clarifiers_locked = clarifiersLocked;
-      cfg.facet_budget = depth === 'quick' ? 3 : depth === 'deep' ? 8 : 6;
+      cfg.facet_budget = depth === 'quick' ? 3 : depth === 'deep' ? 10 : 6;
 
       // Setup abort controller for Stop action
       const controller = new AbortController();
