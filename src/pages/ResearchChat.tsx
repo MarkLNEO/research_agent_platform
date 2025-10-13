@@ -1318,7 +1318,7 @@ export function ResearchChat() {
   };
   const handleSummarizeLast = async () => {
     if (!currentChatId) return;
-    await handleSendMessageWithChat(currentChatId, 'Summarize the above into a one-line headline (<=140 chars) and a TL;DR with 5–8 bullets. No web research.');
+    await handleSendMessageWithChat(currentChatId, 'Summarize the above into a one-line headline (<=140 chars) and a quick summary with 5–8 decision-relevant bullets. No web research.');
     void sendPreferenceSignal('length', { kind: 'categorical', choice: 'brief' }, { weight: 1.5 });
   };
   const handleEmailDraftFromLast = async () => {
@@ -1811,7 +1811,7 @@ export function ResearchChat() {
                     } : undefined}
                     onSummarize={isLastAssistant ? async () => {
                       setPostSummarizeNudge(false);
-                      await handleSendMessageWithChat(currentChatId!, 'Summarize the above into a TL;DR (1–2 sentences) followed by 5–8 decision-relevant bullets. Do not ask for inputs. No web research.');
+                      await handleSendMessageWithChat(currentChatId!, 'Summarize the above into a quick summary (1–2 sentences) followed by 5–8 decision-relevant bullets. Do not ask for inputs. No web research.');
                       void sendPreferenceSignal('length', { kind: 'categorical', choice: 'brief' }, { weight: 1.5 });
                       setPostSummarizeNudge(true);
                     } : undefined}
@@ -1876,11 +1876,11 @@ export function ResearchChat() {
                 </div>
               )}
 
-              {/* Post-summarize nudge: offer to persist TL;DR or brevity preference */}
+              {/* Post-summarize nudge: offer to persist summary or brevity preference */}
               {postSummarizeNudge && (
                 <div className="mt-3 flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg p-3">
                   <div className="text-xs text-blue-900">
-                    Prefer me to keep outputs shorter or always include a TL;DR next time?
+                    Prefer me to keep outputs shorter or always include a quick summary next time?
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -1895,7 +1895,7 @@ export function ResearchChat() {
                             body: JSON.stringify({ prompt_config: { always_tldr: true } })
                           });
                           void sendPreferenceSignal('tldr_trigger', { tokens: 0, choice: 'always' }, { weight: 1.2 });
-                          addToast({ type: 'success', title: 'Preference saved', description: 'I\'ll include a TL;DR by default.' });
+                          addToast({ type: 'success', title: 'Preference saved', description: 'I\'ll include a quick summary by default.' });
                         } catch (e: any) {
                           addToast({ type: 'error', title: 'Save failed', description: e?.message || 'Unable to save preference' });
                         } finally {
@@ -1903,7 +1903,7 @@ export function ResearchChat() {
                         }
                       }}
                     >
-                      Always include TL;DR
+                      Always include summary
                     </button>
                     <button
                       className="px-2.5 py-1.5 text-xs font-medium bg-white border border-blue-300 text-blue-700 rounded hover:bg-blue-100"

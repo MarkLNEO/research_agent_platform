@@ -106,7 +106,7 @@ export function MessageBubble({
       };
     }
 
-    // Auto-generate a TL;DR if content is lengthy but missing an executive summary section
+    // Auto-generate a quick summary if content is lengthy but missing an executive summary section
     const plain = stripMd(remaining);
     const words = plain.split(/\s+/).filter(Boolean);
     if (words.length < 80) return null;
@@ -234,8 +234,8 @@ export function MessageBubble({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-sm font-semibold text-blue-900">Executive Summary</h3>
-                    <span className="px-2 py-1 text-[11px] font-bold bg-blue-600 text-white rounded-full">
-                      {autoSummary ? 'Auto TL;DR' : 'TL;DR'}
+      <span className="px-2 py-1 text-[11px] font-bold bg-blue-600 text-white rounded-full">
+                      {autoSummary ? 'Auto Summary' : 'Quick Summary'}
                     </span>
                   </div>
                   <Streamdown className="prose prose-sm text-gray-800 max-w-none">

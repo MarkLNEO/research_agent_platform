@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -10,6 +10,12 @@ import { ProfileCompleteness } from '../components/ProfileCompleteness';
 import { ThinkingIndicator } from '../components/ThinkingIndicator';
 import { ArrowLeft, User, ChevronDown, ClipboardList } from 'lucide-react';
 import type { TrackedAccount } from '../services/accountService';
+
+const DEFAULT_PROMPT_CONFIG = {
+  preferred_research_type: null as 'quick' | 'deep' | 'specific' | null,
+  default_output_brevity: 'standard' as 'short' | 'standard' | 'long',
+  always_tldr: true,
+};
 
 interface Message {
   id: string;
@@ -46,16 +52,103 @@ export function CompanyProfile() {
   const [profileData, setProfileData] = useState<any>(null);
   const [customCriteriaCount, setCustomCriteriaCount] = useState(0);
   const [signalPreferencesCount, setSignalPreferencesCount] = useState(0);
+  const [promptConfig, setPromptConfig] = useState<{ preferred_research_type: 'quick' | 'deep' | 'specific' | null; default_output_brevity: 'short' | 'standard' | 'long'; always_tldr: boolean } | null>(null);
+  const [updatingPref, setUpdatingPref] = useState<string | null>(null);
   const [streamingMessage, setStreamingMessage] = useState('');
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasInitialized = useRef(false);
 
+  const preferenceSummary = useMemo(() => {
+    const config = promptConfig ?? DEFAULT_PROMPT_CONFIG;
+    const depthLabel = config.preferred_research_type === 'deep'
+      ? 'Deep brief (~2 min)'
+      : config.preferred_research_type === 'quick'
+      ? 'Quick scan (~30 sec)'
+      : 'Standard depth (~1 min)';
+    const lengthLabel = config.default_output_brevity === 'short'
+      ? 'Concise length (≤500 words)'
+      : config.default_output_brevity === 'long'
+      ? 'Comprehensive length (1000+ words)'
+      : 'Balanced length (500-1000 words)';
+    const tldrLabel = config.always_tldr ? 'Quick summary always included' : 'Summary provided on request only';
+    const focus: string[] = [];
+    if (customCriteriaCount > 0) focus.push('Critical criteria highlighted automatically');
+    if (signalPreferencesCount > 0) focus.push('Buying signals surfaced first');
+    return { depthLabel, lengthLabel, tldrLabel, focus };
+  }, [promptConfig, customCriteriaCount, signalPreferencesCount]);
+
+  const depthOptions = useMemo(
+    () => [
+      {
+        id: 'quick',
+        label: 'Quick',
+        description: '30 sec • Headlines & essentials',
+        value: 'quick' as 'quick' | 'deep' | 'specific' | null,
+      },
+      {
+        id: 'standard',
+        label: 'Standard',
+        description: '≈1 min • Balanced depth',
+        value: null as 'quick' | 'deep' | 'specific' | null,
+      },
+      {
+        id: 'deep',
+        label: 'Deep',
+        description: '≈2 min • Comprehensive brief',
+        value: 'deep' as 'quick' | 'deep' | 'specific' | null,
+      },
+    ],
+    []
+  );
+
+  const lengthOptions = useMemo(
+    () => [
+      {
+        id: 'short',
+        label: 'Concise',
+        description: '≤500 words • Quick read',
+        value: 'short' as 'short' | 'standard' | 'long',
+      },
+      {
+        id: 'standard-length',
+        label: 'Standard',
+        description: '500-1000 words • Balanced detail',
+        value: 'standard' as 'short' | 'standard' | 'long',
+      },
+      {
+        id: 'long',
+        label: 'Detailed',
+        description: '1000+ words • Full narrative',
+        value: 'long' as 'short' | 'standard' | 'long',
+      },
+    ],
+    []
+  );
+
+  const tldrOptions = useMemo(
+    () => [
+      {
+        id: 'tldr-always',
+        label: 'Always include summary',
+        description: 'Lead with an executive overview',
+        value: true,
+      },
+      {
+        id: 'tldr-optional',
+        label: 'Only when I ask',
+        description: 'Skip the summary unless requested',
+        value: false,
+      },
+    ],
+    []
+  );
+
   const refreshProfileData = async () => {
     if (!user) return null;
 
-    const [profileResult, criteriaResult, signalsResult] = await Promise.all([
+    const [profileResult, criteriaResult, signalsResult, promptConfigResult] = await Promise.all([
       supabase
         .from('company_profiles')
         .select('*')
@@ -68,13 +161,24 @@ export function CompanyProfile() {
       supabase
         .from('user_signal_preferences')
         .select('id')
+        .eq('user_id', user.id),
+      supabase
+        .from('user_prompt_config')
+        .select('preferred_research_type, default_output_brevity, always_tldr')
         .eq('user_id', user.id)
+        .maybeSingle()
     ]);
 
     const profile = profileResult.data;
     setProfileData(profile);
     setCustomCriteriaCount(criteriaResult.data?.length || 0);
     setSignalPreferencesCount(signalsResult.data?.length || 0);
+    const prompt = promptConfigResult.data || DEFAULT_PROMPT_CONFIG;
+    setPromptConfig({
+      preferred_research_type: prompt.preferred_research_type ?? null,
+      default_output_brevity: (prompt.default_output_brevity as 'short' | 'standard' | 'long') || 'standard',
+      always_tldr: typeof prompt.always_tldr === 'boolean' ? prompt.always_tldr : true,
+    });
     return profile;
   };
 
@@ -112,6 +216,50 @@ export function CompanyProfile() {
       void sendInitialGreeting(!!profile, profile, chatData.id);
     }
     setInitializing(false);
+  };
+
+  const updatePromptPreference = async (
+    updates: Partial<{ preferred_research_type: 'quick' | 'deep' | 'specific' | null; default_output_brevity: 'short' | 'standard' | 'long'; always_tldr: boolean }>,
+    key: string
+  ) => {
+    if (!user) return;
+    const previous = promptConfig ? { ...promptConfig } : { ...DEFAULT_PROMPT_CONFIG };
+    const next = { ...previous, ...updates };
+    setPromptConfig(next);
+    setUpdatingPref(key);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const res = await fetch('/api/update-profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ prompt_config: updates }),
+      });
+
+      if (!res.ok) {
+        const detail = (await res.text()) || 'Failed to update preferences';
+        throw new Error(detail);
+      }
+
+      if (Object.prototype.hasOwnProperty.call(updates, 'preferred_research_type')) {
+        const value = updates.preferred_research_type;
+        if (value) localStorage.setItem('preferred_research_type', value);
+        else localStorage.removeItem('preferred_research_type');
+      }
+
+      addToast({ type: 'success', title: 'Preferences updated', description: 'Future research will use these defaults.' });
+      window.dispatchEvent(new CustomEvent('profile:updated', { detail: { userId: user.id } }));
+    } catch (error: any) {
+      console.error('Failed to update prompt preferences', error);
+      setPromptConfig(previous);
+      addToast({ type: 'error', title: 'Update failed', description: error?.message || 'Unable to update preferences.' });
+    } finally {
+      setUpdatingPref(null);
+    }
   };
 
   const loadChats = async () => {
@@ -627,6 +775,118 @@ export function CompanyProfile() {
                       signal_preferences_count: signalPreferencesCount
                     }}
                   />
+                )}
+                {promptConfig && (
+                  <div className="rounded-2xl border border-purple-200 bg-purple-50/60 p-5 shadow-sm">
+                    <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                      <div>
+                        <h2 className="text-base font-semibold text-purple-900">Research preferences</h2>
+                        <p className="text-xs text-purple-700 mt-1">
+                          These defaults apply automatically whenever you run company research.
+                        </p>
+                      </div>
+                      <span className="text-xs text-purple-600">{updatingPref ? 'Saving…' : 'Instantly applied'}</span>
+                    </div>
+
+                    <div className="mt-4 space-y-5">
+                      <div>
+                        <p className="text-xs font-semibold text-purple-900 uppercase tracking-wide mb-2">Depth</p>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          {depthOptions.map(option => {
+                            const currentDepth = promptConfig?.preferred_research_type === 'specific' ? null : promptConfig?.preferred_research_type ?? null;
+                            const active = currentDepth === option.value;
+                            return (
+                              <button
+                                key={option.id}
+                                type="button"
+                                onClick={() => updatePromptPreference({ preferred_research_type: option.value }, 'depth')}
+                                disabled={updatingPref === 'depth'}
+                                className={`flex-1 min-w-[160px] px-4 py-3 border-2 rounded-xl text-left transition-all ${
+                                  active
+                                    ? 'bg-purple-600 text-white border-purple-600 shadow-md'
+                                    : 'bg-white text-gray-700 border-purple-200 hover:border-purple-400 hover:shadow-sm'
+                                } ${updatingPref === 'depth' ? 'opacity-70 cursor-wait' : ''}`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-sm font-semibold">{option.label}</span>
+                                  {active && <span className="text-[10px] font-semibold uppercase">Active</span>}
+                                </div>
+                                <p className={`text-xs mt-1 ${active ? 'text-purple-100' : 'text-gray-500'}`}>{option.description}</p>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className="text-xs font-semibold text-purple-900 uppercase tracking-wide mb-2">Length</p>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          {lengthOptions.map(option => {
+                            const active = (promptConfig?.default_output_brevity || 'standard') === option.value;
+                            return (
+                              <button
+                                key={option.id}
+                                type="button"
+                                onClick={() => updatePromptPreference({ default_output_brevity: option.value }, 'length')}
+                                disabled={updatingPref === 'length'}
+                                className={`flex-1 min-w-[160px] px-4 py-3 border-2 rounded-xl text-left transition-all ${
+                                  active
+                                    ? 'bg-purple-600 text-white border-purple-600 shadow-md'
+                                    : 'bg-white text-gray-700 border-purple-200 hover:border-purple-400 hover:shadow-sm'
+                                } ${updatingPref === 'length' ? 'opacity-70 cursor-wait' : ''}`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-sm font-semibold">{option.label}</span>
+                                  {active && <span className="text-[10px] font-semibold uppercase">Active</span>}
+                                </div>
+                                <p className={`text-xs mt-1 ${active ? 'text-purple-100' : 'text-gray-500'}`}>{option.description}</p>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className="text-xs font-semibold text-purple-900 uppercase tracking-wide mb-2">Summary preference</p>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          {tldrOptions.map(option => {
+                            const active = Boolean(promptConfig?.always_tldr) === option.value;
+                            return (
+                              <button
+                                key={option.id}
+                                type="button"
+                                onClick={() => updatePromptPreference({ always_tldr: option.value }, 'tldr')}
+                                disabled={updatingPref === 'tldr'}
+                                className={`flex-1 min-w-[160px] px-4 py-3 border-2 rounded-xl text-left transition-all ${
+                                  active
+                                    ? 'bg-purple-600 text-white border-purple-600 shadow-md'
+                                    : 'bg-white text-gray-700 border-purple-200 hover:border-purple-400 hover:shadow-sm'
+                                } ${updatingPref === 'tldr' ? 'opacity-70 cursor-wait' : ''}`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-sm font-semibold">{option.label}</span>
+                                  {active && <span className="text-[10px] font-semibold uppercase">Active</span>}
+                                </div>
+                                <p className={`text-xs mt-1 ${active ? 'text-purple-100' : 'text-gray-500'}`}>{option.description}</p>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="pt-4 mt-4 border-t border-purple-200">
+                        <p className="text-xs font-semibold text-purple-900 uppercase tracking-wide mb-2">What this unlocks</p>
+                        <ul className="text-xs text-purple-800 space-y-1">
+                          <li>• {preferenceSummary.depthLabel}</li>
+                          <li>• {preferenceSummary.lengthLabel}</li>
+                          <li>• {preferenceSummary.tldrLabel}</li>
+                          {preferenceSummary.focus.map((item, idx) => (
+                            <li key={idx}>• {item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
                 )}
                 <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-5 shadow-sm">
                   <div className="flex items-start gap-3">
