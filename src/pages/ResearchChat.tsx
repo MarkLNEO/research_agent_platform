@@ -1738,6 +1738,15 @@ export function ResearchChat() {
                     >
                       Track an account
                     </button>
+                    <button
+                      type="button"
+                      disabled
+                      title="Coming soon"
+                      className="px-3 py-1.5 text-xs rounded-full bg-gray-100 text-gray-400 cursor-not-allowed border border-dashed border-gray-300"
+                      aria-label="Lead list generator coming soon"
+                    >
+                      Lead list generator
+                    </button>
                   </div>
               </div>
               
@@ -2084,6 +2093,13 @@ export function ResearchChat() {
             <button className="text-left px-3 py-2 rounded hover:bg-gray-50" onClick={() => { setPaletteOpen(false); setInputValue('Research '); setFocusComposerTick(t=>t+1); }}>Research a company</button>
             <button className="text-left px-3 py-2 rounded hover:bg-gray-50" onClick={() => { setPaletteOpen(false); setBulkResearchOpen(true); }}>Upload list (Bulk research)</button>
             <button className="text-left px-3 py-2 rounded hover:bg-gray-50" onClick={() => { setPaletteOpen(false); handleAddAccount(); }}>Track account</button>
+            <button
+              className="text-left px-3 py-2 rounded text-gray-400 bg-gray-50 cursor-not-allowed"
+              disabled
+              title="Coming soon"
+            >
+              Lead list generator (coming soon)
+            </button>
           </div>
           <div className="mt-2 text-xs text-gray-500">Press Esc to close</div>
         </div>
