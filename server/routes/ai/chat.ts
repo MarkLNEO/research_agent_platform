@@ -324,6 +324,16 @@ export default async function handler(req: any, res: any) {
       const guard = (userContext.promptConfig as any)?.guardrail_profile;
       if (guard) instructions += `\n\n<guardrails>Use guardrail profile: ${guard}. Respect source allowlists and safety constraints.</guardrails>`;
     } catch {}
+    // If a client-selected template is provided, request the exact section order
+    try {
+      const tpl = (userConfig as any)?.template;
+      if (tpl && Array.isArray(tpl.sections) && tpl.sections.length > 0) {
+        const sectionList = tpl.sections.map((s: any) => `## ${s.label || s.id}`).join(`\n`);
+        const tplBlock = `\n\n<output_sections>Use the following sections in this exact order. Do not add placeholders and do not invent extra headings.\n${sectionList}\n</output_sections>`;
+        instructions += tplBlock;
+      }
+    } catch {}
+
     // Avoid encouraging verbose internal narration; let the model decide when brief progress helps.
     let input;
     let lastUserMessage: any = null;
@@ -351,6 +361,12 @@ export default async function handler(req: any, res: any) {
           const followUpMatch = /\b(ceo|cto|cfo|founder|leadership|headquarters|hq|revenue|funding|employees|valuation|security|stack|product|roadmap)\b/i.test(lastUserMessage.content);
           if (!extractedCompanyName && (pronounMatch || followUpMatch)) {
             effectiveRequest = `${lastUserMessage.content}\n\nContext: The company in focus is ${activeContextCompany}.`;
+          }
+        } else if (_isResearchQuery && !activeContextCompany) {
+          // Fallback: extract a subject from the request and pass it as explicit context
+          const dc = extractCompanyName(lastUserMessage.content);
+          if (dc) {
+            effectiveRequest = `${lastUserMessage.content}\n\nContext: The company in focus is ${dc}.`;
           }
         }
 
