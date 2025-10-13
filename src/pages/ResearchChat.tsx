@@ -1105,7 +1105,6 @@ useEffect(() => {
       // Setup abort controller for Stop action
       const controller = new AbortController();
       streamingAbortRef.current = controller;
-      pendingMetaRef.current = {};
 
       const response = await fetch(chatUrl, {
         method: 'POST',
