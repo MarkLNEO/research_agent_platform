@@ -285,8 +285,28 @@ export function ResearchChat() {
         prompt: `Which tracked accounts triggered ${signalTypes.join(', ')} signals this week?`,
       });
     }
-    return items.slice(0, 3);
-  }, [userProfile, customCriteria, signalPreferences]);
+    if (accountStats?.stale) {
+      items.push({
+        title: 'Refresh stale accounts',
+        description: `${accountStats.stale} tracked account${accountStats.stale === 1 ? '' : 's'} need an update.`,
+        prompt: 'Which tracked accounts have not been researched in the last two weeks?',
+      });
+    }
+    if (accountStats?.hot) {
+      items.push({
+        title: 'Hot accounts right now',
+        description: `${accountStats.hot} account${accountStats.hot === 1 ? ' has' : 's have'} critical signals.`,
+        prompt: 'Which of my tracked accounts are hot opportunities today?',
+      });
+    }
+    const seen = new Set<string>();
+    return items.filter(item => {
+      const key = item.prompt.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 4);
+  }, [userProfile, customCriteria, signalPreferences, accountStats]);
   const dismissContextTooltip = () => {
     setShowContextTooltip(false);
     if (typeof window !== 'undefined') {
@@ -349,9 +369,15 @@ export function ResearchChat() {
     void loadMessages(currentChatId);
   }, [currentChatId]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingMessage, thinkingEvents]);
+useEffect(() => {
+  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+}, [messages, streamingMessage, thinkingEvents]);
+
+useEffect(() => {
+  if (showRefine && refineFacets.length === 0) {
+    setRefineFacets([...ALL_REFINE_FACETS]);
+  }
+}, [showRefine, refineFacets.length]);
 
   // Load preference and handle quick starter
   useEffect(() => {

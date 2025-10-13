@@ -29,7 +29,7 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
   const loadAccounts = useCallback(async () => {
     try {
       setLoading(true);
-      const result = await listTrackedAccounts(filter);
+      const result = await listTrackedAccounts(filter === 'all' ? undefined : filter);
       setAccounts(result.accounts);
       setStats(result.stats);
       setError(null);
