@@ -239,6 +239,13 @@ export function ResearchChat() {
   // acknowledgment messages are displayed via ThinkingIndicator events
   const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([]);
   const [reasoningOpen, setReasoningOpen] = useState(false);
+  const [showInlineReasoning, setShowInlineReasoning] = useState<boolean>(() => {
+    try { return localStorage.getItem('showInlineReasoning') !== '0'; } catch { return true; }
+  });
+  const persistInlineReasoning = (v: boolean) => {
+    setShowInlineReasoning(v);
+    try { localStorage.setItem('showInlineReasoning', v ? '1' : '0'); } catch {}
+  };
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const autoSentRef = useRef(false);
@@ -1976,18 +1983,39 @@ useEffect(() => {
 
               {thinkingEvents.length > 0 && (() => {
                 const last = thinkingEvents[thinkingEvents.length - 1];
+                if (!showInlineReasoning) {
+                  return (
+                    <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 text-xs">
+                      <div className="text-blue-900">Reasoning hidden</div>
+                      <div className="flex items-center gap-3">
+                        <button className="text-blue-700 hover:text-blue-900" onClick={() => persistInlineReasoning(true)}>Show reasoning</button>
+                        <button className="text-blue-700 hover:text-blue-900" onClick={() => setReasoningOpen(true)}>View all</button>
+                      </div>
+                    </div>
+                  );
+                }
                 return (
                   <div className="bg-white border border-blue-100 rounded-xl shadow-sm">
                     <div className="px-4 py-2 flex items-center justify-between">
                       <div className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Reasoning</div>
-                      <button
-                        type="button"
-                        onClick={() => setReasoningOpen(true)}
-                        className="text-xs text-blue-700 hover:text-blue-900"
-                        aria-label="View full reasoning stream"
-                      >
-                        View all
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => persistInlineReasoning(false)}
+                          className="text-xs text-blue-700 hover:text-blue-900"
+                          aria-label="Hide reasoning"
+                        >
+                          Hide reasoning
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setReasoningOpen(true)}
+                          className="text-xs text-blue-700 hover:text-blue-900"
+                          aria-label="View full reasoning stream"
+                        >
+                          View all
+                        </button>
+                      </div>
                     </div>
                     <div className="px-4 pb-3">
                       <ThinkingIndicator
