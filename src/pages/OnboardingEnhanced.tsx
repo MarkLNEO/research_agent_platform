@@ -107,18 +107,12 @@ export function OnboardingEnhanced() {
   const [tempCriterion, setTempCriterion] = useState<Partial<CustomCriterion>>({});
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const suppressAutoScrollRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const initializedRef = useRef(false);
 
   useEffect(() => {
     const node = messagesEndRef.current;
     if (!node) return;
-    if (suppressAutoScrollRef.current > 0) {
-      suppressAutoScrollRef.current -= 1;
-      node.scrollIntoView({ block: 'end' });
-      return;
-    }
     node.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages]);
 
@@ -207,19 +201,13 @@ export function OnboardingEnhanced() {
     }
   };
 
-  const addAgentMessage = async (
-    content: string,
-    withDelay: boolean = true,
-    animate: boolean = true,
-    suppressScroll: boolean = false
-  ) => {
+  const addAgentMessage = async (content: string, withDelay: boolean = true, animate: boolean = true) => {
     if (withDelay) {
       setIsTyping(true);
       await new Promise(resolve => setTimeout(resolve, 800));
     }
 
     const msgId = `agent-${Date.now()}`;
-    if (suppressScroll) suppressAutoScrollRef.current += 1;
     setMessages(prev => [...prev, { id: msgId, role: 'agent', content: '', streaming: true }]);
     setIsTyping(false);
 
@@ -236,11 +224,9 @@ export function OnboardingEnhanced() {
         );
       }
     } else {
-      if (suppressScroll) suppressAutoScrollRef.current += 1;
       setMessages(prev => prev.map(msg => (msg.id === msgId ? { ...msg, content } : msg)));
     }
 
-    if (suppressScroll) suppressAutoScrollRef.current += 1;
     setMessages(prev =>
       prev.map(msg => (msg.id === msgId ? { ...msg, streaming: false } : msg))
     );
@@ -799,15 +785,7 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
         onConflict: 'user_id'
       });
 
-    await addAgentMessage(
-      `Perfect! You're all set up. I'm ready to help you research companies, find prospects, and provide personalized insights based on your ICP.\n\nRedirecting you to your dashboard...`,
-      false,
-      false,
-      true
-    );
-
-    // Navigate immediately; finish small profile updates in the background
-    navigate('/');
+    navigate('/', { replace: true });
     // Best-effort: default research preference to 'deep' without blocking
     (async () => {
       try {
