@@ -1,4 +1,4 @@
-import { Download, FileText, TrendingUp, Zap, Users, Target, Lightbulb } from 'lucide-react';
+import { Download, FileText, TrendingUp, Zap, Users, Target, Lightbulb, HelpCircle } from 'lucide-react';
 
 interface ResearchOutputProps {
   research: {
@@ -65,6 +65,7 @@ function PriorityBadge({ level }: { level?: string }) {
 }
 
 export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchOutputProps) {
+  const [showIcpWhy, setShowIcpWhy] = useState(false);
   return (
     <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 space-y-6" data-testid="research-output">
       {/* Header */}
@@ -127,6 +128,50 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
           color="text-green-600"
         />
       </div>
+
+      {/* ICP explanation */}
+      {(typeof research.icp_fit_score === 'number') && (
+        <div className="-mt-2">
+          <button
+            type="button"
+            onClick={() => setShowIcpWhy(v => !v)}
+            className="inline-flex items-center gap-1 text-xs text-blue-700 hover:text-blue-900"
+          >
+            <HelpCircle className="w-3.5 h-3.5" /> Why this score?
+          </button>
+          {showIcpWhy && (
+            <div className="mt-2 bg-white border border-blue-100 rounded-lg p-3">
+              {Array.isArray(research.custom_criteria_assessment) && research.custom_criteria_assessment.length > 0 ? (
+                <div className="text-sm text-gray-800">
+                  <div className="font-semibold mb-1">Criteria evaluation</div>
+                  <ul className="list-disc list-inside space-y-1">
+                    {research.custom_criteria_assessment.slice(0, 8).map((c: any, idx: number) => (
+                      <li key={idx}>
+                        <span className="font-medium">{c.name || c.field_name || 'Criterion'}:</span>{' '}
+                        <span className={`${c.status === 'met' ? 'text-green-700' : c.status === 'unknown' ? 'text-gray-700' : 'text-red-700'}`}>{String(c.status || c.value || 'unknown')}</span>
+                        {c.source && (
+                          <span className="text-xs text-gray-500"> — source: {typeof c.source === 'string' ? c.source : ''}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <div className="text-sm text-gray-700">This score is based on default criteria and recent signal strength.</div>
+              )}
+              <div className="mt-2">
+                <button
+                  type="button"
+                  onClick={() => { try { window.location.href = '/profile-coach'; } catch {} }}
+                  className="text-xs font-semibold text-blue-700 hover:text-blue-900 underline"
+                >
+                  Optimize ICP
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Company Data */}
       {research.company_data && Object.keys(research.company_data).length > 0 && (
