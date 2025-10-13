@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Send, Sparkles } from 'lucide-react';
-import { invalidateUserProfileCache } from '../hooks/useUserProfile';
+import { invalidateUserProfileCache, primeUserProfileCache } from '../hooks/useUserProfile';
 
 interface Message {
   id: string;
@@ -765,28 +765,56 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
   const finishOnboarding = async (researchFocus: string[]) => {
     if (!user) return;
 
-    await supabase
-      .from('company_profiles')
-      .upsert({
-        user_id: user.id,
-        company_name: profileData.companyName,
-        company_url: profileData.companyUrl,
-        user_role: profileData.userRole,
-        use_case: profileData.useCase,
-        industry: profileData.industry,
-        icp_definition: profileData.icpDefinition,
-        linkedin_url: profileData.linkedinUrl,
-        youtube_channel: profileData.youtubeChannel,
-        competitors: profileData.competitors,
-        target_titles: profileData.targetTitles,
-        research_focus: researchFocus,
-        onboarding_complete: true,
-        onboarding_step: 9
-      }, {
-        onConflict: 'user_id'
-      });
+    const payload = {
+      user_id: user.id,
+      company_name: profileData.companyName,
+      company_url: profileData.companyUrl,
+      user_role: profileData.userRole,
+      use_case: profileData.useCase,
+      industry: profileData.industry,
+      icp_definition: profileData.icpDefinition,
+      linkedin_url: profileData.linkedinUrl,
+      youtube_channel: profileData.youtubeChannel,
+      competitors: profileData.competitors,
+      target_titles: profileData.targetTitles,
+      research_focus: researchFocus,
+      onboarding_complete: true,
+      onboarding_step: 9
+    };
 
-    invalidateUserProfileCache(user.id);
+    const { data: profileRow, error } = await supabase
+      .from('company_profiles')
+      .upsert(payload, {
+        onConflict: 'user_id'
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('Failed to finalize onboarding profile', error);
+    }
+
+    const mergedProfile = profileRow
+      ? {
+          ...profileRow,
+          research_focus: researchFocus,
+          onboarding_complete: true,
+          onboarding_step: 9
+        }
+      : {
+          ...payload
+        };
+
+    if (profileRow || !error) {
+      primeUserProfileCache(user.id, mergedProfile, {
+        customCriteriaCount: customCriteria.length,
+        signalPreferencesCount: selectedSignals.length,
+        disqualifiersCount: 0
+      });
+    } else {
+      invalidateUserProfileCache(user.id);
+    }
+
     navigate('/', { replace: true });
     // Best-effort: default research preference to 'deep' without blocking
     (async () => {

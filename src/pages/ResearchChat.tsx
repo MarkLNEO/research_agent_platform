@@ -369,10 +369,17 @@ export function ResearchChat() {
       try {
         const { data: criteria } = await supabase
           .from('user_custom_criteria')
-          .select('id,name,importance')
+          .select('id, field_name, importance')
           .eq('user_id', user.id)
           .order('importance', { ascending: true });
-        if (criteria) setCustomCriteria(criteria as any[]);
+        if (criteria) {
+          setCustomCriteria(
+            (criteria as any[]).map(item => ({
+              ...item,
+              name: item.field_name ?? item.name ?? ''
+            }))
+          );
+        }
 
         const { data: signals } = await supabase
           .from('user_signal_preferences')

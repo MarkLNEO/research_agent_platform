@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
-interface ProfileData {
+export interface ProfileData {
   profile: any | null;
   customCriteriaCount: number;
   signalPreferencesCount: number;
@@ -13,6 +13,11 @@ interface ProfileData {
 
 const CACHE_DURATION = 5 * 60 * 1000;
 const profileCache = new Map<string, { data: ProfileData; timestamp: number }>();
+
+const notifyProfileUpdated = (userId: string, data?: ProfileData) => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('profile:updated', { detail: { userId, data } }));
+};
 
 export function useUserProfile(forceRefresh = false) {
   const { user } = useAuth();
@@ -100,8 +105,16 @@ export function useUserProfile(forceRefresh = false) {
 
   useEffect(() => {
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ userId?: string }>).detail;
+      const detail = (event as CustomEvent<{ userId?: string; data?: ProfileData }>).detail;
       if (detail?.userId && detail.userId === user?.id) {
+        if (detail.data) {
+          profileCache.set(user.id, {
+            data: detail.data,
+            timestamp: Date.now(),
+          });
+          setProfileData(detail.data);
+          return;
+        }
         if (user?.id) {
           profileCache.delete(user.id);
         }
@@ -182,8 +195,23 @@ export function useUserProfile(forceRefresh = false) {
 export function invalidateUserProfileCache(userId: string | null | undefined) {
   if (!userId) return;
   profileCache.delete(userId);
-  if (typeof window === 'undefined') return;
-  window.setTimeout(() => {
-    window.dispatchEvent(new CustomEvent('profile:updated', { detail: { userId } }));
-  }, 0);
+  notifyProfileUpdated(userId);
+}
+
+export function primeUserProfileCache(
+  userId: string | null | undefined,
+  profile: any,
+  overrides?: Partial<Pick<ProfileData, 'customCriteriaCount' | 'signalPreferencesCount' | 'disqualifiersCount'>>
+) {
+  if (!userId) return;
+  const primed: ProfileData = {
+    profile,
+    customCriteriaCount: overrides?.customCriteriaCount ?? 0,
+    signalPreferencesCount: overrides?.signalPreferencesCount ?? 0,
+    disqualifiersCount: overrides?.disqualifiersCount ?? 0,
+    loading: false,
+    error: null,
+  };
+  profileCache.set(userId, { data: primed, timestamp: Date.now() });
+  notifyProfileUpdated(userId, primed);
 }
