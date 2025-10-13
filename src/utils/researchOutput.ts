@@ -30,6 +30,7 @@ interface ResearchDraftInput {
   chatTitle?: string | null;
   agentType?: AgentType | string;
   sources?: { query?: string; sources?: string[] }[] | ResearchSource[];
+  activeSubject?: string | null;
 }
 
 const agentTypeToResearchType: Record<string, ResearchDraft['research_type']> = {
@@ -54,9 +55,38 @@ function inferResearchType(input: ResearchDraftInput): ResearchDraft['research_t
   return 'company';
 }
 
+const IGNORED_SUBJECTS = new Set([
+  'company research',
+  'company researcher',
+  'research insight',
+  'new research',
+  'new session',
+  'bulk research',
+  'profile coach',
+]);
+
+function sanitizeSubject(subject: string, input: ResearchDraftInput): string {
+  const trimmed = subject.trim();
+  const lower = trimmed.toLowerCase();
+  const active = (input.activeSubject || '').trim();
+  const returnActive = () => (active ? active : trimmed || (input.userMessage || '').trim());
+
+  if (!trimmed) return returnActive();
+  if (IGNORED_SUBJECTS.has(lower)) return returnActive();
+  if (lower.startsWith('research:')) {
+    const tail = lower.replace(/^research:\s*/, '');
+    if (!tail || IGNORED_SUBJECTS.has(tail)) return returnActive();
+  }
+  return trimmed;
+}
+
 function inferSubject(input: ResearchDraftInput): string {
   if (input.chatTitle && input.chatTitle.trim() && input.chatTitle.trim().toLowerCase() !== 'new research') {
-    return input.chatTitle.trim();
+    const normalizedTitle = input.chatTitle.trim();
+    const lowerTitle = normalizedTitle.toLowerCase();
+    if (!IGNORED_SUBJECTS.has(lowerTitle)) {
+      return normalizedTitle;
+    }
   }
 
   const headingMatch = input.assistantMessage.match(/^#+\s*(.+)$/m);
@@ -64,13 +94,22 @@ function inferSubject(input: ResearchDraftInput): string {
     return headingMatch[1].trim();
   }
 
+  if (input.userMessage) {
+    const user = input.userMessage.trim();
+    const researchRegex = /^research\s+(.+)/i;
+    const match = researchRegex.exec(user);
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+    if (user.length <= 120) {
+      return user;
+    }
+    return user.slice(0, 120);
+  }
+
   const firstLine = input.assistantMessage.split('\n').map(line => line.trim()).find(Boolean);
   if (firstLine) {
     return firstLine.replace(/[*_#>-]/g, '').trim().slice(0, 120) || 'Research Insight';
-  }
-
-  if (input.userMessage) {
-    return input.userMessage.slice(0, 120);
   }
 
   return 'Research Insight';
@@ -164,7 +203,7 @@ export function approximateTokenCount(text: string): number {
 export function buildResearchDraft(input: ResearchDraftInput): ResearchDraft {
   let normalizedSources = normalizeSourceEvents(input.sources);
   const researchType = inferResearchType(input);
-  const subject = inferSubject(input);
+  const subject = sanitizeSubject(inferSubject(input), input);
   const markdown = input.assistantMessage.trim();
   // If no captured sources from reasoning/search, attempt to extract first URL from markdown
   if (normalizedSources.length === 0) {

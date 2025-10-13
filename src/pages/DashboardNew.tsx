@@ -337,6 +337,7 @@ export function DashboardNew() {
       chatTitle: chat?.title,
       agentType,
       sources: message.metadata?.sources,
+      activeSubject: message.metadata?.subject || chat?.title || null,
     });
 
     const mergedDraft: ResearchDraft = {

@@ -122,6 +122,15 @@ const generateSuggestions = (profile: any, criteria: any[], signalPrefs: any[]):
   return suggestions.slice(0, 4);
 };
 
+const summarizeForMemory = (markdown: string): string => {
+  if (!markdown) return '';
+  const execMatch = markdown.match(/##\s+Executive Summary\s*([\s\S]*?)(?=\n##\s+|$)/i);
+  if (execMatch?.[1]) {
+    return execMatch[1].replace(/\s+/g, ' ').trim().slice(0, 400);
+  }
+  return markdown.split('\n').slice(0, 6).join(' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+};
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -217,6 +226,7 @@ export function ResearchChat() {
       localStorage.setItem('contextTooltipSeen', 'true');
     }
   };
+  const lastResearchSummaryRef = useRef<string>('');
 
   const lastAssistantIndex = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -553,6 +563,7 @@ export function ResearchChat() {
       setCurrentChatId(data.id);
       setMessages([]);
       skipInitialLoadRef.current = true;
+      lastResearchSummaryRef.current = '';
       return data.id;
     }
     return null;
@@ -608,7 +619,9 @@ export function ResearchChat() {
 
     const detectedCompany = extractCompanyNameFromQuery(normalized);
     if (detectedCompany) setActiveSubject(detectedCompany);
-
+    if (detectedCompany && detectedCompany !== activeSubject) {
+      lastResearchSummaryRef.current = '';
+    }
     const looksLikeResearch = isResearchPrompt(normalized);
     if (looksLikeResearch && userProfile) {
       const criticalNames = customCriteria
@@ -691,6 +704,7 @@ export function ResearchChat() {
       });
       setStreamingMessage('');
       setThinkingEvents([]);
+      lastResearchSummaryRef.current = summarizeForMemory(assistant);
 
       // JIT prompts based on usage milestones and profile state
       try {
@@ -890,10 +904,13 @@ export function ResearchChat() {
       const referencesActive = activeSubject
         ? userMessage.toLowerCase().includes(activeSubject.toLowerCase())
         : false;
+      const summarySnippet = !looksLikeResearch && lastResearchSummaryRef.current
+        ? `\n\n[Recent findings recap: ${lastResearchSummaryRef.current}]`
+        : '';
       const enrichedMessage =
         activeSubject && !looksLikeResearch && !referencesActive
-          ? `${userMessage}\n\n[Context: The company in focus is ${activeSubject}.]`
-          : userMessage;
+          ? `${userMessage}\n\n[Context: The company in focus is ${activeSubject}.]${summarySnippet}`
+          : `${userMessage}${summarySnippet}`;
 
       history.push({ role: 'user', content: enrichedMessage });
 
@@ -1198,6 +1215,7 @@ export function ResearchChat() {
     setInputValue('Research ');
     setShowClarify(false);
     setFocusComposerTick(t => t + 1);
+    lastResearchSummaryRef.current = '';
   };
   const handleContinueCompany = () => {
     if (activeSubject) {
@@ -1281,6 +1299,7 @@ export function ResearchChat() {
       chatTitle: chats.find(c => c.id === currentChatId)?.title,
       agentType: 'company_research',
       sources,
+      activeSubject,
     });
     const subj = (draft.subject || '').trim();
     const active = (activeSubject || '').trim();
@@ -1620,6 +1639,7 @@ export function ResearchChat() {
                         chatTitle: chats.find(c => c.id === currentChatId)?.title,
                         agentType: 'company_research',
                         sources,
+                        activeSubject,
                       });
 
                       // Proactive subject mismatch handling (before Save dialog)
