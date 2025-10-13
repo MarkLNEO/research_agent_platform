@@ -107,11 +107,19 @@ export function OnboardingEnhanced() {
   const [tempCriterion, setTempCriterion] = useState<Partial<CustomCriterion>>({});
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const suppressAutoScrollRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const initializedRef = useRef(false);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const node = messagesEndRef.current;
+    if (!node) return;
+    if (suppressAutoScrollRef.current) {
+      suppressAutoScrollRef.current = false;
+      node.scrollIntoView({ block: 'end' });
+      return;
+    }
+    node.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages]);
 
   // Keep the text input focused for fast replies
@@ -783,6 +791,7 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
         onConflict: 'user_id'
       });
 
+    suppressAutoScrollRef.current = true;
     await addAgentMessage(
       `Perfect! You're all set up. I'm ready to help you research companies, find prospects, and provide personalized insights based on your ICP.\n\nRedirecting you to your dashboard...`,
       false,
