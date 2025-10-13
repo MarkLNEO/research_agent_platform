@@ -512,21 +512,24 @@ export function CompanyProfile() {
       // Instrumentation start
       const startedAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
       try { window.dispatchEvent(new CustomEvent('llm:request', { detail: { page: 'settings', url: chatUrl, ts: Date.now() } })); } catch {}
-      const response = await fetch(
-        chatUrl,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
+      const response = await fetch(chatUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: conversationHistory,
+          stream: true,
+          chat_id: activeChatId,
+          agentType: 'settings_agent',
+          config: {
+            disable_fast_plan: true,
+            clarifiers_locked: false,
           },
-          body: JSON.stringify({
-            messages: conversationHistory,
-            stream: true,
-            chat_id: activeChatId
-          }),
-        }
-      );
+          research_type: null,
+        }),
+      });
 
       if (!response.ok) {
         if (response.status === 401) {

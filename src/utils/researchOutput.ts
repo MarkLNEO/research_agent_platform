@@ -276,6 +276,23 @@ export function buildResearchDraft(input: ResearchDraftInput): ResearchDraft {
   const researchType = inferResearchType(input);
   const subject = sanitizeSubject(inferSubject(input), input);
   const markdown = input.assistantMessage.replace(ICP_META_BLOCK_REGEX, '').trim();
+
+  const clarificationPatterns = [
+    /what type of research would be most helpful\??/i,
+    /do you mean the company/i,
+    /what do you want researched\??/i,
+    /pick from these or list your own/i,
+    /i['’]ll start the web search once you confirm/i,
+    /objective \(why you need it\)/i,
+    /timeframe \(e\.g\./i,
+    /deliverable \(brief summary, detailed report, slide bullets\)/i,
+    /depth \(quick \/ medium \/ deep\)/i,
+    /any sources to include or exclude/i,
+    /quick question before i start/i,
+    /choose research type/i
+  ];
+  const isClarification = clarificationPatterns.some(pattern => pattern.test(markdown));
+
   // If no captured sources from reasoning/search, attempt to extract first URL from markdown
   if (normalizedSources.length === 0) {
     const firstUrl = (markdown.match(/https?:\/\/[^\s)]+/i) || [])[0];
@@ -283,6 +300,28 @@ export function buildResearchDraft(input: ResearchDraftInput): ResearchDraft {
       normalizedSources = [{ url: firstUrl }];
     }
   }
+
+  if (isClarification || (!/##\s+/.test(markdown) && normalizedSources.length === 0 && markdown.length < 400)) {
+    return {
+      subject,
+      research_type: researchType,
+      executive_summary: '',
+      markdown_report: '',
+      icp_fit_score: undefined,
+      signal_score: undefined,
+      composite_score: undefined,
+      priority_level: undefined,
+      confidence_level: undefined,
+      sources: [],
+      company_data: {},
+      leadership_team: [],
+      buying_signals: [],
+      custom_criteria_assessment: [],
+      personalization_points: [],
+      recommended_actions: {},
+    };
+  }
+
   const executiveSummary = buildSummary(markdown);
   const stripExecSection = (md: string): string => {
     // Remove canonical section

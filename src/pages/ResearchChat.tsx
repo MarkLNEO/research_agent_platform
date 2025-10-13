@@ -260,8 +260,8 @@ export function ResearchChat() {
   const location = useLocation();
   const autoSentRef = useRef(false);
   const [showClarify, setShowClarify] = useState(false);
-  const [focusComposerTick, setFocusComposerTick] = useState(0);
   const [pendingQuery, setPendingQuery] = useState<string | null>(null);
+  const [focusComposerTick, setFocusComposerTick] = useState(0);
   const [preferredResearchType, setPreferredResearchType] = useState<'deep' | 'quick' | 'specific' | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveDraft, setSaveDraft] = useState<ResearchDraft | null>(null);
@@ -787,7 +787,7 @@ useEffect(() => {
     }
   };
 
-  const handleSendMessageWithChat = async (chatId: string, text: string) => {
+  const handleSendMessageWithChat = async (chatId: string, text: string, runModeOverride?: 'deep' | 'quick' | 'specific') => {
     if (!text.trim() || loading) return;
     const normalized = text.trim();
     const now = Date.now();
@@ -861,7 +861,7 @@ useEffect(() => {
         .select()
         .single();
 
-      let assistant = await streamAIResponse(text, chatId);
+      let assistant = await streamAIResponse(text, chatId, { overrideDepth: runModeOverride });
 
       // Normalize markdown for numbering and headings
       try {
@@ -1046,15 +1046,11 @@ useEffect(() => {
     }
   };
 
-  const needsClarification = (text: string) => {
-    const t = text.toLowerCase();
-    return t.includes('research') || t.includes('tell me about') || t.includes('analyze') || t.includes('find out about');
-  };
-
   const startSuggestion = (prompt: string) => {
     if (!prompt) return;
     setInputValue(prompt);
     setShowClarify(false);
+    setPendingQuery(null);
     setFocusComposerTick(t => t + 1);
   };
 
@@ -1062,27 +1058,29 @@ useEffect(() => {
     const content = inputValue.trim();
     if (!content) return;
 
-    // If no preference yet and looks like a research task, ask for clarification
-    if (!preferredResearchType && needsClarification(content)) {
+    if (!preferredResearchType && isResearchPrompt(content)) {
       setPendingQuery(content);
       setShowClarify(true);
+      setInputValue('');
       return;
     }
 
     setInputValue('');
     if (!currentChatId) {
       const id = await createNewChat();
-      if (id) await handleSendMessageWithChat(id, content);
+      if (id) await handleSendMessageWithChat(id, content, type);
       return;
     }
-    await handleSendMessageWithChat(currentChatId, content);
+    await handleSendMessageWithChat(currentChatId, content, type);
   };
 
   const persistPreference = async (type: 'deep' | 'quick' | 'specific') => {
+    setPreferredResearchType(type);
+    try { localStorage.setItem('preferred_research_type', type); } catch {}
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      
+
       const updateProfileUrl = '/api/update-profile';
       await fetch(updateProfileUrl, {
         method: 'POST',
@@ -1093,8 +1091,6 @@ useEffect(() => {
         },
         body: JSON.stringify({ prompt_config: { preferred_research_type: type } }),
       });
-      localStorage.setItem('preferred_research_type', type);
-      setPreferredResearchType(type);
     } catch (err) {
       console.error('Failed to persist preference:', err);
     }
@@ -1111,7 +1107,7 @@ useEffect(() => {
       weight: type === 'quick' ? 1.5 : type === 'deep' ? 1.2 : 1,
     });
     setShowClarify(false);
-    const content = pendingQuery || inputValue.trim();
+    const content = (pendingQuery || inputValue.trim());
     setPendingQuery(null);
     if (!content) return;
     setInputValue('');
@@ -1123,7 +1119,11 @@ useEffect(() => {
     await handleSendMessageWithChat(currentChatId, content);
   };
 
-  const streamAIResponse = async (userMessage: string, chatId?: string, extraCfg?: Record<string, any>): Promise<string> => {
+  const streamAIResponse = async (
+    userMessage: string,
+    chatId?: string,
+    options?: { config?: Record<string, any>; overrideDepth?: 'deep' | 'quick' | 'specific' }
+  ): Promise<string> => {
     try {
       const history = messages
         .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -1159,9 +1159,10 @@ useEffect(() => {
         console.log('[LLM][research] request', { url: chatUrl });
       } catch {}
       // Build config to influence model depth based on user preference/clarifier
-      const depth = preferredResearchType || (needsClarification(userMessage) ? null : 'specific');
+      const overrideDepth = options?.overrideDepth;
+      const depth = overrideDepth || preferredResearchType || 'specific';
       setLastRunMode((depth as any) || 'auto');
-      const cfg: any = { ...(extraCfg || {}) };
+      const cfg: any = { ...(options?.config || {}) };
       if (depth === 'deep') cfg.model = 'gpt-5-mini';
       if (depth === 'quick') cfg.model = 'gpt-5-mini';
       if (depth === 'specific') cfg.model = 'gpt-5-mini';
@@ -1479,7 +1480,7 @@ useEffect(() => {
 
   const startSummarize = async (chatId: string, sourceMarkdown: string) => {
     const prompt = 'Summarize the previous research for executive consumption.';
-    await streamAIResponse(prompt, chatId, { summarize_source: sourceMarkdown });
+    await streamAIResponse(prompt, chatId, { config: { summarize_source: sourceMarkdown } });
   };
 
   const getUserInitial = () => (user?.email ? user.email[0].toUpperCase() : 'Y');
@@ -1503,6 +1504,7 @@ useEffect(() => {
     setActiveSubject(null);
     setInputValue('Research ');
     setShowClarify(false);
+    setPendingQuery(null);
     setFocusComposerTick(t => t + 1);
     lastResearchSummaryRef.current = '';
   };
@@ -1717,6 +1719,7 @@ useEffect(() => {
     setThinkingEvents([]);
     assistantInsertedRef.current = false;
     setShowClarify(false);
+    setPendingQuery(null);
     navigate('/');
     try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {}
   };
