@@ -308,8 +308,10 @@ export default async function handler(req: any, res: any) {
     }
     if (subjectSnapshot) instructions += subjectSnapshot;
     // Apply clarifier lock and facet budget hints
-    if (userConfig?.clarifiers_locked) {
-      instructions += `\n\n<clarifiers_policy>Clarifiers are locked for this chat. Do not ask setup questions. Only disambiguate if the subject is genuinely ambiguous.</clarifiers_policy>`;
+    // Lock clarifiers when an explicit research_type is provided or when the client requests it.
+    const lockClarifiers = Boolean(userConfig?.clarifiers_locked || research_type);
+    if (lockClarifiers) {
+      instructions += `\n\n<clarifiers_policy>Clarifiers are locked for this request. Do not ask setup questions or present checklists. Proceed with standard coverage using sensible defaults.</clarifiers_policy>`;
     }
     if (typeof userConfig?.facet_budget === 'number') {
       instructions += `\n\n<facet_budget>${userConfig.facet_budget}</facet_budget>`;
@@ -658,6 +660,9 @@ export default async function handler(req: any, res: any) {
           model: selectedModel,
           route: 'vercel/api/ai/chat',
           runtime: 'nodejs',
+          project_masked: (process.env.OPENAI_PROJECT || '').slice(0, 8) || null,
+          project_set: Boolean(process.env.OPENAI_PROJECT),
+          store: storeRun,
           timings: {
             auth_ms: authAndCreditMs,
             context_ms: contextFetchMs,
