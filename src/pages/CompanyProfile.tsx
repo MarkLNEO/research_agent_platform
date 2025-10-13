@@ -14,6 +14,7 @@ import type { TrackedAccount } from '../services/accountService';
 const DEFAULT_PROMPT_CONFIG = {
   preferred_research_type: null as 'quick' | 'deep' | 'specific' | null,
   default_output_brevity: 'standard' as 'short' | 'standard' | 'long',
+  default_tone: 'balanced' as 'warm' | 'balanced' | 'direct',
   always_tldr: true,
 };
 
@@ -52,7 +53,7 @@ export function CompanyProfile() {
   const [profileData, setProfileData] = useState<any>(null);
   const [customCriteriaCount, setCustomCriteriaCount] = useState(0);
   const [signalPreferencesCount, setSignalPreferencesCount] = useState(0);
-  const [promptConfig, setPromptConfig] = useState<{ preferred_research_type: 'quick' | 'deep' | 'specific' | null; default_output_brevity: 'short' | 'standard' | 'long'; always_tldr: boolean } | null>(null);
+  const [promptConfig, setPromptConfig] = useState<{ preferred_research_type: 'quick' | 'deep' | 'specific' | null; default_output_brevity: 'short' | 'standard' | 'long'; default_tone: 'warm' | 'balanced' | 'direct'; always_tldr: boolean } | null>(null);
   const [updatingPref, setUpdatingPref] = useState<string | null>(null);
   const [streamingMessage, setStreamingMessage] = useState('');
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
@@ -72,11 +73,16 @@ export function CompanyProfile() {
       : config.default_output_brevity === 'long'
       ? 'Comprehensive length (1000+ words)'
       : 'Balanced length (500-1000 words)';
+    const toneLabel = config.default_tone === 'warm'
+      ? 'Warm, relationship-first tone'
+      : config.default_tone === 'direct'
+      ? 'Direct, outcome-focused tone'
+      : 'Balanced, consultative tone';
     const tldrLabel = config.always_tldr ? 'Quick summary always included' : 'Summary provided on request only';
     const focus: string[] = [];
     if (customCriteriaCount > 0) focus.push('Critical criteria highlighted automatically');
     if (signalPreferencesCount > 0) focus.push('Buying signals surfaced first');
-    return { depthLabel, lengthLabel, tldrLabel, focus };
+    return { depthLabel, lengthLabel, toneLabel, tldrLabel, focus };
   }, [promptConfig, customCriteriaCount, signalPreferencesCount]);
 
   const depthOptions = useMemo(
@@ -122,6 +128,30 @@ export function CompanyProfile() {
         label: 'Detailed',
         description: '1000+ words • Full narrative',
         value: 'long' as 'short' | 'standard' | 'long',
+      },
+    ],
+    []
+  );
+
+  const toneOptions = useMemo(
+    () => [
+      {
+        id: 'tone-warm',
+        label: 'Warm',
+        description: 'Relationship-forward, collaborative voice',
+        value: 'warm' as 'warm' | 'balanced' | 'direct',
+      },
+      {
+        id: 'tone-balanced',
+        label: 'Balanced',
+        description: 'Consultative + confident (default)',
+        value: 'balanced' as 'warm' | 'balanced' | 'direct',
+      },
+      {
+        id: 'tone-direct',
+        label: 'Direct',
+        description: 'Crisp, outcome-driven tone',
+        value: 'direct' as 'warm' | 'balanced' | 'direct',
       },
     ],
     []
@@ -177,6 +207,7 @@ export function CompanyProfile() {
     setPromptConfig({
       preferred_research_type: prompt.preferred_research_type ?? null,
       default_output_brevity: (prompt.default_output_brevity as 'short' | 'standard' | 'long') || 'standard',
+      default_tone: (prompt.default_tone as 'warm' | 'balanced' | 'direct') || 'balanced',
       always_tldr: typeof prompt.always_tldr === 'boolean' ? prompt.always_tldr : true,
     });
     return profile;
@@ -219,7 +250,7 @@ export function CompanyProfile() {
   };
 
   const updatePromptPreference = async (
-    updates: Partial<{ preferred_research_type: 'quick' | 'deep' | 'specific' | null; default_output_brevity: 'short' | 'standard' | 'long'; always_tldr: boolean }>,
+    updates: Partial<{ preferred_research_type: 'quick' | 'deep' | 'specific' | null; default_output_brevity: 'short' | 'standard' | 'long'; default_tone: 'warm' | 'balanced' | 'direct'; always_tldr: boolean }>,
     key: string
   ) => {
     if (!user) return;
@@ -819,6 +850,35 @@ export function CompanyProfile() {
                       </div>
 
                       <div>
+                        <p className="text-xs font-semibold text-purple-900 uppercase tracking-wide mb-2">Tone</p>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          {toneOptions.map(option => {
+                            const currentTone = promptConfig?.default_tone || 'balanced';
+                            const active = currentTone === option.value;
+                            return (
+                              <button
+                                key={option.id}
+                                type="button"
+                                onClick={() => updatePromptPreference({ default_tone: option.value }, 'tone')}
+                                disabled={updatingPref === 'tone'}
+                                className={`flex-1 min-w-[160px] px-4 py-3 border-2 rounded-xl text-left transition-all ${
+                                  active
+                                    ? 'bg-purple-600 text-white border-purple-600 shadow-md'
+                                    : 'bg-white text-gray-700 border-purple-200 hover:border-purple-400 hover:shadow-sm'
+                                } ${updatingPref === 'tone' ? 'opacity-70 cursor-wait' : ''}`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-sm font-semibold">{option.label}</span>
+                                  {active && <span className="text-[10px] font-semibold uppercase">Active</span>}
+                                </div>
+                                <p className={`text-xs mt-1 ${active ? 'text-purple-100' : 'text-gray-500'}`}>{option.description}</p>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div>
                         <p className="text-xs font-semibold text-purple-900 uppercase tracking-wide mb-2">Length</p>
                         <div className="flex flex-col sm:flex-row gap-2">
                           {lengthOptions.map(option => {
@@ -879,6 +939,7 @@ export function CompanyProfile() {
                         <ul className="text-xs text-purple-800 space-y-1">
                           <li>• {preferenceSummary.depthLabel}</li>
                           <li>• {preferenceSummary.lengthLabel}</li>
+                          <li>• {preferenceSummary.toneLabel}</li>
                           <li>• {preferenceSummary.tldrLabel}</li>
                           {preferenceSummary.focus.map((item, idx) => (
                             <li key={idx}>• {item}</li>

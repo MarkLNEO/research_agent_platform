@@ -325,6 +325,7 @@ export default async function handler(req: any, res: any) {
     instructions += `\n\n<streaming_guidance>Stream your thinking immediately in short bullet updates. Narrate progress while research tasks run. Keep each update concise.</streaming_guidance>`;
     let input;
     let lastUserMessage: any = null;
+    let effectiveRequest = '';
 
     // If we have messages array, convert it to the Responses API format
     if (messages && messages.length > 0) {
@@ -341,7 +342,7 @@ export default async function handler(req: any, res: any) {
         const _isResearchQuery = classifyResearchIntent(_text);
         req.__isResearchQuery = _isResearchQuery;
 
-        let effectiveRequest = lastUserMessage.content || '';
+        effectiveRequest = lastUserMessage.content || '';
         if (_isResearchQuery && activeContextCompany) {
           const extractedCompanyName = extractCompanyName(lastUserMessage.content);
           const pronounMatch = /\b(their|they|them|it|its)\b/i.test(lastUserMessage.content);
@@ -802,6 +803,62 @@ export default async function handler(req: any, res: any) {
         } catch (summaryErr) {
           console.error('Auto TL;DR generation failed:', summaryErr);
           safeWrite(`data: ${JSON.stringify({ type: 'tldr_error', message: 'TL;DR unavailable' })}\n\n`);
+        }
+      }
+
+      if (isResearchQuery) {
+        try {
+          const trimmedForAnalysis = accumulatedContent.length > 20000
+            ? accumulatedContent.slice(0, 20000)
+            : accumulatedContent;
+          const icpEval = await openai.responses.create({
+            model: 'gpt-5-mini',
+            input: [
+              {
+                role: 'system',
+                content: [{
+                  type: 'input_text',
+                  text: 'You evaluate how well a target company fits the user\'s ICP based on a research report. Return strict JSON with keys: score (0-100 integer), verdict (Excellent|Strong|Moderate|Weak), confidence (0-100 integer representing percent confidence), rationale (<=200 characters, plain text). Respond with JSON only.'
+                }]
+              },
+              {
+                role: 'user',
+                content: [{
+                  type: 'input_text',
+                  text: `Research report to evaluate:\n${trimmedForAnalysis}`
+                }]
+              }
+            ],
+            store: false,
+            metadata: {
+              agent: 'company_research',
+              stage: 'icp_scoring',
+              chat_id: chatId || null,
+              user_id: user.id
+            }
+          });
+          const candidate = (icpEval as any)?.output_text || (icpEval as any)?.output?.[0]?.content?.[0]?.text || '';
+          if (candidate) {
+            try {
+              const parsedMeta = JSON.parse(candidate);
+              if (typeof parsedMeta?.score === 'number' && typeof parsedMeta?.confidence === 'number') {
+                const score = Math.max(0, Math.min(100, Math.round(parsedMeta.score)));
+                const confidence = Math.max(0, Math.min(100, Math.round(parsedMeta.confidence)));
+                const verdict = typeof parsedMeta.verdict === 'string' ? parsedMeta.verdict : (score >= 80 ? 'Excellent' : score >= 65 ? 'Strong' : score >= 45 ? 'Moderate' : 'Weak');
+                const rationale = typeof parsedMeta.rationale === 'string'
+                  ? parsedMeta.rationale.slice(0, 320)
+                  : '';
+                safeWrite(`data: ${JSON.stringify({
+                  type: 'icp_meta',
+                  payload: { score, confidence, verdict, rationale }
+                })}\n\n`);
+              }
+            } catch (icpParseErr) {
+              console.error('Failed to parse ICP meta response', icpParseErr);
+            }
+          }
+        } catch (icpErr) {
+          console.error('ICP meta evaluation failed', icpErr);
         }
       }
 

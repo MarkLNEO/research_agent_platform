@@ -41,6 +41,8 @@ const agentTypeToResearchType: Record<string, ResearchDraft['research_type']> = 
   market_trends: 'market',
 };
 
+const ICP_META_BLOCK_REGEX = /```icp_meta[\s\S]*?```/gi;
+
 function inferResearchType(input: ResearchDraftInput): ResearchDraft['research_type'] {
   const agentType = input.agentType && agentTypeToResearchType[input.agentType];
   if (agentType) return agentType;
@@ -204,7 +206,7 @@ export function buildResearchDraft(input: ResearchDraftInput): ResearchDraft {
   let normalizedSources = normalizeSourceEvents(input.sources);
   const researchType = inferResearchType(input);
   const subject = sanitizeSubject(inferSubject(input), input);
-  const markdown = input.assistantMessage.trim();
+  const markdown = input.assistantMessage.replace(ICP_META_BLOCK_REGEX, '').trim();
   // If no captured sources from reasoning/search, attempt to extract first URL from markdown
   if (normalizedSources.length === 0) {
     const firstUrl = (markdown.match(/https?:\/\/[^\s)]+/i) || [])[0];

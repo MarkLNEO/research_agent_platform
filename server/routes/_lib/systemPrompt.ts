@@ -168,6 +168,14 @@ export function buildSystemPrompt(
     extras.push('Summary preference: Use the standard-length High Level summary (5–6 bullets) with balanced context.');
     summaryPreferenceTag = '<summary_preference level="standard">Executive summary 2–3 sentences. High Level summary must have 5–6 balanced bullets covering value, signals, and next steps.</summary_preference>';
   }
+  const tonePref = (userContext.promptConfig as any)?.default_tone as string | undefined;
+  if (tonePref === 'warm') {
+    extras.push('Tone preference: Keep the narrative warm, encouraging, and relationship-first without losing clarity.');
+  } else if (tonePref === 'direct') {
+    extras.push('Tone preference: Write in a direct, outcome-driven voice with crisp phrasing and minimal filler.');
+  } else {
+    extras.push('Tone preference: Maintain a balanced, consultative tone blending warmth with clear guidance.');
+  }
   if (userContext.promptConfig?.always_tldr === false) {
     extras.push('The user may toggle the High Level summary off; only omit it if they explicitly say so in the latest request.');
   } else {

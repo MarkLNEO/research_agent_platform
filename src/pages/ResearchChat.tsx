@@ -34,6 +34,15 @@ type Suggestion = {
   prompt: string;
 };
 
+type IcpMeta = {
+  score: number;
+  confidence: number;
+  verdict: string;
+  rationale?: string;
+};
+
+const ICP_META_BLOCK_REGEX = /```icp_meta[\s\S]*?```/gi;
+
 const extractCompanyNameFromQuery = (raw: string): string | null => {
   if (!raw) return null;
   let cleaned = raw.trim();
@@ -194,6 +203,8 @@ const summarizeForMemory = (markdown: string): string => {
   return markdown.split('\n').slice(0, 6).join(' ').replace(/\s+/g, ' ').trim().slice(0, 400);
 };
 
+const stripIcpMetaBlocks = (text: string): string => text.replace(ICP_META_BLOCK_REGEX, '').trim();
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -237,6 +248,7 @@ export function ResearchChat() {
   const [actionBarVisible, setActionBarVisible] = useState(false);
   const [actionBarCompany, setActionBarCompany] = useState<string | null>(null);
   const streamingAbortRef = useRef<AbortController | null>(null);
+  const pendingMetaRef = useRef<{ icp?: IcpMeta } | null>(null);
   // acknowledgment messages are displayed via ThinkingIndicator events
   const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -814,6 +826,7 @@ useEffect(() => {
         return;
       }
       assistantInsertedRef.current = true;
+      const sanitizedAssistant = stripIcpMetaBlocks(assistant);
       const { data: savedAssistant } = await supabase
         .from('messages')
         .insert({ chat_id: chatId, role: 'assistant', content: assistant })
@@ -845,10 +858,10 @@ useEffect(() => {
       });
       setStreamingMessage('');
       setThinkingEvents([]);
-      lastResearchSummaryRef.current = summarizeForMemory(assistant);
+      lastResearchSummaryRef.current = summarizeForMemory(sanitizedAssistant);
 
       if (assistant?.trim()) {
-        const assistantCandidate = extractCompanyNameFromQuery(assistant);
+        const assistantCandidate = extractCompanyNameFromQuery(sanitizedAssistant);
         const nextCompany = isLikelySubject(detectedCompany)
           ? detectedCompany
           : isLikelySubject(activeSubject)
@@ -1105,6 +1118,7 @@ useEffect(() => {
       // Setup abort controller for Stop action
       const controller = new AbortController();
       streamingAbortRef.current = controller;
+      pendingMetaRef.current = {};
 
       const response = await fetch(chatUrl, {
         method: 'POST',
@@ -1335,6 +1349,21 @@ useEffect(() => {
                     title: 'TL;DR unavailable',
                     description: parsed.message || 'Could not create summary.'
                   });
+                } else if (parsed.type === 'icp_meta') {
+                  const payload = parsed.payload || {};
+                  const normalizedScore = typeof payload.score === 'number' ? Math.max(0, Math.min(100, Math.round(payload.score))) : null;
+                  const normalizedConfidence = typeof payload.confidence === 'number' ? Math.max(0, Math.min(100, Math.round(payload.confidence))) : null;
+                  if (normalizedScore != null && normalizedConfidence != null) {
+                    pendingMetaRef.current = {
+                      ...(pendingMetaRef.current || {}),
+                      icp: {
+                        score: normalizedScore,
+                        confidence: normalizedConfidence,
+                        verdict: typeof payload.verdict === 'string' ? payload.verdict : (normalizedScore >= 80 ? 'Excellent' : normalizedScore >= 65 ? 'Strong' : normalizedScore >= 45 ? 'Moderate' : 'Weak'),
+                        rationale: typeof payload.rationale === 'string' ? payload.rationale : undefined,
+                      },
+                    };
+                  }
                 } else if (parsed.type === 'response.completed' && parsed.response?.usage?.total_tokens) {
                   usedTokens = Number(parsed.response.usage.total_tokens) || usedTokens;
                 } else if (parsed.type === 'response' && parsed.usage?.total_tokens) {
@@ -1383,7 +1412,14 @@ useEffect(() => {
         }));
         console.log('[LLM][research] complete', { totalMs: endedAt - startedAt, ttfbMs: firstDeltaAt != null ? (firstDeltaAt - startedAt) : null, tokens: usedTokens });
       } catch {}
-      return composeOutput();
+      const finalText = composeOutput();
+      let augmented = finalText;
+      if (pendingMetaRef.current?.icp) {
+        const block = `\n\n\`\`\`icp_meta\n${JSON.stringify(pendingMetaRef.current.icp)}\n\`\`\``;
+        augmented = `${finalText}${block}`;
+      }
+      pendingMetaRef.current = null;
+      return augmented;
     } catch (e: any) {
       // Swallow abort errors as user-initiated stops
       if (e?.name === 'AbortError') {
@@ -1391,6 +1427,7 @@ useEffect(() => {
         return (streamingMessage || '');
       }
       console.error('stream error', e);
+      pendingMetaRef.current = null;
       const errorMsg = e?.message || String(e);
       addToast({
         type: 'error',
