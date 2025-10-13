@@ -377,22 +377,32 @@ export default async function handler(req: any, res: any) {
       console.log('[DEBUG] Input:', input);
 
       const requestText = lastUserMessage?.content || '';
+      const normalizedRequest = requestText.toLowerCase();
       const isResearchQuery = research_type ? true : !!req.__isResearchQuery;
       const selectedModel = research_type === 'deep' ? 'gpt-5' : (userConfig.model || 'gpt-5-mini');
       const reasoningEffort = research_type === 'deep' ? 'medium' : 'low';
       const isQuick = research_type === 'quick';
 
-      const wantsFreshIntel = /recent|latest|today|yesterday|this week|signals?|news|breach|breaches|leadership|funding|acquisition|hiring|layoff|changed|update|report/i.test(requestText.toLowerCase());
+      const wantsFreshIntel = /recent|latest|today|yesterday|this week|signals?|news|breach|breaches|leadership|funding|acquisition|hiring|layoff|changed|update|report/i.test(normalizedRequest);
+      const mentionsTimeframe = /\b(last|past)\s+\d+\s+(day|days|week|weeks|month|months|year|years)\b/i.test(requestText);
+      const explicitlyRequestsSearch = /\bweb[_\s-]?search\b/.test(normalizedRequest) || /\b(search online|look up|google|check the web)\b/.test(normalizedRequest);
+      const needsFreshLookup = wantsFreshIntel || mentionsTimeframe || explicitlyRequestsSearch;
+
       let useTools = research_type === 'deep' || (!research_type && isResearchQuery);
-      if (research_type === 'specific' && !wantsFreshIntel) {
+      if (research_type === 'specific' && !needsFreshLookup) {
         useTools = false;
       }
       if (research_type === 'quick') {
-        useTools = false;
+        useTools = needsFreshLookup;
+      }
+      if (explicitlyRequestsSearch) {
+        useTools = true;
       }
 
       if (!useTools) {
-        instructions += '\n\n<tool_policy>Do not call web_search unless a user explicitly asks for fresh external data. Prioritize saved profile context and internal knowledge.</tool_policy>';
+        instructions += '\n\n<tool_policy>Call web_search only when the user explicitly asks for fresh external data or provides a recent timeframe. Otherwise prioritise saved profile context and internal knowledge.</tool_policy>';
+      } else {
+        instructions += '\n\n<tool_policy>Use web_search when the user explicitly asks for it or references recent timeframes (e.g., last 12 months). Avoid unnecessary calls when profile context already answers the question.</tool_policy>';
       }
 
       if (isResearchQuery) {
