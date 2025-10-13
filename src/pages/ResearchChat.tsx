@@ -1576,14 +1576,6 @@ useEffect(() => {
       sources,
       activeSubject,
     });
-    const subj = (draft.subject || '').trim();
-    const active = (activeSubject || '').trim();
-    const isMismatch = Boolean(active && subj && active.toLowerCase() !== subj.toLowerCase());
-    if (isMismatch) {
-      setMismatchDraft(draft);
-      setMismatchOpen(true);
-      return;
-    }
     setSaveDraft(draft);
     setSaveOpen(true);
   };
