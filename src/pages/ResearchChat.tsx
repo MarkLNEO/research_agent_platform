@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, ChevronDown } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Loader2 } from 'lucide-react';
 import { Sidebar } from '../components/Sidebar';
 import { MessageBubble } from '../components/MessageBubble';
 import { MessageInput } from '../components/MessageInput';
@@ -20,6 +20,105 @@ import { useToast } from '../components/ToastProvider';
 import { buildResearchDraft } from '../utils/researchOutput';
 import type { ResearchDraft } from '../utils/researchOutput';
 import type { TrackedAccount } from '../services/accountService';
+import { useUserProfile } from '../hooks/useUserProfile';
+
+type Suggestion = {
+  icon: string;
+  title: string;
+  description: string;
+  prompt: string;
+};
+
+const extractCompanyNameFromQuery = (raw: string): string | null => {
+  if (!raw) return null;
+  let cleaned = raw.trim();
+  cleaned = cleaned.replace(/^research\s+/i, '')
+    .replace(/^tell me about\s+/i, '')
+    .replace(/^find\s+/i, '')
+    .replace(/^analyze\s+/i, '')
+    .replace(/^who is\s+/i, '')
+    .replace(/^what is\s+/i, '')
+    .trim();
+  if (!cleaned) return null;
+  const stopPattern = /\s+(in|at|for|with|that|who|which)\s+/i;
+  const parts = cleaned.split(stopPattern);
+  const candidate = (parts[0] || '').replace(/[^A-Za-z0-9&.\s-]/g, '').trim();
+  if (!candidate) return null;
+  return candidate
+    .split(' ')
+    .filter(Boolean)
+    .map(word => word[0].toUpperCase() + word.slice(1))
+    .join(' ')
+    .trim();
+};
+
+const deriveChatTitle = (text: string): string => {
+  const company = extractCompanyNameFromQuery(text);
+  if (company) return `Research: ${company}`;
+  const trimmed = text.trim();
+  return trimmed.length > 60 ? `${trimmed.slice(0, 57)}…` : trimmed || 'New Chat';
+};
+
+const isResearchPrompt = (text: string): boolean => {
+  const lower = text.toLowerCase();
+  return (
+    lower.startsWith('research ') ||
+    lower.includes(' research ') ||
+    lower.startsWith('tell me about') ||
+    lower.startsWith('analyze ') ||
+    lower.startsWith('find ') ||
+    lower.startsWith('who is ') ||
+    lower.startsWith('what is ')
+  );
+};
+
+const generateSuggestions = (profile: any, criteria: any[], signalPrefs: any[]): Suggestion[] => {
+  if (!profile) return [];
+  const suggestions: Suggestion[] = [];
+  const industry = profile.industry || '';
+  const icp = profile.icp_definition || profile.icp || '';
+  const criticalCriteria = criteria.filter((c: any) => (c?.importance || '').toLowerCase() === 'critical');
+  const importantCriteria = criteria.filter((c: any) => (c?.importance || '').toLowerCase() === 'important');
+  const signalTypes = signalPrefs.map((s: any) => s?.signal_type).filter(Boolean);
+
+  if (icp) {
+    suggestions.push({
+      icon: '🎯',
+      title: 'Find ICP Matches',
+      description: 'Search for companies that match your ideal customer profile',
+      prompt: `Find companies that match this ICP: ${icp}`,
+    });
+  }
+
+  if (criticalCriteria.length > 0) {
+    suggestions.push({
+      icon: '🔥',
+      title: 'Critical Signals Watchlist',
+      description: `Monitor companies hitting: ${criticalCriteria.map((c: any) => c.name).join(', ')}`,
+      prompt: `Show ${industry || 'relevant'} companies with signals for: ${criticalCriteria.map((c: any) => c.name).join(', ')}`,
+    });
+  }
+
+  if (signalTypes.length > 0) {
+    suggestions.push({
+      icon: '📡',
+      title: 'New Signal Alerts',
+      description: `Companies with recent ${signalTypes.slice(0, 2).join(' & ')} activity`,
+      prompt: `Find ${industry || 'relevant'} companies with recent ${signalTypes.join(', ')} events`,
+    });
+  }
+
+  if (importantCriteria.length > 0) {
+    suggestions.push({
+      icon: '🧭',
+      title: 'Deep Dive Priorities',
+      description: `Evaluate prospects on ${importantCriteria.slice(0, 3).map((c: any) => c.name).join(', ')}`,
+      prompt: `Research a company focusing on: ${importantCriteria.map((c: any) => c.name).join(', ')}`,
+    });
+  }
+
+  return suggestions.slice(0, 4);
+};
 
 interface Message {
   id: string;
@@ -37,13 +136,17 @@ interface Chat {
 
 interface ThinkingEvent {
   id: string;
-  type: 'reasoning' | 'web_search' | 'reasoning_progress' | 'acknowledgment' | 'content_extraction' | 'accounts_added';
+  type: 'reasoning' | 'web_search' | 'reasoning_progress' | 'acknowledgment' | 'content_extraction' | 'accounts_added' | 'context_preview';
   content?: string;
   query?: string;
   sources?: string[];
   url?: string;
   count?: number;
   companies?: string[];
+  company?: string;
+  icp?: string;
+  critical?: string[];
+  important?: string[];
 }
 
 export function ResearchChat() {
@@ -97,6 +200,21 @@ export function ResearchChat() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [lastRunMode, setLastRunMode] = useState<'deep'|'quick'|'specific'|'auto'|null>(null);
   const skipInitialLoadRef = useRef(false);
+  const { profile: userProfile } = useUserProfile();
+  const [customCriteria, setCustomCriteria] = useState<any[]>([]);
+  const [signalPreferences, setSignalPreferences] = useState<any[]>([]);
+  const [creatingNewChat, setCreatingNewChat] = useState(false);
+  const [showContextTooltip, setShowContextTooltip] = useState(false);
+  const suggestions = useMemo(
+    () => generateSuggestions(userProfile, customCriteria, signalPreferences),
+    [userProfile, customCriteria, signalPreferences]
+  );
+  const dismissContextTooltip = () => {
+    setShowContextTooltip(false);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('contextTooltipSeen', 'true');
+    }
+  };
 
   const lastAssistantIndex = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -109,6 +227,29 @@ export function ResearchChat() {
   useEffect(() => {
     if (user) void loadChats();
   }, [user]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const fetchPreferences = async () => {
+      try {
+        const { data: criteria } = await supabase
+          .from('user_custom_criteria')
+          .select('id,name,importance')
+          .eq('user_id', user.id)
+          .order('importance', { ascending: true });
+        if (criteria) setCustomCriteria(criteria as any[]);
+
+        const { data: signals } = await supabase
+          .from('user_signal_preferences')
+          .select('id, signal_type, importance')
+          .eq('user_id', user.id);
+        if (signals) setSignalPreferences(signals as any[]);
+      } catch (error) {
+        console.error('Failed to load user preferences', error);
+      }
+    };
+    void fetchPreferences();
+  }, [user?.id]);
 
   useEffect(() => {
     if (!currentChatId) {
@@ -216,6 +357,22 @@ export function ResearchChat() {
       window.removeEventListener('keydown', keyHandler);
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (localStorage.getItem('contextTooltipSeen') === 'true') return;
+    let hideTimer: number | undefined;
+    const showTimer = window.setTimeout(() => {
+      setShowContextTooltip(true);
+      hideTimer = window.setTimeout(() => {
+        dismissContextTooltip();
+      }, 6000);
+    }, 1500);
+    return () => {
+      window.clearTimeout(showTimer);
+      if (hideTimer) window.clearTimeout(hideTimer);
+    };
+  }, [dismissContextTooltip]);
 
   // Allow tests and power users to open the signals drawer programmatically
   useEffect(() => {
@@ -384,13 +541,36 @@ export function ResearchChat() {
       .select()
       .single();
     if (data) {
-      setChats([data, ...chats]);
+      setChats(prev => [data, ...prev]);
       setCurrentChatId(data.id);
       setMessages([]);
       skipInitialLoadRef.current = true;
       return data.id;
     }
     return null;
+  };
+
+  const handleNewChatClick = async () => {
+    if (creatingNewChat) return;
+    setCreatingNewChat(true);
+    try {
+      const id = await createNewChat();
+      if (id) {
+        addToast({
+          type: 'success',
+          title: 'New session ready',
+          description: 'Start typing to kick off your next research.',
+        });
+      }
+    } catch (error: any) {
+      addToast({
+        type: 'error',
+        title: 'Could not start new chat',
+        description: error?.message || 'Please try again.',
+      });
+    } finally {
+      setCreatingNewChat(false);
+    }
   };
 
   const handleSendMessageWithChat = async (chatId: string, text: string) => {
@@ -417,6 +597,32 @@ export function ResearchChat() {
       created_at: new Date().toISOString(),
     };
     setMessages(prev => [...prev, tempUser]);
+
+    const detectedCompany = extractCompanyNameFromQuery(normalized);
+    if (detectedCompany) setActiveSubject(detectedCompany);
+
+    const looksLikeResearch = isResearchPrompt(normalized);
+    if (looksLikeResearch && userProfile) {
+      const criticalNames = customCriteria
+        .filter((c: any) => (c?.importance || '').toLowerCase() === 'critical')
+        .map((c: any) => c.name)
+        .filter(Boolean)
+        .slice(0, 4);
+      const importantNames = customCriteria
+        .filter((c: any) => (c?.importance || '').toLowerCase() === 'important')
+        .map((c: any) => c.name)
+        .filter(Boolean)
+        .slice(0, 4);
+
+      setThinkingEvents([{
+        id: `context-${Date.now()}`,
+        type: 'context_preview',
+        company: detectedCompany || activeSubject || 'this company',
+        icp: userProfile.icp_definition || userProfile.icp || userProfile.industry || '',
+        critical: criticalNames,
+        important: importantNames,
+      }]);
+    }
 
     try {
       // Persist last message for recovery in case of refresh
@@ -452,10 +658,21 @@ export function ResearchChat() {
         .select()
         .single();
 
-      await supabase
-        .from('chats')
-        .update({ updated_at: new Date().toISOString(), title: messages.length === 0 ? text.slice(0, 60) : undefined })
-        .eq('id', chatId);
+      const updatedAt = new Date().toISOString();
+      if (messages.length === 0) {
+        const title = deriveChatTitle(normalized);
+        await supabase
+          .from('chats')
+          .update({ updated_at: updatedAt, title })
+          .eq('id', chatId);
+        setChats(prev => prev.map(chat => chat.id === chatId ? { ...chat, title, updated_at: updatedAt } : chat));
+      } else {
+        await supabase
+          .from('chats')
+          .update({ updated_at: updatedAt })
+          .eq('id', chatId);
+        setChats(prev => prev.map(chat => chat.id === chatId ? { ...chat, updated_at: updatedAt } : chat));
+      }
 
       setMessages(prev => {
         const filtered = prev.filter(m => m.id !== tempUser.id);
@@ -589,6 +806,13 @@ export function ResearchChat() {
   const needsClarification = (text: string) => {
     const t = text.toLowerCase();
     return t.includes('research') || t.includes('tell me about') || t.includes('analyze') || t.includes('find out about');
+  };
+
+  const startSuggestion = (prompt: string) => {
+    if (!prompt) return;
+    setInputValue(prompt);
+    setShowClarify(false);
+    setFocusComposerTick(t => t + 1);
   };
 
   const handleSendMessage = async () => {
@@ -765,7 +989,7 @@ export function ResearchChat() {
       const markFirstDelta = () => {
         if (firstDeltaAt == null) {
           firstDeltaAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-          setThinkingEvents(prev => prev.filter(e => e.type !== 'acknowledgment' && e.type !== 'reasoning_progress'));
+          setThinkingEvents(prev => prev.filter(e => e.type !== 'acknowledgment' && e.type !== 'reasoning_progress' && e.type !== 'context_preview'));
           try {
             window.dispatchEvent(new CustomEvent('llm:first-delta', { detail: { page: 'research', ttfbMs: firstDeltaAt - startedAt } }));
             console.log('[LLM][research] first-delta', { ttfbMs: firstDeltaAt - startedAt });
@@ -1116,7 +1340,8 @@ export function ResearchChat() {
     <>
     <div className="flex h-screen bg-gray-50">
       <Sidebar
-        onNewChat={createNewChat}
+        onNewChat={handleNewChatClick}
+        creatingNewChat={creatingNewChat}
         userName={getUserInitial()}
         chats={chats}
         currentChatId={currentChatId}
@@ -1133,13 +1358,22 @@ export function ResearchChat() {
         <div className="bg-white border-b border-gray-200 px-6 py-4">
           <div className="max-w-3xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <button onClick={() => {
-                setCurrentChatId(null);
-                setMessages([]);
-                setShowClarify(false);
-              }} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors">
-                <ArrowLeft className="w-4 h-4" />
-                <span className="text-sm font-medium">New session</span>
+              <button
+                onClick={() => void handleNewChatClick()}
+                disabled={creatingNewChat}
+                className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors disabled:opacity-60"
+              >
+                {creatingNewChat ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span className="text-sm font-medium">Creating...</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowLeft className="w-4 h-4" />
+                    <span className="text-sm font-medium">New session</span>
+                  </>
+                )}
               </button>
               <button
                 onClick={() => setBulkResearchOpen(true)}
@@ -1186,6 +1420,59 @@ export function ResearchChat() {
                       {greeting ? `👋 Good ${greeting.time_of_day}, ${greeting.user_name}!` : '👋 Welcome back!'}
                     </h2>
                   </div>
+                  {userProfile && (
+                    <div className="border border-blue-200 rounded-2xl p-4 bg-white shadow-sm">
+                      <div className="flex flex-col gap-4">
+                        <div>
+                          <div className="text-sm font-semibold text-blue-900 mb-1">Using your saved profile</div>
+                          <p className="text-xs text-gray-600">
+                            ICP focus: <span className="font-medium text-gray-900">{userProfile.icp_definition || userProfile.icp || 'Not specified yet'}</span>
+                          </p>
+                        </div>
+                        {customCriteria.length > 0 && (
+                          <div className="flex flex-wrap gap-2">
+                            {customCriteria
+                              .filter((c: any) => (c?.importance || '').toLowerCase() === 'critical')
+                              .map((c: any) => (
+                                <span key={c.id} className="px-2 py-1 text-xs font-semibold bg-red-100 text-red-700 rounded-full">
+                                  🔥 {c.name}
+                                </span>
+                              ))}
+                            {customCriteria
+                              .filter((c: any) => (c?.importance || '').toLowerCase() === 'important')
+                              .map((c: any) => (
+                                <span key={c.id} className="px-2 py-1 text-xs font-semibold bg-yellow-100 text-yellow-700 rounded-full">
+                                  ⭐ {c.name}
+                                </span>
+                              ))}
+                          </div>
+                        )}
+                        {suggestions.length > 0 && (
+                          <div className="grid gap-3 md:grid-cols-2">
+                            {suggestions.map((suggestion, index) => (
+                              <button
+                                key={`${suggestion.title}-${index}`}
+                                onClick={() => startSuggestion(suggestion.prompt)}
+                                className="w-full text-left border border-blue-100 hover:border-blue-300 hover:shadow-md transition-all rounded-xl p-3 bg-blue-50/50"
+                              >
+                                <div className="flex items-start gap-3">
+                                  <span className="text-xl">{suggestion.icon}</span>
+                                  <div className="flex-1">
+                                    <div className="text-sm font-semibold text-gray-900 mb-1">
+                                      {suggestion.title}
+                                    </div>
+                                    <p className="text-xs text-gray-600">
+                                      {suggestion.description}
+                                    </p>
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {recentSignals.length > 0 && (
                     <div className="border border-gray-200 rounded-2xl p-4 bg-white">
                       <div className="flex items-center justify-between mb-3">
@@ -1470,14 +1757,24 @@ export function ResearchChat() {
           {/* Context crumb (above composer) */}
           <div className="mb-2 flex items-center justify-between" data-testid="context-crumb">
             <div className="text-xs text-gray-700 inline-flex items-center gap-2">
-              <button
-                type="button"
-                className="px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50"
-                onClick={() => setCrumbOpen(o => !o)}
-                aria-expanded={crumbOpen}
-              >
-                Context: {activeSubject ? activeSubject : 'None'} ▾
-              </button>
+              <div className="relative inline-flex">
+                {showContextTooltip && (
+                  <div className="absolute -top-2 left-1/2 -translate-x-1/2 -translate-y-full bg-gray-900 text-white text-[10px] px-3 py-1.5 rounded-lg shadow-lg">
+                    Tip: Save contexts to jump between research threads.
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50"
+                  onClick={() => {
+                    dismissContextTooltip();
+                    setCrumbOpen(o => !o);
+                  }}
+                  aria-expanded={crumbOpen}
+                >
+                  Context: {activeSubject ? activeSubject : 'None'} ▾
+                </button>
+              </div>
               {canUndoSubject() && (
                 <button type="button" className="text-blue-700 hover:underline" onClick={handleUndoSubject}>Undo</button>
               )}

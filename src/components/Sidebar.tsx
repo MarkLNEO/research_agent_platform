@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { LayoutGrid, Plus, MessageSquare, Settings, FileText, ChevronLeft, LogOut, Home, UserCircle2 } from 'lucide-react';
+import { LayoutGrid, Plus, MessageSquare, Settings, FileText, ChevronLeft, LogOut, Home, UserCircle2, Loader2 } from 'lucide-react';
 import { ProfileHealth } from './ProfileHealth';
 import { AccountListWidget } from './AccountListWidget';
 import { CreditDisplay } from './CreditDisplay';
@@ -14,6 +14,7 @@ interface Chat {
 
 interface SidebarProps {
   onNewChat: () => void;
+  creatingNewChat?: boolean;
   userName?: string;
   chats?: Chat[];
   currentChatId?: string | null;
@@ -32,6 +33,7 @@ interface SidebarProps {
 
 export function Sidebar({
   onNewChat,
+  creatingNewChat = false,
   userName = 'Y',
   chats = [],
   currentChatId,
@@ -96,10 +98,20 @@ export function Sidebar({
         )}
         <button
           onClick={onNewChat}
-          className={`${isExpanded ? 'w-full justify-center gap-2' : 'w-8 h-8 justify-center'} rounded-full bg-blue-500 hover:bg-blue-700 flex items-center text-white transition-colors shadow-sm py-2`}
+          disabled={creatingNewChat}
+          className={`${isExpanded ? 'w-full justify-center gap-2' : 'w-8 h-8 justify-center'} rounded-full bg-blue-500 hover:bg-blue-700 flex items-center text-white transition-colors shadow-sm py-2 disabled:opacity-60 disabled:cursor-progress`}
         >
-          <Plus className="w-5 h-5" />
-          {isExpanded && <span className="text-sm font-medium">New Chat</span>}
+          {creatingNewChat ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              {isExpanded && <span className="text-sm font-medium">Creating...</span>}
+            </>
+          ) : (
+            <>
+              <Plus className="w-5 h-5" />
+              {isExpanded && <span className="text-sm font-medium">New Chat</span>}
+            </>
+          )}
         </button>
       </div>
 

@@ -1,5 +1,5 @@
 import { ThumbsUp, ThumbsDown, Copy, RotateCcw, Coins, Building2, Mail } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Streamdown } from 'streamdown';
 import { useToast } from './ToastProvider';
 
@@ -76,16 +76,46 @@ export function MessageBubble({
   const wordCount = (() => {
     try { return stripMd(content).trim().split(/\s+/).filter(Boolean).length; } catch { return 0; }
   })();
-  const shouldCollapse = !streaming && collapseEnabled && wordCount > collapseThresholdWords;
-  const truncated = (() => {
-    if (!shouldCollapse) return content;
+  const structured = useMemo(() => {
+    if (role !== 'assistant') return null;
+    let remaining = content?.trim();
+    if (!remaining) return null;
+
+    let ackLine: string | null = null;
+    const firstBreak = remaining.indexOf('\n');
+    if (firstBreak > 0) {
+      const firstLine = remaining.slice(0, firstBreak).trim();
+      if (firstLine && !firstLine.startsWith('##')) {
+        ackLine = firstLine;
+        remaining = remaining.slice(firstBreak + 1).trim();
+      }
+    }
+
+    const execRegex = /##\s+Executive Summary\s*([\s\S]*?)(?=\n##\s+|$)/i;
+    const execMatch = execRegex.exec(remaining);
+    if (!execMatch) return null;
+    const execBody = execMatch[1].trim();
+    const before = remaining.slice(0, execMatch.index).trim();
+    const after = remaining.slice(execMatch.index + execMatch[0].length).trim();
+    const rest = [before, after].filter(Boolean).join('\n\n').trim();
+
+    return {
+      ackLine,
+      execBody,
+      remaining: rest,
+    };
+  }, [content, role]);
+
+  const enableCollapse = !streaming && collapseEnabled && !structured && wordCount > collapseThresholdWords;
+  const truncated = useMemo(() => {
+    if (!enableCollapse) return content;
     try {
       const words = stripMd(content).trim().split(/\s+/);
       const head = words.slice(0, collapseThresholdWords).join(' ');
-      // Keep markdown structure light by not attempting to preserve code fences; this is a visual preview only.
       return `${head} …`;
     } catch { return content; }
-  })();
+  }, [enableCollapse, content, collapseThresholdWords]);
+  const displayContent = enableCollapse && !expanded ? truncated : content;
 
   // Extract company name from research content if applicable
   const extractCompanyName = () => {
@@ -166,23 +196,69 @@ export function MessageBubble({
     );
   }
 
+  const ackLine = structured?.ackLine;
+  const execBody = structured?.execBody;
+  const remainingMarkdown = structured?.remaining;
+  const showCollapseToggle = enableCollapse;
+
   return (
     <div className="space-y-3" data-testid="message-assistant">
-      <div className="relative">
-        <MarkdownContent content={shouldCollapse && !expanded ? truncated : content} />
-        {streaming && content && (
-          <span className="inline-block w-0.5 h-4 bg-blue-600 ml-1 animate-pulse" />
-        )}
-        {streaming && !content && (
-          <div className="flex gap-1">
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }}></div>
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></div>
-          </div>
-        )}
-      </div>
+      {structured && !streaming ? (
+        <div className="space-y-3">
+          {ackLine && (
+            <p className="text-xs text-gray-500 italic">{ackLine}</p>
+          )}
+          {execBody && (
+            <div className="bg-gradient-to-br from-blue-50 to-purple-50 border border-blue-200 rounded-2xl p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-blue-500 text-white flex items-center justify-center text-lg">
+                  📊
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-semibold text-blue-900">Executive Summary</h3>
+                    <span className="px-2 py-1 text-[11px] font-bold bg-blue-600 text-white rounded-full">TL;DR</span>
+                  </div>
+                  <Streamdown className="prose prose-sm text-gray-800 max-w-none">
+                    {execBody}
+                  </Streamdown>
+                </div>
+              </div>
+            </div>
+          )}
+          {remainingMarkdown && (
+            <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
+              <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold text-gray-900">
+                Detailed Findings
+              </div>
+              <div className="px-4 py-3">
+                <Streamdown className="prose prose-sm max-w-none text-gray-800">
+                  {remainingMarkdown}
+                </Streamdown>
+              </div>
+            </div>
+          )}
+          {!remainingMarkdown && !execBody && content && (
+            <MarkdownContent content={content} />
+          )}
+        </div>
+      ) : (
+        <div className="relative">
+          <MarkdownContent content={displayContent} />
+          {streaming && content && (
+            <span className="inline-block w-0.5 h-4 bg-blue-600 ml-1 animate-pulse" />
+          )}
+          {streaming && !content && (
+            <div className="flex gap-1">
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }}></div>
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></div>
+            </div>
+          )}
+        </div>
+      )}
 
-      {shouldCollapse && (
+      {showCollapseToggle && (
         <div className="flex items-center justify-end">
           <button
             type="button"

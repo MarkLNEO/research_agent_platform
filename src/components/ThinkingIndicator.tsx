@@ -3,13 +3,17 @@ import { useEffect, useState } from 'react';
 import { Streamdown } from 'streamdown';
 
 interface ThinkingIndicatorProps {
-  type: 'reasoning' | 'web_search' | 'reasoning_progress' | 'acknowledgment' | 'content_extraction' | 'accounts_added';
+  type: 'reasoning' | 'web_search' | 'reasoning_progress' | 'acknowledgment' | 'content_extraction' | 'accounts_added' | 'context_preview';
   content?: string;
   query?: string;
   sources?: string[];
   url?: string;
   count?: number;
   companies?: string[];
+  company?: string;
+  icp?: string;
+  critical?: string[];
+  important?: string[];
 }
 
 function extractDomain(url: string): string {
@@ -27,9 +31,50 @@ function formatSourceTitle(url: string): string {
   return parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
 }
 
-export function ThinkingIndicator({ type, content, query, sources, url, count, companies }: ThinkingIndicatorProps) {
+export function ThinkingIndicator({ type, content, query, sources, url, count, companies, company: previewCompany, icp, critical, important }: ThinkingIndicatorProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const toggle = () => { setIsExpanded(v => !v); };
+
+  if (type === 'context_preview') {
+    return (
+      <div className="flex gap-3 items-start mb-4 animate-fadeIn">
+        <div className="flex-1 px-4 py-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl text-sm shadow-sm">
+          <div className="text-sm font-semibold text-blue-900 mb-2">
+            Using your saved preferences for {previewCompany || 'this company'}
+          </div>
+          {icp && (
+            <p className="text-xs text-blue-800 mb-3">
+              ICP focus: <span className="font-semibold">{icp}</span>
+            </p>
+          )}
+          {critical && critical.length > 0 && (
+            <div className="mb-2">
+              <div className="text-[11px] font-semibold text-red-700 uppercase tracking-wide mb-1">Critical criteria</div>
+              <div className="flex flex-wrap gap-2">
+                {critical.map((item, idx) => (
+                  <span key={idx} className="px-2 py-0.5 text-[11px] font-medium bg-red-100 text-red-700 rounded-full">
+                    🔥 {item}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {important && important.length > 0 && (
+            <div>
+              <div className="text-[11px] font-semibold text-yellow-700 uppercase tracking-wide mb-1">Important focus</div>
+              <div className="flex flex-wrap gap-2">
+                {important.map((item, idx) => (
+                  <span key={idx} className="px-2 py-0.5 text-[11px] font-medium bg-yellow-100 text-yellow-700 rounded-full">
+                    ⭐ {item}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (type === 'reasoning') {
     // Coerce plain reasoning lines into bullets if not already formatted

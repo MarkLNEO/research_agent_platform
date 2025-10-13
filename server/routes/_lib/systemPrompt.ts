@@ -27,25 +27,36 @@ const MODE_HINT: Record<Exclude<ResearchMode, undefined>, string> = {
 
 const STREAMING_BEHAVIOUR = `While reasoning, surface short bullet updates ("- assessing funding rounds", "- reading tech stack coverage") so the UI can stream progress.`;
 
+const EXEC_SUMMARY_GUIDANCE = `Executive Summary (non-negotiable):
+- After the acknowledgement line, output:
+  ## Executive Summary
+  <2 short sentences with the headline insight>
+  **ICP Fit:** <0-100% with adjective>
+  **Recommendation:** <Pursue / Monitor / Pass + 5-word rationale>
+  **Key Takeaways:**
+  - <Top 3 facts in one sentence each>
+  **Quick Stats:**
+  - Funding: <amount and date or "None disclosed">
+  - Employees: <approx headcount>
+  - Industry: <industry/segment>
+  - Stage: <startup/scale/enterprise>
+- Keep the entire Executive Summary ≤ 120 words.`;
+
 const STRUCTURED_OUTPUT = `Output format (strict):
 - Start with a brief, friendly acknowledgement line (e.g., "On it — deep dive (~2 min).") that states research depth and ETA, then proceed.
-- Always begin the substantive report with a single H1 headline in the form "# {Subject} — Executive Summary" (replace {Subject} with the researched entity).
-- Follow immediately with "## High Level" (label it “High Level” in your copy) and provide 5–8 bullet points unless the user preference says otherwise. Obey any <summary_preference> tag exactly.
-- Continue with the sections, in this order: "## Key Findings", "## Signals", "## Recommended Next Actions", "## Tech/Footprint" (or "## Operating Footprint" when more appropriate), "## Decision Makers" (if personnel data exists), "## Risks & Gaps" (optional), "## Sources", "## Proactive Follow-ups".
+- ${EXEC_SUMMARY_GUIDANCE}
+- After the Executive Summary, continue with the sections, in this order: "## High Level" (obey any <summary_preference> tag), "## Key Findings", "## Custom Criteria" (if applicable), "## Signals", "## Recommended Next Actions", "## Tech/Footprint" (or "## Operating Footprint" when more appropriate), "## Decision Makers" (if personnel data exists), "## Risks & Gaps" (optional), "## Sources", "## Proactive Follow-ups".
 - If a section has no content, keep the heading and state "None found" with a note on next steps.
 - Use bold call-outs within sections for clarity, but do not omit or rename the headings.
 - When saved follow-up questions exist, add "## Saved Follow-up Answers" after the core sections and answer each saved question in 1-2 concise bullets.`;
 
 const QUICK_OUTPUT = `Quick Facts format (strict):
-- Do not include an Executive Summary heading or long sections.
-- Output only these items, in this order, as short bullets (no subheadings):
-  1) Company size and revenue (if unknown, say "unknown").
-  2) Industry and headquarters city/state.
-  3) Leadership (2–3 names with titles).
-  4) Recent major news (≤2 bullets, last 3–6 months max).
-  5) One‑line ICP fit assessment.
-- Total length ≤ 150 words. Refuse extra content beyond these bullets.
-- Cite source keywords inline in parentheses when relevant (e.g., "(WSJ, Sep 2025)").`;
+- Output exactly two sections and nothing else:
+  ## Executive Summary (≤ 80 words, include one sentence headline plus "ICP Fit: <value>" and "Recommendation: <value>")
+  ## Quick Facts (5 bullets: size & revenue, industry & HQ, 2 leadership names, ≤2 recent news items, 1-sentence ICP fit rationale)
+- Keep total length ≤ 140 words.
+- Do not add additional headings, tables, or filler.
+- Cite sources in parentheses when helpful (e.g., "(WSJ, Sep 2025)").`;
 
 const DEFAULT_CRITERIA_GUIDANCE = `Default Qualifying Criteria (assume when none supplied):
 1. Recent security or operational incidents (breach, ransomware, downtime).

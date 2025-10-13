@@ -1,36 +1,17 @@
 import { AlertCircle, X } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
-
-interface ProfileCompleteness {
-  isComplete: boolean;
-  missingFields: string[];
-  completionPercentage: number;
-}
+import { useUserProfile } from '../hooks/useUserProfile';
 
 export function ProfileCompletenessBanner() {
   const navigate = useNavigate();
-  const [profileStatus, setProfileStatus] = useState<ProfileCompleteness | null>(null);
+  const { profile, customCriteriaCount, signalPreferencesCount, loading } = useUserProfile();
   const [isDismissed, setIsDismissed] = useState(() => {
-    // Check localStorage for dismissal state
     const dismissed = localStorage.getItem('profileBannerDismissed');
     return dismissed === 'true';
   });
 
   useEffect(() => {
-    checkProfileCompleteness();
-  }, []);
-
-  const handleDismiss = () => {
-    setIsDismissed(true);
-    // Persist dismissal for 7 days
-    localStorage.setItem('profileBannerDismissed', 'true');
-    localStorage.setItem('profileBannerDismissedAt', Date.now().toString());
-  };
-
-  useEffect(() => {
-    // Check if dismissal has expired (7 days)
     const dismissedAt = localStorage.getItem('profileBannerDismissedAt');
     if (dismissedAt) {
       const daysSinceDismissal = (Date.now() - parseInt(dismissedAt)) / (1000 * 60 * 60 * 24);
@@ -42,102 +23,158 @@ export function ProfileCompletenessBanner() {
     }
   }, []);
 
-  const checkProfileCompleteness = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const [profileRes, signalsCountRes] = await Promise.all([
-        supabase
-          .from('company_profiles')
-          .select('*')
-          .eq('user_id', user.id)
-          .maybeSingle(),
-        supabase
-          .from('user_signal_preferences')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', user.id),
-      ]);
-
-      const profile = profileRes.data;
-      const signalPreferencesCount = signalsCountRes.count || 0;
-
-      if (!profile) {
-        setProfileStatus({
-          isComplete: false,
-          missingFields: ['All profile information'],
-          completionPercentage: 0
-        });
-        return;
-      }
-
-      const missingFields: string[] = [];
-      let filledFields = 0;
-      const totalFields = 7;
-
-      if (!profile.company_name) missingFields.push('Company name'); else filledFields++;
-      if (!profile.company_url) missingFields.push('Company website'); else filledFields++;
-      if (!profile.industry) missingFields.push('Industry'); else filledFields++;
-      if (!profile.icp_definition) missingFields.push('Ideal customer profile'); else filledFields++;
-      if (!profile.competitors || profile.competitors.length === 0) missingFields.push('Competitors'); else filledFields++;
-      if (!profile.target_titles || profile.target_titles.length === 0) missingFields.push('Target job titles'); else filledFields++;
-      if (signalPreferencesCount === 0) missingFields.push('Buying signals'); else filledFields++;
-
-      const completionPercentage = Math.round((filledFields / totalFields) * 100);
-
-      setProfileStatus({
-        isComplete: missingFields.length === 0,
-        missingFields,
-        completionPercentage
-      });
-    } catch (error) {
-      console.error('Error checking profile completeness:', error);
-    }
+  const handleDismiss = () => {
+    setIsDismissed(true);
+    localStorage.setItem('profileBannerDismissed', 'true');
+    localStorage.setItem('profileBannerDismissedAt', Date.now().toString());
   };
 
-  if (!profileStatus || profileStatus.isComplete || isDismissed) {
+  const { completion, requiredMissing, importantMissing, optionalMissing } = useMemo(() => {
+    if (!profile) {
+      return {
+        completion: 0,
+        requiredMissing: ['Company name', 'Company website', 'Industry', 'Ideal customer profile'],
+        importantMissing: [],
+        optionalMissing: [],
+      };
+    }
+
+    const requiredMissing: string[] = [];
+    const importantMissing: string[] = [];
+    const optionalMissing: string[] = [];
+
+    let score = 0;
+    let total = 0;
+
+    const addWeighted = (condition: boolean, value: number) => {
+      total += value;
+      if (condition) score += value;
+    };
+
+    const hasCompanyName = Boolean(profile.company_name);
+    const hasCompanyUrl = Boolean(profile.company_url);
+    const hasIndustry = Boolean(profile.industry);
+    const hasICP = Boolean(profile.icp_definition || profile.icp);
+
+    if (!hasCompanyName) requiredMissing.push('Company name');
+    if (!hasCompanyUrl) requiredMissing.push('Company website');
+    if (!hasIndustry) requiredMissing.push('Industry');
+    if (!hasICP) requiredMissing.push('Ideal customer profile');
+
+    addWeighted(hasCompanyName, 20);
+    addWeighted(hasCompanyUrl, 15);
+    addWeighted(hasIndustry, 15);
+    addWeighted(hasICP, 20);
+
+    const hasRole = Boolean(profile.user_role);
+    const hasUseCase = Boolean(profile.use_case);
+    const hasTargets = Array.isArray(profile.target_titles) && profile.target_titles.length > 0;
+    const hasCustomCriteria = customCriteriaCount > 0;
+    const hasSignalPrefs = signalPreferencesCount > 0;
+
+    if (!hasRole) importantMissing.push('Role');
+    if (!hasUseCase) importantMissing.push('Use case');
+    if (!hasTargets) importantMissing.push('Target job titles');
+    if (!hasCustomCriteria) importantMissing.push('Qualifying criteria');
+    if (!hasSignalPrefs) importantMissing.push('Buying signal preferences');
+
+    addWeighted(hasRole, 10);
+    addWeighted(hasUseCase, 10);
+    addWeighted(hasTargets, 8);
+    addWeighted(hasCustomCriteria, 4);
+    addWeighted(hasSignalPrefs, 4);
+
+    const hasCompetitors = Array.isArray(profile.competitors) && profile.competitors.length > 0;
+    const hasResearchFocus = Array.isArray(profile.research_focus) && profile.research_focus.length > 0;
+
+    if (!hasCompetitors) optionalMissing.push('Competitors');
+    if (!hasResearchFocus) optionalMissing.push('Preferred research focus');
+
+    addWeighted(hasCompetitors, 4);
+    addWeighted(hasResearchFocus, 4);
+
+    const completion = total > 0 ? Math.round((score / total) * 100) : 0;
+
+    return { completion, requiredMissing, importantMissing, optionalMissing };
+  }, [profile, customCriteriaCount, signalPreferencesCount]);
+
+  if (loading || !profile || isDismissed) return null;
+
+  const hasRequired = requiredMissing.length > 0;
+  const hasImportant = importantMissing.length > 0;
+  const severity = hasRequired ? 'critical' : hasImportant ? 'important' : 'optional';
+
+  if (!hasRequired && !hasImportant && optionalMissing.length === 0) {
     return null;
   }
 
+  const bodyText = hasRequired
+    ? 'Add these essentials so I can qualify companies accurately:'
+    : hasImportant
+    ? 'Add these details to sharpen recommendations:'
+    : 'Optional enhancements to personalize research even further:';
+
+  const missingList = hasRequired ? requiredMissing : hasImportant ? importantMissing : optionalMissing;
+
   return (
-    <div className="bg-amber-50 border-l-4 border-amber-400 p-4 mb-4 rounded-r-lg" data-testid="profile-completeness-banner">
-      <div className="flex items-start">
-        <div className="flex-shrink-0">
-          <AlertCircle className="h-5 w-5 text-amber-400" />
-        </div>
-        <div className="ml-3 flex-1">
-          <h3 className="text-sm font-medium text-amber-800">
-            Complete your profile for better research ({profileStatus.completionPercentage}% complete)
-          </h3>
-          <div className="mt-2 text-sm text-amber-700">
-            <p>
-              Adding these details will help me provide more targeted and relevant research:
-            </p>
-            <ul className="list-disc list-inside mt-2 space-y-1">
-              {profileStatus.missingFields.slice(0, 3).map((field, index) => (
-                <li key={index}>{field}</li>
-              ))}
-              {profileStatus.missingFields.length > 3 && (
-                <li>And {profileStatus.missingFields.length - 3} more...</li>
-              )}
-            </ul>
-          </div>
-          <div className="mt-4">
-            <button
-              onClick={() => navigate('/profile-coach')}
-              className="text-sm font-medium text-amber-800 hover:text-amber-900 underline"
+    <div
+      className={`p-4 mb-4 rounded-2xl border-2 ${
+        severity === 'critical'
+          ? 'bg-red-50 border-red-200'
+          : severity === 'important'
+          ? 'bg-yellow-50 border-yellow-200'
+          : 'bg-blue-50 border-blue-200'
+      }`}
+      data-testid="profile-completeness-banner"
+    >
+      <div className="flex items-start gap-3">
+        <AlertCircle
+          className={`h-5 w-5 flex-shrink-0 ${
+            severity === 'critical' ? 'text-red-500' : severity === 'important' ? 'text-yellow-500' : 'text-blue-500'
+          }`}
+        />
+        <div className="flex-1">
+          <div className="flex items-center justify-between">
+            <h3
+              className={`text-sm font-semibold ${
+                severity === 'critical'
+                  ? 'text-red-900'
+                  : severity === 'important'
+                  ? 'text-yellow-900'
+                  : 'text-blue-900'
+              }`}
             >
-              Complete your profile →
+              {severity === 'critical'
+                ? 'Complete your profile for better research'
+                : severity === 'important'
+                ? 'Boost your research accuracy'
+                : 'Enhance your profile (optional)'}
+              <span className="ml-2 px-2 py-0.5 text-xs font-bold bg-white/80 rounded-full text-gray-700">
+                {completion}% complete
+              </span>
+            </h3>
+            <button
+              onClick={handleDismiss}
+              className="text-gray-400 hover:text-gray-600"
+              title="Dismiss for 7 days"
+            >
+              <X className="h-4 w-4" />
             </button>
           </div>
-        </div>
-        <div className="ml-auto pl-3">
+          <p className={`text-xs mt-2 ${severity === 'critical' ? 'text-red-800' : severity === 'important' ? 'text-yellow-800' : 'text-blue-800'}`}>
+            {bodyText}
+          </p>
+          <ul className="mt-2 text-xs text-gray-700 list-disc list-inside space-y-1">
+            {missingList.slice(0, 3).map((item, idx) => (
+              <li key={idx}>{item}</li>
+            ))}
+            {missingList.length > 3 && <li>+{missingList.length - 3} more</li>}
+          </ul>
           <button
-            onClick={handleDismiss}
-            className="inline-flex text-amber-400 hover:text-amber-500"
-            title="Dismiss for 7 days"
+            onClick={() => navigate('/profile-coach')}
+            className="mt-3 text-xs font-semibold text-blue-700 hover:text-blue-900 underline"
           >
-            <X className="h-5 w-5" />
+            {severity === 'optional' ? 'Enhance profile →' : 'Complete profile →'}
           </button>
         </div>
       </div>
