@@ -1126,9 +1126,9 @@ useEffect(() => {
       const depth = preferredResearchType || (needsClarification(userMessage) ? null : 'specific');
       setLastRunMode((depth as any) || 'auto');
       const cfg: any = { ...(extraCfg || {}) };
-      if (depth === 'deep') cfg.model = 'gpt-5';
+      if (depth === 'deep') cfg.model = 'gpt-5-mini';
       if (depth === 'quick') cfg.model = 'gpt-5-mini';
-      if (depth === 'specific') cfg.model = 'gpt-5';
+      if (depth === 'specific') cfg.model = 'gpt-5-mini';
       cfg.clarifiers_locked = clarifiersLocked;
       cfg.facet_budget = depth === 'quick' ? 3 : depth === 'deep' ? 10 : 6;
 
@@ -2013,56 +2013,41 @@ useEffect(() => {
                   }
                   return (last as any).content || '';
                 };
-                const inlineContent = pickContent();
+                const inlineContent = pickContent().trim();
+                if (!inlineContent) return null;
                 if (!showInlineReasoning) {
                   return (
                     <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 text-xs">
-                      <div className="text-blue-900">Reasoning hidden</div>
+                      <div className="text-blue-900">Thinking hidden</div>
                       <div className="flex items-center gap-3">
-                        <button className="text-blue-700 hover:text-blue-900" onClick={() => persistInlineReasoning(true)}>Show reasoning</button>
+                        <button className="text-blue-700 hover:text-blue-900" onClick={() => persistInlineReasoning(true)}>Show thinking</button>
                         <button className="text-blue-700 hover:text-blue-900" onClick={() => setReasoningOpen(true)}>View all</button>
                       </div>
                     </div>
                   );
                 }
                 return (
-                  <div className="bg-white border border-blue-100 rounded-xl shadow-sm">
-                    <div className="px-4 py-2 flex items-center justify-between">
-                      <div className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Reasoning</div>
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => persistInlineReasoning(false)}
-                          className="text-xs text-blue-700 hover:text-blue-900"
-                          aria-label="Hide reasoning"
-                        >
-                          Hide reasoning
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setReasoningOpen(true)}
-                          className="text-xs text-blue-700 hover:text-blue-900"
-                          aria-label="View full reasoning stream"
-                        >
-                          View all
-                        </button>
-                      </div>
+                  <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 text-xs">
+                    <div className="text-blue-900 truncate pr-2">
+                      <span className="font-semibold">Thinking:</span> {inlineContent}
                     </div>
-                    <div className="px-4 pb-3">
-                      <ThinkingIndicator
-                        key={last.id}
-                        type={last.type}
-                        content={inlineContent}
-                        query={last.query}
-                        sources={last.sources}
-                        url={(last as any).url}
-                        count={(last as any).count}
-                        companies={(last as any).companies}
-                        company={(last as any).company}
-                        icp={(last as any).icp}
-                        critical={(last as any).critical}
-                        important={(last as any).important}
-                      />
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => persistInlineReasoning(false)}
+                        className="text-blue-700 hover:text-blue-900"
+                        aria-label="Hide reasoning"
+                      >
+                        Hide
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReasoningOpen(true)}
+                        className="text-blue-700 hover:text-blue-900"
+                        aria-label="View full reasoning stream"
+                      >
+                        View all
+                      </button>
                     </div>
                   </div>
                 );

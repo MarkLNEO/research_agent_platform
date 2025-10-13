@@ -179,17 +179,16 @@ function clampScore(value: number): number {
 }
 
 function computeScores(markdown: string, sourcesCount: number) {
-  const wordCount = markdown.split(/\s+/).filter(Boolean).length;
   const hasSignals = /signal|trigger|intent|buying/i.test(markdown);
   const hasIcp = /icp|ideal customer profile|fit score/i.test(markdown);
-  const structureBonus = markdown.includes('##') ? 8 : 0;
+  const hasStructure = /##\s+/.test(markdown);
 
-  const baseCoverage = clampScore(40 + Math.min(50, wordCount / 4 + structureBonus));
-  const icpFit = clampScore(45 + Math.min(40, wordCount / 5) + (hasIcp ? 10 : 0));
-  const signalScore = clampScore(35 + Math.min(45, wordCount / 6) + (hasSignals ? 12 : 0) + sourcesCount * 3);
+  const baseCoverage = clampScore(60 + sourcesCount * 4 + (hasStructure ? 5 : 0));
+  const icpFit = clampScore(65 + sourcesCount * 4 + (hasIcp ? 8 : 0) + (hasStructure ? 3 : 0));
+  const signalScore = clampScore(60 + sourcesCount * 5 + (hasSignals ? 10 : 0));
   const composite = clampScore(icpFit * 0.3 + signalScore * 0.4 + baseCoverage * 0.3);
+  const confidence: ResearchDraft['confidence_level'] = sourcesCount >= 3 ? 'high' : sourcesCount >= 1 ? 'medium' : 'low';
   const priority: ResearchDraft['priority_level'] = composite >= 80 ? 'hot' : composite >= 60 ? 'warm' : 'standard';
-  const confidence: ResearchDraft['confidence_level'] = sourcesCount >= 3 ? 'high' : sourcesCount === 0 ? 'low' : 'medium';
 
   return {
     icpFit,

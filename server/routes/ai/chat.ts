@@ -459,8 +459,7 @@ export default async function handler(req: any, res: any) {
       const normalizedRequest = requestText.toLowerCase();
       const isResearchQuery = research_type ? true : !!req.__isResearchQuery;
       const defaultModel = (() => {
-        if (research_type === 'deep') return 'gpt-5';
-        if (research_type === 'quick') return 'gpt-5-mini';
+        // Default all research modes to gpt-5-mini for cost efficiency
         return 'gpt-5-mini';
       })();
       const selectedModel = userConfig.model || defaultModel;
