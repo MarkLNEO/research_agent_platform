@@ -243,7 +243,14 @@ export function BulkResearchStatus({ onJobComplete }: BulkResearchStatusProps) {
   }
 
   if (jobs.length === 0) {
-    return null;
+    return (
+      <div className="border border-dashed border-gray-300 rounded-lg p-4 bg-gray-50">
+        <h3 className="text-sm font-semibold text-gray-800">No bulk research runs yet</h3>
+        <p className="text-xs text-gray-600 mt-1 leading-relaxed">
+          Upload a CSV from the chat composer to research many accounts at once. Your most recent jobs will appear here with status, progress, and downloads when they finish.
+        </p>
+      </div>
+    );
   }
 
   return (
