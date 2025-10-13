@@ -1063,7 +1063,7 @@ useEffect(() => {
     await handleSendMessageWithChat(currentChatId, content);
   };
 
-  const streamAIResponse = async (userMessage: string, chatId?: string): Promise<string> => {
+  const streamAIResponse = async (userMessage: string, chatId?: string, extraCfg?: Record<string, any>): Promise<string> => {
     try {
       const history = messages
         .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -1101,7 +1101,7 @@ useEffect(() => {
       // Build config to influence model depth based on user preference/clarifier
       const depth = preferredResearchType || (needsClarification(userMessage) ? null : 'specific');
       setLastRunMode((depth as any) || 'auto');
-      const cfg: any = {};
+      const cfg: any = { ...(extraCfg || {}) };
       if (depth === 'deep') cfg.model = 'gpt-5';
       if (depth === 'quick') cfg.model = 'gpt-5-mini';
       if (depth === 'specific') cfg.model = 'gpt-5';
@@ -1405,6 +1405,11 @@ useEffect(() => {
       });
       return `Sorry, I had trouble completing that request.\n\n**Error details:** ${errorMsg}`;
     }
+  };
+
+  const startSummarize = async (chatId: string, sourceMarkdown: string) => {
+    const prompt = 'Summarize the previous research for executive consumption.';
+    await streamAIResponse(prompt, chatId, { summarize_source: sourceMarkdown });
   };
 
   const getUserInitial = () => (user?.email ? user.email[0].toUpperCase() : 'Y');
@@ -1953,9 +1958,13 @@ useEffect(() => {
                     } : undefined}
                     onSummarize={isLastAssistant ? async () => {
                       setPostSummarizeNudge(false);
-                      await handleSendMessageWithChat(currentChatId!, 'Summarize the above into a quick summary (1–2 sentences) followed by 5–8 decision-relevant bullets. Do not ask for inputs. No web research.');
-                      void sendPreferenceSignal('length', { kind: 'categorical', choice: 'brief' }, { weight: 1.5 });
-                      setPostSummarizeNudge(true);
+                      try {
+                        await startSummarize(currentChatId!, m.content);
+                        void sendPreferenceSignal('length', { kind: 'categorical', choice: 'brief' }, { weight: 1.5 });
+                        setPostSummarizeNudge(true);
+                      } catch (e: any) {
+                        addToast({ type: 'error', title: 'Summarize failed', description: e?.message || 'Please try again.' });
+                      }
                     } : undefined}
                     onNextAction={isLastAssistant ? handleNextAction : undefined}
                     disablePromote={saving}

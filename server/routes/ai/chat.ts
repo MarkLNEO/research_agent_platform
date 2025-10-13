@@ -449,6 +449,48 @@ export default async function handler(req: any, res: any) {
       const reasoningEffort = research_type === 'deep' ? 'medium' : 'low';
       const isQuick = research_type === 'quick';
 
+      // Summarization mode: if the client passed summarize_source, bypass research flow
+      const summarizeSource = (userConfig as any)?.summarize_source as string | undefined;
+      if (summarizeSource && typeof summarizeSource === 'string' && summarizeSource.trim().length > 0) {
+        const sumInstructions = [
+          'You write crisp executive summaries for sales research.',
+          'Output format strictly:
+## Executive Summary
+<2 short sentences with headline>
+
+## Key Takeaways
+- 5–8 bullets, each ≤18 words, decision-focused, grounded in the source
+',
+          'Do not add extra sections. Do not use web_search. No boilerplate.',
+        ].join('\n');
+        const sumInput = `SOURCE\n---\n${summarizeSource}\n---\nSummarize for an Account Executive.`;
+
+        const stream = await openai.responses.stream({
+          model: 'gpt-5-mini',
+          instructions: sumInstructions,
+          input: sumInput,
+          text: { format: { type: 'text' }, verbosity: 'low' },
+          store: false,
+          metadata: {
+            agent: 'company_research',
+            stage: 'user_summarize',
+            chat_id: chatId || null,
+            user_id: user.id,
+          },
+        });
+
+        for await (const chunk of stream as any) {
+          if (responseClosed) break;
+          if (chunk.type === 'response.output_text.delta' && chunk.delta) {
+            safeWrite(`data: ${JSON.stringify({ type: 'content', content: chunk.delta })}\n\n`);
+          }
+        }
+        try { await stream.finalResponse(); } catch {}
+        safeWrite('data: [DONE]\n\n');
+        responseClosed = true;
+        return;
+      }
+
       const wantsFreshIntel = /recent|latest|today|yesterday|this week|signals?|news|breach|breaches|leadership|funding|acquisition|hiring|layoff|changed|update|report/i.test(normalizedRequest);
       const mentionsTimeframe = /\b(last|past)\s+\d+\s+(day|days|week|weeks|month|months|year|years)\b/i.test(requestText);
       const explicitlyRequestsSearch = /\bweb[_\s-]?search\b/.test(normalizedRequest) || /\b(search online|look up|google|check the web)\b/.test(normalizedRequest);
