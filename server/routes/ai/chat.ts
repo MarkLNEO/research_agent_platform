@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import { buildSystemPrompt, type AgentType } from '../_lib/systemPrompt.js';
+import { buildMemoryBlock } from '../_lib/memory.js';
 import { assertEmailAllowed } from '../_lib/access.js';
 
 // Helper function to estimate tokens
@@ -254,6 +255,14 @@ export default async function handler(req: any, res: any) {
 
     // Build system prompt if not provided; pass research_type to bias depth
     let instructions = systemPrompt || buildSystemPrompt(userContext as any, agentType as AgentType, body.research_type);
+    try {
+      const memoryBlock = await buildMemoryBlock(user.id, agentType as string);
+      if (memoryBlock) {
+        instructions = `${memoryBlock}\n\n${instructions}`;
+      }
+    } catch (memoryError) {
+      console.error('[memory] failed to load memory block', memoryError);
+    }
     if (!instructions.startsWith('Formatting re-enabled')) {
       instructions = `Formatting re-enabled\n\n${instructions}`;
     }
@@ -652,13 +661,6 @@ export default async function handler(req: any, res: any) {
 
       if (storeRun && finalResponseData?.id) {
         try {
-          // extra confirmation: create a tiny metadata entry so we can cross-reference later
-          await openai.responses.update(finalResponseData.id, {
-            metadata: {
-              last_verified_at: new Date().toISOString(),
-              verifying_route: 'vercel/api/ai/chat'
-            }
-          });
           const verify = await openai.responses.retrieve(finalResponseData.id);
           console.log('[OPENAI] Stored response status:', verify?.status);
         } catch (verifyErr: any) {

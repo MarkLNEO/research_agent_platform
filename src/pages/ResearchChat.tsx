@@ -61,6 +61,40 @@ const deriveChatTitle = (text: string): string => {
   return trimmed.length > 60 ? `${trimmed.slice(0, 57)}…` : trimmed || 'New Chat';
 };
 
+const DEFAULT_AGENT = 'company_research';
+
+const sendPreferenceSignal = async (
+  key: string,
+  observed: Record<string, any>,
+  opts?: { agent?: string; weight?: number }
+) => {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    };
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (anonKey) headers['apikey'] = String(anonKey);
+
+    const payload: Record<string, any> = {
+      agent: opts?.agent || DEFAULT_AGENT,
+      key,
+      observed,
+    };
+    if (typeof opts?.weight === 'number') payload.weight = opts.weight;
+
+    await fetch('/api/agent/signal', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    console.warn('[research-chat] preference signal failed', error);
+  }
+};
+
 const isResearchPrompt = (text: string): boolean => {
   const lower = text.toLowerCase();
   return (
@@ -881,6 +915,14 @@ export function ResearchChat() {
 
   const chooseResearchType = async (type: 'deep' | 'quick' | 'specific') => {
     await persistPreference(type);
+    const lengthChoice: Record<'deep' | 'quick' | 'specific', 'long' | 'brief' | 'standard'> = {
+      deep: 'long',
+      quick: 'brief',
+      specific: 'standard',
+    };
+    void sendPreferenceSignal('length', { kind: 'categorical', choice: lengthChoice[type] }, {
+      weight: type === 'quick' ? 1.5 : type === 'deep' ? 1.2 : 1,
+    });
     setShowClarify(false);
     const content = pendingQuery || inputValue.trim();
     setPendingQuery(null);
@@ -1228,6 +1270,7 @@ export function ResearchChat() {
   const handleSummarizeLast = async () => {
     if (!currentChatId) return;
     await handleSendMessageWithChat(currentChatId, 'Summarize the above into a one-line headline (<=140 chars) and a TL;DR with 5–8 bullets. No web research.');
+    void sendPreferenceSignal('length', { kind: 'categorical', choice: 'brief' }, { weight: 1.5 });
   };
   const handleEmailDraftFromLast = async () => {
     try {
@@ -1658,6 +1701,7 @@ export function ResearchChat() {
                     onSummarize={isLastAssistant ? async () => {
                       setPostSummarizeNudge(false);
                       await handleSendMessageWithChat(currentChatId!, 'Summarize the above into a TL;DR (1–2 sentences) followed by 5–8 decision-relevant bullets. Do not ask for inputs. No web research.');
+                      void sendPreferenceSignal('length', { kind: 'categorical', choice: 'brief' }, { weight: 1.5 });
                       setPostSummarizeNudge(true);
                     } : undefined}
                     disablePromote={saving}
@@ -1739,6 +1783,7 @@ export function ResearchChat() {
                             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
                             body: JSON.stringify({ prompt_config: { always_tldr: true } })
                           });
+                          void sendPreferenceSignal('tldr_trigger', { tokens: 0, choice: 'always' }, { weight: 1.2 });
                           addToast({ type: 'success', title: 'Preference saved', description: 'I\'ll include a TL;DR by default.' });
                         } catch (e: any) {
                           addToast({ type: 'error', title: 'Save failed', description: e?.message || 'Unable to save preference' });
@@ -1760,6 +1805,7 @@ export function ResearchChat() {
                             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
                             body: JSON.stringify({ prompt_config: { default_output_brevity: 'short' } })
                           });
+                          void sendPreferenceSignal('length', { kind: 'categorical', choice: 'brief' }, { weight: 2 });
                           addToast({ type: 'success', title: 'Preference saved', description: 'I\'ll keep outputs shorter by default.' });
                         } catch (e: any) {
                           addToast({ type: 'error', title: 'Save failed', description: e?.message || 'Unable to save preference' });

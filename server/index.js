@@ -17,10 +17,14 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 8787;
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 // Follow .windsurf/rules/gpt-5-responses-api.md — default to GPT‑5 Responses API model
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini';
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+const serviceSupabase = SUPABASE_SERVICE_ROLE_KEY
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+  : null;
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   console.error('Missing Supabase environment variables. Set SUPABASE_URL and SUPABASE_ANON_KEY (or VITE_ variants).');
@@ -121,6 +125,182 @@ async function logUsage(supabase, userId, actionType, tokensUsed, metadata = {})
     tool_name: 'chat',
     metadata,
   });
+}
+
+function formatImplicitValue(key, valueJson) {
+  if (!valueJson || typeof valueJson !== 'object') return null;
+  const conf = typeof valueJson.confidence === 'number' ? valueJson.confidence : valueJson.conf;
+  if (typeof conf === 'number' && conf < 0.6) return null;
+
+  if (typeof valueJson.value === 'number') {
+    return `${key}: ${valueJson.value.toFixed(2)}${conf ? ` (conf ${conf.toFixed(2)})` : ''}`;
+  }
+  if (typeof valueJson.choice === 'string') {
+    return `${key}: ${valueJson.choice}${conf ? ` (conf ${conf.toFixed(2)})` : ''}`;
+  }
+  if (Array.isArray(valueJson.order)) {
+    return `${key}: [${valueJson.order.slice(0, 6).join(', ')}]`;
+  }
+  if (valueJson.map && typeof valueJson.map === 'object') {
+    const entries = Object.entries(valueJson.map)
+      .sort((a, b) => Number(b[1]) - Number(a[1]))
+      .slice(0, 5)
+      .map(([k, v]) => `${k}:${Number(v).toFixed(2)}`);
+    return `${key}: {${entries.join(', ')}}`;
+  }
+  return `${key}: ${JSON.stringify(valueJson).slice(0, 120)}`;
+}
+
+async function buildMemoryBlockForUser(userId, agent = 'company_research') {
+  if (!serviceSupabase) return '';
+  try {
+    const MAX_BYTES = 1800;
+    const [{ data: knowledge }, { data: implicit }] = await Promise.all([
+      serviceSupabase
+        .from('knowledge_entries')
+        .select('title, content')
+        .eq('user_id', userId)
+        .eq('agent', agent)
+        .eq('enabled', true)
+        .order('created_at', { ascending: false })
+        .limit(8),
+      serviceSupabase
+        .from('implicit_preferences')
+        .select('key, value_json')
+        .eq('user_id', userId)
+        .eq('agent', agent)
+        .order('updated_at', { ascending: false })
+        .limit(24),
+    ]);
+
+    const confirmed = (knowledge || []).map(entry => `- ${entry.content || entry.title}`);
+    const tendencies = (implicit || [])
+      .map(row => formatImplicitValue(row.key, row.value_json))
+      .filter(Boolean)
+      .slice(0, 12);
+
+    if (confirmed.length === 0 && tendencies.length === 0) return '';
+
+    let block = `<<memory v=1 agent=${agent}>`;
+    const appendLine = line => {
+      const prefix = block.endsWith('\n') ? '' : '\n';
+      const candidate = `${block}${prefix}${line}`;
+      if (Buffer.byteLength(`${candidate}\n</memory>`, 'utf8') <= MAX_BYTES) {
+        block = candidate;
+        return true;
+      }
+      return false;
+    };
+    const appendBlank = () => {
+      const prefix = block.endsWith('\n') ? '' : '\n';
+      const candidate = `${block}${prefix}`;
+      if (Buffer.byteLength(`${candidate}</memory>`, 'utf8') <= MAX_BYTES) {
+        block = candidate;
+        return true;
+      }
+      return false;
+    };
+
+    if (confirmed.length > 0) {
+      if (appendLine('# confirmed knowledge')) {
+        for (const line of confirmed) {
+          if (!appendLine(line)) break;
+        }
+      }
+    }
+    if (tendencies.length > 0) {
+      if (!block.endsWith('\n') && !appendBlank()) {
+        // no room for separator; skip block if necessary
+      } else if (block.trim() !== `<<memory v=1 agent=${agent}>`) {
+        appendBlank();
+      }
+      if (appendLine('# implicit tendencies')) {
+        for (const line of tendencies) {
+          if (!appendLine(line)) break;
+        }
+      }
+    }
+
+    const bareHeader = `<<memory v=1 agent=${agent}>`;
+    if (block.trim() === bareHeader) return '';
+
+    if (!block.endsWith('\n')) block += '\n';
+    if (Buffer.byteLength(`${block}</memory>`, 'utf8') > MAX_BYTES) {
+      block = block.slice(0, Math.max(0, block.lastIndexOf('\n', block.length - 2) + 1));
+    }
+
+    block = `${block}</memory>`;
+    if (Buffer.byteLength(block, 'utf8') > MAX_BYTES) {
+      console.warn('[memory] block exceeded budget in express helper', {
+        bytes: Buffer.byteLength(block, 'utf8'),
+      });
+      return '';
+    }
+    return block;
+  } catch (error) {
+    console.error('Failed to build memory block', error);
+    return '';
+  }
+}
+
+async function upsertImplicitPreference(userId, agent, key, observed, weight = 1) {
+  if (!serviceSupabase) return null;
+  try {
+    const { data: existing } = await serviceSupabase
+      .from('implicit_preferences')
+      .select('value_json')
+      .eq('user_id', userId)
+      .eq('agent', agent)
+      .eq('key', key)
+      .maybeSingle();
+
+    const prev = existing?.value_json || {};
+    const kind = observed?.kind || prev.kind || (typeof observed?.value === 'number' ? 'scalar' : 'generic');
+    const updated = { ...prev, kind };
+    const step = Number(weight) > 0 ? Number(weight) : 1;
+
+    if (kind === 'scalar' && typeof observed?.value === 'number') {
+      const prevValue = typeof prev.value === 'number' ? prev.value : observed.value;
+      const prevCount = Number(prev.count) || 0;
+      const total = prevCount + step;
+      const newValue = (prevValue * prevCount + observed.value * step) / total;
+      updated.value = newValue;
+      updated.count = total;
+      const prevConf = Number(prev.confidence) || 0.5;
+      updated.confidence = Math.min(1, prevConf + 0.05 * step);
+    } else if (kind === 'categorical' && typeof observed?.choice === 'string') {
+      const prevChoice = prev.choice || observed.choice;
+      if (prevChoice === observed.choice) {
+        const prevConf = Number(prev.confidence) || 0.5;
+        updated.confidence = Math.min(1, prevConf + 0.07 * step);
+      } else {
+        updated.confidence = 0.4;
+      }
+      updated.choice = observed.choice;
+    } else if (observed?.map && typeof observed.map === 'object') {
+      updated.map = { ...(prev.map || {}) };
+      Object.entries(observed.map).forEach(([k, v]) => {
+        const prevVal = Number(updated.map[k] || 0);
+        updated.map[k] = prevVal * 0.9 + Number(v);
+      });
+      updated.confidence = Math.min(1, Number(prev.confidence) || 0.6);
+    } else {
+      Object.assign(updated, observed);
+      if (typeof updated.confidence !== 'number') {
+        updated.confidence = 0.6;
+      }
+    }
+
+    updated.updated_at = new Date().toISOString();
+
+    await serviceSupabase
+      .from('implicit_preferences')
+      .upsert({ user_id: userId, agent, key, value_json: updated, updated_at: new Date().toISOString() });
+    return updated;
+  } catch (error) {
+    console.error('Failed to upsert implicit preference', error);
+    return null;
+  }
 }
 
 async function fetchUserContext(supabase, userId, chatId) {

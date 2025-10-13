@@ -14,6 +14,9 @@ import draftOutreach from './outreach/draft.ts';
 import updateProfile from './profiles/update.ts';
 import health from './health.ts';
 import test from './test.ts';
+import recordSignal from './agent/signal.ts';
+import memoryBlock from './memory/block.ts';
+import memoryRollup from './memory/rollup.ts';
 
 type Handler = (req: any, res: any) => unknown;
 
@@ -58,6 +61,15 @@ export const routeDefinitions: RouteDefinition[] = [
 
   { method: 'post', path: '/outreach/draft', handler: draftOutreach },
   { method: 'options', path: '/outreach/draft', handler: draftOutreach },
+
+  { method: 'post', path: '/agent/signal', handler: recordSignal },
+  { method: 'options', path: '/agent/signal', handler: recordSignal },
+
+  { method: 'get', path: '/memory/block', handler: memoryBlock },
+  { method: 'options', path: '/memory/block', handler: memoryBlock },
+
+  { method: 'post', path: '/memory/rollup', handler: memoryRollup },
+  { method: 'options', path: '/memory/rollup', handler: memoryRollup },
 
   { method: 'post', path: '/profiles/update', handler: updateProfile },
   { method: 'options', path: '/profiles/update', handler: updateProfile },
