@@ -1398,7 +1398,15 @@ useEffect(() => {
   }, [handleStartNewCompany, handleContinueCompany, handleSummarizeLast, handleEmailDraftFromLast, setShowRefine]);
 
   const shortcutHandlers = useMemo<Record<string, () => void>>(() => {
-    if (!actionBarVisible || streamingMessage) return {};
+    if (!actionBarVisible || streamingMessage) {
+      return {
+        n: () => {},
+        c: () => {},
+        s: () => {},
+        e: () => {},
+        r: () => {},
+      };
+    }
     return {
       n: () => { void handleActionBarAction('new'); },
       c: () => { void handleActionBarAction('continue'); },
