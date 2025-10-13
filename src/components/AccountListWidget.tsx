@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Building2, TrendingUp, AlertCircle, Plus, Upload, Flame, Clock, RefreshCw } from 'lucide-react';
+import { Building2, TrendingUp, AlertCircle, Plus, Upload, Flame, Clock, RefreshCw, Maximize2, X } from 'lucide-react';
 import { listTrackedAccounts, type TrackedAccount } from '../services/accountService';
 import { useToast } from '../components/ToastProvider';
 import { BulkAccountUpload } from './BulkAccountUpload';
@@ -16,6 +16,7 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'hot' | 'warm' | 'stale'>('all');
   const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [showModal, setShowModal] = useState(false);
   const [stats, setStats] = useState({
     total: 0,
     hot: 0,
@@ -144,6 +145,13 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
               className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-100"
             >
               <RefreshCw className="w-3.5 h-3.5" /> Refresh
+            </button>
+            <button
+              onClick={() => setShowModal(true)}
+              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+              title="Open tracked accounts"
+            >
+              <Maximize2 className="w-4 h-4 text-gray-600" />
             </button>
             <button
               onClick={() => setShowBulkUpload(true)}
@@ -347,10 +355,168 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
               title: 'Accounts imported',
               description: `Successfully imported ${count} account${count !== 1 ? 's' : ''}`,
               type: 'success',
-            });
-          }}
+          });
+        }}
+      />
+      )}
+
+      {showModal && (
+        <TrackedAccountsModal
+          accounts={accounts}
+          stats={stats}
+          filter={filter}
+          onFilterChange={setFilter}
+          onClose={() => setShowModal(false)}
+          onAccountClick={onAccountClick}
+          onResearchAccount={onResearchAccount}
         />
       )}
+    </div>
+  );
+}
+
+interface TrackedAccountsModalProps {
+  accounts: TrackedAccount[];
+  stats: { total: number; hot: number; warm: number; stale: number; with_signals: number; standard: number };
+  filter: 'all' | 'hot' | 'warm' | 'stale';
+  onFilterChange: (value: 'all' | 'hot' | 'warm' | 'stale') => void;
+  onClose: () => void;
+  onAccountClick: (account: TrackedAccount) => void;
+  onResearchAccount?: (account: TrackedAccount) => void;
+}
+
+function TrackedAccountsModal({
+  accounts,
+  stats,
+  filter,
+  onFilterChange,
+  onClose,
+  onAccountClick,
+  onResearchAccount,
+}: TrackedAccountsModalProps) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-6 py-10">
+      <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl border border-gray-200 overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Tracked accounts</h3>
+            <p className="text-xs text-gray-600 mt-1">{stats.total} total • {stats.with_signals} with signals</p>
+          </div>
+          <button onClick={onClose} className="p-2 text-gray-500 hover:text-gray-900 rounded-lg hover:bg-white" aria-label="Close tracked accounts">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="px-6 py-4 border-b border-gray-200">
+          <div
+            className="flex flex-wrap gap-2"
+            role="tablist"
+            aria-label="Tracked account filters"
+          >
+            {[
+              { value: 'all' as const, label: `All (${stats.total})` },
+              { value: 'hot' as const, label: `Hot (${stats.hot})` },
+              { value: 'warm' as const, label: `Warm (${stats.warm})` },
+              { value: 'stale' as const, label: `Stale (${stats.stale})` },
+            ].map(option => (
+              <button
+                key={option.value}
+                type="button"
+                role="tab"
+                aria-pressed={filter === option.value}
+                className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                  filter === option.value
+                    ? 'bg-blue-600 border-blue-600 text-white'
+                    : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'
+                }`}
+                onClick={() => onFilterChange(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {accounts.length === 0 ? (
+            <div className="p-6 text-center text-sm text-gray-600">No tracked accounts match this filter.</div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {accounts.map(account => {
+                const isStale = account.last_researched_at
+                  ? Math.floor((Date.now() - new Date(account.last_researched_at).getTime()) / (1000 * 60 * 60 * 24)) > 14
+                  : true;
+                return (
+                  <div key={`modal-${account.id}`} className="px-6 py-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full ${
+                            account.priority === 'hot'
+                              ? 'bg-red-100 text-red-700'
+                              : account.priority === 'warm'
+                              ? 'bg-orange-100 text-orange-700'
+                              : 'bg-gray-100 text-gray-700'
+                          }`}>
+                            {account.priority.toUpperCase()}
+                          </span>
+                          {(account.unviewed_signal_count || 0) > 0 && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700 rounded-full">
+                              <AlertCircle className="w-3 h-3" />
+                              {account.unviewed_signal_count} new
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="text-sm font-semibold text-gray-900" title={account.company_name}>{account.company_name}</h4>
+                        {account.industry && <p className="text-xs text-gray-600">{account.industry}</p>}
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                          {account.latest_signal_summary && (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-50 text-red-700 rounded-full border border-red-100">
+                              <AlertCircle className="w-3 h-3" />
+                              {account.latest_signal_summary}
+                            </span>
+                          )}
+                          {isStale && (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 rounded-full border border-gray-200">
+                              <Clock className="w-3 h-3" /> Needs refresh
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
+                          {account.latest_signal_relative && (
+                            <span>Latest signal {account.latest_signal_relative}</span>
+                          )}
+                          {account.last_researched_relative && (
+                            <span>• Last research {account.last_researched_relative}</span>
+                          )}
+                        </div>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => { onAccountClick(account); onClose(); }}
+                            className="px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 border border-red-100 rounded-full hover:bg-red-100"
+                          >
+                            Review signals
+                          </button>
+                          {onResearchAccount && (
+                            <button
+                              type="button"
+                              onClick={() => { onResearchAccount(account); onClose(); }}
+                              className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-100 rounded-full hover:bg-blue-100"
+                            >
+                              Open research
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
