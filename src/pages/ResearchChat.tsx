@@ -238,6 +238,7 @@ export function ResearchChat() {
   const streamingAbortRef = useRef<AbortController | null>(null);
   // acknowledgment messages are displayed via ThinkingIndicator events
   const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([]);
+  const [reasoningOpen, setReasoningOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const autoSentRef = useRef(false);
@@ -1963,26 +1964,40 @@ useEffect(() => {
                 );
               })}
 
-              {thinkingEvents.length > 0 && (
-                <div className="space-y-2">
-                  {thinkingEvents.map(ev => (
-                    <ThinkingIndicator
-                      key={ev.id}
-                      type={ev.type}
-                      content={ev.content}
-                      query={ev.query}
-                      sources={ev.sources}
-                      url={ev.url}
-                      count={ev.count}
-                      companies={ev.companies}
-                      company={ev.company}
-                      icp={ev.icp}
-                      critical={ev.critical}
-                      important={ev.important}
-                    />
-                  ))}
-                </div>
-              )}
+              {thinkingEvents.length > 0 && (() => {
+                const last = thinkingEvents[thinkingEvents.length - 1];
+                return (
+                  <div className="bg-white border border-blue-100 rounded-xl shadow-sm">
+                    <div className="px-4 py-2 flex items-center justify-between">
+                      <div className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Reasoning</div>
+                      <button
+                        type="button"
+                        onClick={() => setReasoningOpen(true)}
+                        className="text-xs text-blue-700 hover:text-blue-900"
+                        aria-label="View full reasoning stream"
+                      >
+                        View all
+                      </button>
+                    </div>
+                    <div className="px-4 pb-3">
+                      <ThinkingIndicator
+                        key={last.id}
+                        type={last.type}
+                        content={last.content}
+                        query={last.query}
+                        sources={last.sources}
+                        url={(last as any).url}
+                        count={(last as any).count}
+                        companies={(last as any).companies}
+                        company={(last as any).company}
+                        icp={(last as any).icp}
+                        critical={(last as any).critical}
+                        important={(last as any).important}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
 
               {streamingMessage && (
                 <MessageBubble role="assistant" content={streamingMessage} userName={getUserInitial()} showActions={false} />
@@ -2294,6 +2309,49 @@ useEffect(() => {
       onClose={() => setCSVUploadOpen(false)}
       onSuccess={handleCSVUploadSuccess}
     />
+
+    {reasoningOpen && (
+      <div
+        className="fixed inset-0 z-40 bg-black/30 flex items-start justify-end"
+        onClick={() => setReasoningOpen(false)}
+      >
+        <div
+          className="w-full max-w-xl h-full bg-white border-l border-gray-200 shadow-2xl p-4 overflow-y-auto"
+          onClick={(e) => e.stopPropagation()}
+          role="dialog"
+          aria-label="Reasoning stream"
+        >
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-semibold text-gray-900">Reasoning Stream</div>
+            <button
+              className="text-xs text-gray-600 hover:text-gray-900"
+              onClick={() => setReasoningOpen(false)}
+              aria-label="Close reasoning stream"
+            >
+              Close
+            </button>
+          </div>
+          <div className="space-y-2">
+            {thinkingEvents.map(ev => (
+              <ThinkingIndicator
+                key={ev.id}
+                type={ev.type}
+                content={ev.content}
+                query={ev.query}
+                sources={ev.sources}
+                url={(ev as any).url}
+                count={(ev as any).count}
+                companies={(ev as any).companies}
+                company={(ev as any).company}
+                icp={(ev as any).icp}
+                critical={(ev as any).critical}
+                important={(ev as any).important}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
     <AccountSignalsDrawer
       open={signalsDrawerOpen}
       accountId={signalsAccountId}
