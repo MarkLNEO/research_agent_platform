@@ -268,11 +268,21 @@ export function MessageBubble({
           <div className="text-xs text-emerald-800 mt-1">
             Confidence: {icpMeta.confidence}%
           </div>
-          {icpMeta.rationale && (
-            <p className="text-xs text-emerald-700 mt-2 leading-relaxed">
-              {icpMeta.rationale}
-            </p>
-          )}
+          <div className="mt-2 flex items-center gap-3">
+            {icpMeta.rationale && (
+              <span className="text-[11px] text-emerald-800">{icpMeta.rationale}</span>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                try { window.dispatchEvent(new CustomEvent('icp:optimize')); } catch {}
+              }}
+              className="text-[11px] font-semibold text-blue-700 hover:text-blue-900 underline"
+              title="Adjust ICP criteria"
+            >
+              Optimize ICP
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -280,7 +290,7 @@ export function MessageBubble({
 
   return (
     <div className="space-y-3" data-testid="message-assistant">
-      {structured && !streaming ? (
+      {structured ? (
         <div className="space-y-3">
           {ackLine && (
             <p className="text-xs text-gray-500 italic">{ackLine}</p>

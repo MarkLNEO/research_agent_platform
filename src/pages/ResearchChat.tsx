@@ -21,6 +21,8 @@ import type { ResearchDraft } from '../utils/researchOutput';
 import type { TrackedAccount } from '../services/accountService';
 import { useUserProfile } from '../hooks/useUserProfile';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import { OptimizeICPModal } from '../components/OptimizeICPModal';
+import { useResearchEngine } from '../contexts/ResearchEngineContext';
 
 const ALL_REFINE_FACETS = ['leadership', 'funding', 'tech stack', 'news', 'competitors', 'hiring'] as const;
 
@@ -132,7 +134,14 @@ const isResearchPrompt = (text: string): boolean => {
     lower.startsWith('analyze ') ||
     lower.startsWith('find ') ||
     lower.startsWith('who is ') ||
-    lower.startsWith('what is ')
+    lower.startsWith('what is ') ||
+    (() => {
+      // Fallback: a short noun phrase that looks like a company
+      const candidate = extractCompanyNameFromQuery(text);
+      if (!candidate) return false;
+      const words = text.trim().split(/\s+/).length;
+      return words <= 4; // treat short company-only prompts as research
+    })()
   );
 };
 
@@ -239,6 +248,7 @@ export function ResearchChat() {
   // acknowledgment messages are displayed via ThinkingIndicator events
   const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([]);
   const [reasoningOpen, setReasoningOpen] = useState(false);
+  const [optimizeOpen, setOptimizeOpen] = useState(false);
   const [showInlineReasoning, setShowInlineReasoning] = useState<boolean>(() => {
     try { return localStorage.getItem('showInlineReasoning') !== '0'; } catch { return true; }
   });
@@ -443,6 +453,13 @@ useEffect(() => {
     if (pref === 'deep' || pref === 'quick' || pref === 'specific') {
       setPreferredResearchType(pref);
     }
+  }, []);
+
+  // Listen for optimize ICP events from message bubbles
+  useEffect(() => {
+    const handler = () => setOptimizeOpen(true);
+    window.addEventListener('icp:optimize', handler as any);
+    return () => window.removeEventListener('icp:optimize', handler as any);
   }, []);
 
   // Load greeting + signals for proactive dashboard
@@ -1129,7 +1146,17 @@ useEffect(() => {
           messages: history,
           stream: true,
           chatId: chatId ?? currentChatId,
-          config: cfg,
+          config: {
+            ...cfg,
+            template: selectedTemplate ? {
+              id: selectedTemplateId,
+              version: selectedTemplate.version,
+              sections: (selectedTemplate.sections || []).map(s => ({ id: s.id, label: s.label, required: Boolean((s as any).required) })),
+              inputs: templateInputs || {},
+              guardrail_profile_id: selectedGuardrailProfile?.id,
+              signal_set_id: selectedSignalSet?.id,
+            } : undefined
+          },
           research_type: depth,
           active_subject: activeSubject || null
         }),
@@ -1975,6 +2002,18 @@ useEffect(() => {
 
               {thinkingEvents.length > 0 && (() => {
                 const last = thinkingEvents[thinkingEvents.length - 1];
+                const pickContent = () => {
+                  if (!last) return '';
+                  if (last.type === 'reasoning' && typeof last.content === 'string') {
+                    const lines = last.content.split(/\n+/).filter(Boolean);
+                    return lines.length ? lines[lines.length - 1] : last.content;
+                  }
+                  if (last.type === 'web_search') {
+                    return last.query || 'Searching…';
+                  }
+                  return (last as any).content || '';
+                };
+                const inlineContent = pickContent();
                 if (!showInlineReasoning) {
                   return (
                     <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 text-xs">
@@ -2013,7 +2052,7 @@ useEffect(() => {
                       <ThinkingIndicator
                         key={last.id}
                         type={last.type}
-                        content={last.content}
+                        content={inlineContent}
                         query={last.query}
                         sources={last.sources}
                         url={(last as any).url}
@@ -2349,10 +2388,10 @@ useEffect(() => {
           )}
         </div>
       </div>
-    </div>
-    </div>
-    {/* Command palette */}
-    {paletteOpen && (
+  </div>
+  </div>
+  {/* Command palette */}
+  {paletteOpen && (
       <div className="fixed inset-0 z-40 bg-black/30 flex items-start justify-center p-6" onClick={() => setPaletteOpen(false)}>
         <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl shadow-xl p-3" onClick={e => e.stopPropagation()}>
           <div className="text-sm font-semibold text-gray-900 mb-2">Quick actions</div>
@@ -2387,6 +2426,9 @@ useEffect(() => {
       onClose={() => setCSVUploadOpen(false)}
       onSuccess={handleCSVUploadSuccess}
     />
+
+    {/* Optimize ICP modal (for inline scorecard link) */}
+    <OptimizeICPModal isOpen={optimizeOpen} onClose={() => setOptimizeOpen(false)} />
 
     {reasoningOpen && (
       <div
@@ -2451,3 +2493,11 @@ useEffect(() => {
     </>
   );
 }
+  // Research template context (global provider)
+  const {
+    selectedTemplate,
+    selectedTemplateId,
+    templateInputs,
+    selectedGuardrailProfile,
+    selectedSignalSet
+  } = useResearchEngine();
