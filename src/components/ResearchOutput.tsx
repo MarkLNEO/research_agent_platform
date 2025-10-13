@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { Download, FileText, TrendingUp, Zap, Users, Target, Lightbulb, HelpCircle } from 'lucide-react';
+import { OptimizeICPModal } from './OptimizeICPModal';
 
 interface ResearchOutputProps {
   research: {
@@ -66,6 +68,7 @@ function PriorityBadge({ level }: { level?: string }) {
 
 export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchOutputProps) {
   const [showIcpWhy, setShowIcpWhy] = useState(false);
+  const [optimizeOpen, setOptimizeOpen] = useState(false);
   return (
     <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 space-y-6" data-testid="research-output">
       {/* Header */}
@@ -162,7 +165,7 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
               <div className="mt-2">
                 <button
                   type="button"
-                  onClick={() => { try { window.location.href = '/profile-coach'; } catch {} }}
+                  onClick={() => setOptimizeOpen(true)}
                   className="text-xs font-semibold text-blue-700 hover:text-blue-900 underline"
                 >
                   Optimize ICP
@@ -172,6 +175,9 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
           )}
         </div>
       )}
+
+      {/* Optimize ICP modal */}
+      <OptimizeICPModal isOpen={optimizeOpen} onClose={() => setOptimizeOpen(false)} />
 
       {/* Company Data */}
       {research.company_data && Object.keys(research.company_data).length > 0 && (
