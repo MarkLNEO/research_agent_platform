@@ -452,8 +452,8 @@ export default async function handler(req: any, res: any) {
     try {
       // Add more detailed debugging
       console.log('[DEBUG] System instructions length:', instructions?.length || 0);
-      console.log('[DEBUG] First 500 chars of instructions:', instructions?.substring(0, 500));
-      console.log('[DEBUG] Input:', input);
+      console.log('[DEBUG] System instructions full text:\n', instructions);
+      console.log('[DEBUG] Input full text:\n', input);
 
       const requestText = lastUserMessage?.content || '';
       const normalizedRequest = requestText.toLowerCase();
@@ -711,6 +711,14 @@ export default async function handler(req: any, res: any) {
       scheduleKeepAlive();
 
       console.log('[DEBUG] Starting to process stream...');
+
+      if (process.env.ENABLE_PROMPT_DEBUG === 'true') {
+        try {
+          safeWrite(`data: ${JSON.stringify({ type: 'debug_prompt', instructions, input })}\n\n`);
+        } catch (debugErr) {
+          console.warn('Failed to emit prompt debug event', debugErr);
+        }
+      }
 
       // Configure reasoning streaming behaviour
       // We keep reasoning visible in all modes. For quick mode, we throttle/compact updates.
