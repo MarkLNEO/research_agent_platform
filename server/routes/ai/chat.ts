@@ -475,6 +475,7 @@ export default async function handler(req: any, res: any) {
       console.log('[DEBUG] System instructions length:', instructions?.length || 0);
       console.log('[DEBUG] System instructions full text:\n', instructions);
       console.log('[DEBUG] Input full text:\n', input);
+      console.log('[DEBUG] ENABLE_PROMPT_DEBUG resolved to:', process.env.ENABLE_PROMPT_DEBUG);
 
       const requestText = lastUserMessage?.content || '';
       const normalizedRequest = requestText.toLowerCase();
