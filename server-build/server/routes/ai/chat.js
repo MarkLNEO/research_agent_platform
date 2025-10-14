@@ -171,6 +171,45 @@ function summarizeContextForPlan(userContext) {
     }
     return bits.join('\n');
 }
+function extractCompanyName(raw) {
+    if (!raw)
+        return '';
+    let text = String(raw || '').trim();
+    if (!text)
+        return '';
+    const actionPrefix = /^(summarize|continue|resume|draft|write|compose|email|refine|save|track|start|generate|rerun|retry|copy|share|compare)\b/i;
+    if (actionPrefix.test(text)) {
+        return '';
+    }
+    const leadingVerb = /^(research|analy[sz]e|investigate|look\s*up|deep\s*dive|tell me about|find|discover|explore|dig into)\s+/i;
+    text = text.replace(leadingVerb, '').trim();
+    text = text.replace(/\?/g, '').trim();
+    const stopMatch = text.match(/\s+(?:in|at|for|with|that|who|which|using|focused|within)\s+/i);
+    if (stopMatch?.index) {
+        text = text.slice(0, stopMatch.index).trim();
+    }
+    text = text.replace(/^[^A-Za-z0-9(]+/, '').replace(/[^A-Za-z0-9)&.\-\s]+$/, '').trim();
+    if (!text)
+        return '';
+    const words = text.split(/\s+/).slice(0, 6);
+    if (!words.length)
+        return '';
+    const formatted = words
+        .map((word) => {
+        if (!word)
+            return '';
+        if (word.toUpperCase() === word)
+            return word;
+        return word[0].toUpperCase() + word.slice(1);
+    })
+        .join(' ')
+        .trim();
+    if (/^\d+$/.test(formatted))
+        return '';
+    if (formatted.length > 80)
+        return '';
+    return formatted;
+}
 export const config = {
     runtime: 'nodejs',
     maxDuration: 30, // 30 seconds for streaming
