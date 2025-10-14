@@ -4,6 +4,11 @@ import { buildSystemPrompt, type AgentType } from '../_lib/systemPrompt.js';
 import { buildMemoryBlock } from '../_lib/memory.js';
 import { assertEmailAllowed } from '../_lib/access.js';
 
+const NON_RESEARCH_TERMS = new Set([
+  'hi', 'hello', 'hey', 'thanks', 'thank you', 'agenda', 'notes', 'help', 'update', 'updates',
+  'plan', 'planning', 'what', 'who', 'why', 'how', 'where', 'when', 'test'
+]);
+
 // Helper function to estimate tokens
 function estimateTokens(text = '') {
   return Math.ceil((text || '').length / 4);
@@ -121,7 +126,20 @@ function classifyResearchIntent(raw: string) {
   const hasVerb = RESEARCH_VERBS.test(text);
   const companyLike = /\b[A-Z][\w&]+(?:\s+[A-Z][\w&]+){0,3}\b/.test(text) && COMPANY_INDICATORS.test(text);
   const allPhrase = ALL_SYNONYMS.test(text);
-  return hasVerb || companyLike || allPhrase;
+  if (hasVerb || companyLike || allPhrase) return true;
+
+  const extracted = extractCompanyName(text);
+  if (extracted) {
+    if (NON_RESEARCH_TERMS.has(text.toLowerCase())) {
+      return false;
+    }
+    const wordCount = text.split(/\s+/).filter(Boolean).length;
+    if (wordCount > 0 && wordCount <= 4) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function summarizeContextForPlan(userContext: any) {
@@ -351,7 +369,10 @@ export default async function handler(req: any, res: any) {
       if (lastUserMessage) {
         // Intent classification: decide whether to perform research or just reply briefly
         const _text = String(lastUserMessage.content || '').trim();
-        const _isResearchQuery = classifyResearchIntent(_text);
+        let _isResearchQuery = classifyResearchIntent(_text);
+        if (!_isResearchQuery && activeContextCompany) {
+          _isResearchQuery = true;
+        }
         req.__isResearchQuery = _isResearchQuery;
 
         effectiveRequest = lastUserMessage.content || '';
