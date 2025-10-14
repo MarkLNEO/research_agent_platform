@@ -1156,7 +1156,7 @@ useEffect(() => {
       } catch {}
       // Build config to influence model depth based on user preference/clarifier
       const overrideDepth = options?.overrideDepth;
-      const depth = overrideDepth || preferredResearchType || 'specific';
+      const depth = overrideDepth || preferredResearchType || 'deep';
       setLastRunMode((depth as any) || 'auto');
       const cfg: any = { ...(options?.config || {}) };
       if (depth === 'deep') cfg.model = 'gpt-5-mini';

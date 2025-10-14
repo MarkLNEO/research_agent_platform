@@ -511,14 +511,11 @@ export default async function handler(req: any, res: any) {
       const explicitlyRequestsSearch = /\bweb[_\s-]?search\b/.test(normalizedRequest) || /\b(search online|look up|google|check the web)\b/.test(normalizedRequest);
       const needsFreshLookup = wantsFreshIntel || mentionsTimeframe || explicitlyRequestsSearch;
 
-      let useTools = research_type === 'deep' || (!research_type && isResearchQuery);
-      if (research_type === 'specific' && !needsFreshLookup) {
-        useTools = false;
+      let useTools = isResearchQuery || explicitlyRequestsSearch;
+      if (research_type === 'deep' || research_type === 'quick') {
+        useTools = true;
       }
-      if (research_type === 'quick') {
-        useTools = needsFreshLookup;
-      }
-      if (explicitlyRequestsSearch) {
+      if (research_type === 'specific' && !useTools) {
         useTools = true;
       }
 
