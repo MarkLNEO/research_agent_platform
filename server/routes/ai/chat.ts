@@ -287,6 +287,7 @@ export default async function handler(req: any, res: any) {
 
     // Parse request body
     const { messages, systemPrompt, chatId, chat_id, agentType = 'company_research', config: userConfig = {}, research_type, active_subject } = body as any;
+    const fastMode = Boolean((userConfig as any)?.fast_mode);
     const activeContextCompany = typeof active_subject === 'string' ? active_subject.trim() : '';
 
     const contextFetchStart = Date.now();
@@ -336,6 +337,15 @@ export default async function handler(req: any, res: any) {
     }
     if (typeof userConfig?.summary_brevity === 'string') {
       instructions += `\n\n<summary_brevity>${userConfig.summary_brevity}</summary_brevity>`;
+    }
+    if (fastMode) {
+      instructions += `\n\n<fast_mode>On</fast_mode>\n` +
+        `Do not include an acknowledgement line or progress updates. ` +
+        `Be terse and action-focused. Prefer bullets. Avoid filler. ` +
+        `Only output the final answer in the required sections.`;
+      if (!userConfig?.summary_brevity) {
+        instructions += `\n<summary_brevity>short</summary_brevity>`;
+      }
     }
     // Append guardrail hint if present in prompt config
     try {
@@ -399,7 +409,8 @@ export default async function handler(req: any, res: any) {
 
         if (_isResearchQuery || research_type) {
           // Build explicit research task input and include brief recent context
-          const recent = (messages || []).slice(-4).map((m: any) => {
+          const recentWindow = fastMode ? 2 : 4;
+          const recent = (messages || []).slice(-recentWindow).map((m: any) => {
             const role = m.role === 'user' ? 'User' : (m.role === 'assistant' ? 'Assistant' : 'System');
             const text = String(m.content || '').replace(/\s+/g, ' ').trim();
             return `${role}: ${text}`;
@@ -491,8 +502,8 @@ export default async function handler(req: any, res: any) {
         return 'gpt-5-mini';
       })();
       const selectedModel = userConfig.model || defaultModel;
-      const reasoningEffort = research_type === 'deep' ? 'medium' : 'low';
-      const isQuick = research_type === 'quick';
+      const reasoningEffort = fastMode ? 'low' : (research_type === 'deep' ? 'medium' : 'low');
+      const isQuick = fastMode ? true : (research_type === 'quick');
 
       // Summarization mode: if the client passed summarize_source, bypass research flow
       const summarizeSource = (userConfig as any)?.summarize_source as string | undefined;
@@ -569,7 +580,7 @@ export default async function handler(req: any, res: any) {
         safeWrite(`data: ${JSON.stringify({ type: 'reasoning_progress', content: preview })}\n\n`);
       }
       const storeRun = true;
-      const shouldPlanStream = isResearchQuery && !userConfig?.disable_fast_plan;
+      const shouldPlanStream = isResearchQuery && !userConfig?.disable_fast_plan && !fastMode;
 
       // Emit a hard-coded acknowledgment only if the fast plan stream is disabled
       if (!shouldPlanStream) {
@@ -675,13 +686,13 @@ export default async function handler(req: any, res: any) {
         model: selectedModel,
         instructions,
         input,
-        text: { format: { type: 'text' }, verbosity: isQuick ? 'low' : 'medium' },
+        text: { format: { type: 'text' }, verbosity: 'low' },
         reasoning: { effort: reasoningEffort },
         tools: useTools ? [{ type: 'web_search' }] : [],
-        include: ['reasoning.encrypted_content', 'web_search_call.results'] as any,
+        include: (fastMode ? [] : (['reasoning.encrypted_content', 'web_search_call.results'] as any)),
         parallel_tool_calls: useTools,
-        temperature: isQuick ? 0.2 : undefined,
-        max_output_tokens: isQuick ? 450 : undefined,
+        temperature: 0.2,
+        max_output_tokens: fastMode ? (research_type === 'deep' ? 900 : 500) : (isQuick ? 450 : undefined),
         store: storeRun,
         metadata: {
           agent: 'company_research',
@@ -750,7 +761,7 @@ export default async function handler(req: any, res: any) {
 
       // Configure reasoning streaming behaviour
       // We keep reasoning visible in all modes. For quick mode, we throttle/compact updates.
-      const forwardReasoning = true;
+      const forwardReasoning = fastMode ? false : true;
       let quickReasoningBuffer = '';
       let quickReasoningLastEmit = 0;
 
@@ -901,7 +912,7 @@ export default async function handler(req: any, res: any) {
       console.log('[DEBUG] Stream processing complete. Total chunks:', chunkCount);
       console.log('[DEBUG] Total content length:', accumulatedContent.length);
 
-      const shouldGenerateTldr = isResearchQuery && estimateTokens(accumulatedContent) > 350;
+      const shouldGenerateTldr = false; // Generate summaries only on demand (no live TL;DR streaming)
       if (shouldGenerateTldr) {
         try {
           safeWrite(`data: ${JSON.stringify({ type: 'tldr_status', content: 'Preparing high level summary…' })}\n\n`);

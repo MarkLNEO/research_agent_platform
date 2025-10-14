@@ -31,7 +31,8 @@ export function stripClarifierBlocks(raw: string): string {
   return text;
 }
 
-export function normalizeMarkdown(raw: string): string {
+export function normalizeMarkdown(raw: string, opts?: { enforceResearchSections?: boolean }): string {
+  const enforce = opts?.enforceResearchSections !== false; // default true for research flows
   let text = stripClarifierBlocks(raw || '');
 
   // Convert plain-text bullets (• or –) to markdown dashes when used as list items
@@ -101,13 +102,15 @@ export function normalizeMarkdown(raw: string): string {
 
   text = renumberOrderedLists(text);
 
-  // If a High Level section still contains clarifier-style prompts, replace with default placeholder.
-  text = text.replace(/(^##\s+High Level[\s\S]*?)(?=^##\s+|\Z)/gim, (section) => {
-    if (/do you mean/i.test(section) || /what do you want/i.test(section)) {
-      return '## High Level\n- No high-level summary provided yet.\n';
-    }
-    return section;
-  });
+  if (enforce) {
+    // If a High Level section still contains clarifier-style prompts, replace with default placeholder.
+    text = text.replace(/(^##\s+High Level[\s\S]*?)(?=^##\s+|\Z)/gim, (section) => {
+      if (/do you mean/i.test(section) || /what do you want/i.test(section)) {
+        return '## High Level\n- No high-level summary provided yet.\n';
+      }
+      return section;
+    });
+  }
 
   const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -130,8 +133,10 @@ export function normalizeMarkdown(raw: string): string {
     { pattern: /^\s*Risks? & gaps?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Risks & Gaps' }
   ];
 
-  for (const { pattern, replacement } of headingMap) {
-    text = text.replace(pattern, replacement);
+  if (enforce) {
+    for (const { pattern, replacement } of headingMap) {
+      text = text.replace(pattern, replacement);
+    }
   }
 
   const headingMatches = Array.from(text.matchAll(/^##\s+(.+?)\s*$/gm)).map((match) => match[1].trim());
@@ -154,24 +159,28 @@ export function normalizeMarkdown(raw: string): string {
   ]);
   const usesCustomTemplate = headingMatches.some((heading) => !DEFAULT_SECTIONS.has(heading));
 
-  // Ensure a top-level headline exists; promote first Executive Summary heading to H1 if needed
-  if (!/^#\s+/m.test(text)) {
-    if (/^##\s+Executive Summary/m.test(text)) {
-      text = text.replace(/^##\s+Executive Summary/m, '# Executive Summary');
-    } else {
-      text = `# Executive Summary\n\n${text.trimStart()}`;
+  if (enforce) {
+    // Ensure a top-level headline exists; promote first Executive Summary heading to H1 if needed
+    if (!/^#\s+/m.test(text)) {
+      if (/^##\s+Executive Summary/m.test(text)) {
+        text = text.replace(/^##\s+Executive Summary/m, '# Executive Summary');
+      } else {
+        text = `# Executive Summary\n\n${text.trimStart()}`;
+      }
     }
   }
 
-  // Ensure High Level section exists; if missing, add placeholder after headline
-  if (!/^##\s+High Level/m.test(text) && !usesCustomTemplate) {
-    text = text.replace(/^#\s.+$/m, (match) => `${match}\n\n## High Level\n- No high-level summary provided yet.\n`);
-    if (!/^##\s+High Level/m.test(text)) {
-      text = `${text.trim()}\n\n## High Level\n- No high-level summary provided yet.\n`;
+  if (enforce) {
+    // Ensure High Level section exists; if missing, add placeholder after headline
+    if (!/^##\s+High Level/m.test(text) && !usesCustomTemplate) {
+      text = text.replace(/^#\s.+$/m, (match) => `${match}\n\n## High Level\n- No high-level summary provided yet.\n`);
+      if (!/^##\s+High Level/m.test(text)) {
+        text = `${text.trim()}\n\n## High Level\n- No high-level summary provided yet.\n`;
+      }
     }
   }
 
-  if (!usesCustomTemplate) {
+  if (enforce && !usesCustomTemplate) {
     // Ensure other key sections exist; append placeholders if absent
     const requiredSections = ['Key Findings', 'Signals', 'Recommended Next Actions'];
     for (const section of requiredSections) {
@@ -193,7 +202,7 @@ export function normalizeMarkdown(raw: string): string {
     ensureHeading(/^\s*(?:next\s+actions|recommended\s+next\s+actions)[\s:]*\n/mi, 'Recommended Next Actions');
     ensureHeading(/^\s*(?:tech\s*\/\s*footprint|tech|footprint)[\s:]*\n/mi, 'Tech/Footprint');
   }
-  if (!/\n##\s+Sources\n/i.test(text) && /https?:\/\//.test(text)) {
+  if (enforce && !/\n##\s+Sources\n/i.test(text) && /https?:\/\//.test(text)) {
     text += `\n\n## Sources\n` + Array.from(new Set(Array.from(text.matchAll(/https?:[^\s)\]]+/g)).map(m => m[0]))).slice(0, 8).map(u => `- ${u}`).join('\n');
   }
 
