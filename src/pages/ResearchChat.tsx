@@ -1094,10 +1094,14 @@ useEffect(() => {
       detectedCompany = extractCompanyNameFromQuery(`research ${continuationTarget}`);
     }
 
-    if ((looksLikeResearch || continuationTarget) && isLikelySubject(detectedCompany)) {
+    // Only set active subject if the extracted value looks like a proper entity,
+    // and not a generic follow-up question like "who is the ceo?"
+    const isWHQuestion = /^(who|what|when|where|which|why|how)\b/i.test(normalized);
+    const endsWithQuestion = /\?\s*$/.test(normalized);
+    if (!isWHQuestion && !endsWithQuestion && (looksLikeResearch || continuationTarget) && isLikelySubject(detectedCompany)) {
       setActiveSubject(detectedCompany);
     }
-    if ((looksLikeResearch || continuationTarget) && isLikelySubject(detectedCompany) && detectedCompany && detectedCompany !== activeSubject) {
+    if (!isWHQuestion && !endsWithQuestion && (looksLikeResearch || continuationTarget) && isLikelySubject(detectedCompany) && detectedCompany && detectedCompany !== activeSubject) {
       lastResearchSummaryRef.current = '';
     }
 
@@ -1171,7 +1175,8 @@ useEffect(() => {
         .single();
 
       let assistant = await streamAIResponse(text, chatId, { overrideDepth: runModeOverride });
-      assistant = normalizeMarkdown(assistant);
+      const usedDepth = (runModeOverride || preferredResearchType || 'deep') as 'deep'|'quick'|'specific';
+      assistant = normalizeMarkdown(assistant, { enforceResearchSections: usedDepth !== 'specific' });
 
       // Persist any save_profile commands returned by the agent
       await processSaveCommands(assistant);

@@ -26,7 +26,7 @@ interface MessageBubbleProps {
 
 function MarkdownContent({ content }: { content: string }) {
   return (
-    <div className="streamdown-wrapper text-gray-900">
+    <div className="streamdown-wrapper text-gray-900 select-text">
       <Streamdown
         className="prose prose-gray max-w-none"
         // Keep component overrides minimal so Streamdown can provide

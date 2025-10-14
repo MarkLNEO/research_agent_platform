@@ -591,7 +591,7 @@ export default async function handler(req, res) {
             });
             let planPromise = null;
             if (shouldPlanStream && lastUserMessage?.content) {
-                const planInstructions = `You are the fast planning cortex for a research assistant.\n- Start with a single standalone acknowledgement sentence that confirms you are beginning now, states the research mode (deep/quick/specific/auto), mentions the **research subject** from the input, and gives a realistic ETA (deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈1-2 min).\n- Immediately follow with 2-3 markdown bullet steps (prefix each with "- ") describing the investigative actions you will take.\n- Keep bullets under 12 words, action-oriented, and reference saved preferences when they change sequencing.\n- When referencing the company you are researching, always use the "Research subject" field from the input (never the profile context labels).\n- Do not ask the user questions or request clarifications; assume sensible defaults.\n- Do not add closing statements or extra blank lines.`;
+                const planInstructions = `You are the fast planning cortex for a research assistant.\n- Start with a single standalone acknowledgement sentence that confirms you are beginning now, states the research mode (deep/quick/specific/auto), mentions the **research subject** from the input, and gives a realistic ETA (deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈2 min).\n- Immediately follow with 2-3 markdown bullet steps (prefix each with "- ") describing the investigative actions you will take.\n- Keep bullets under 12 words, action-oriented, and reference saved preferences when they change sequencing.\n- When referencing the company you are researching, always use the "Research subject" field from the input (never the profile context labels).\n- Do not ask the user questions or request clarifications; assume sensible defaults.\n- Do not add closing statements or extra blank lines.`;
                 const contextSummary = summarizeContextForPlan(userContext).slice(0, 600);
                 const detectedCompanyRaw = extractCompanyName(lastUserMessage.content);
                 const fallbackCompany = typeof activeContextCompany === 'string' ? activeContextCompany.trim() : '';
@@ -603,6 +603,10 @@ export default async function handler(req, res) {
                         return false;
                     if (trimmed.length > 80)
                         return false;
+                    if (/^(who|what|when|where|which|why|how)\b/i.test(trimmed))
+                        return false;
+                    if (/\?\s*$/.test(trimmed))
+                        return false;
                     return !/^(summarize|continue|resume|draft|write|compose|email|refine|help me|start|begin|generate|rerun|retry)/i.test(trimmed);
                 };
                 const detectedCompany = isLikelySubject(detectedCompanyRaw)
@@ -610,7 +614,7 @@ export default async function handler(req, res) {
                     : isLikelySubject(fallbackCompany)
                         ? fallbackCompany
                         : '';
-                const planInput = `Research mode: ${research_type || (isResearchQuery ? 'auto' : 'general')}\nResearch subject: ${detectedCompany || 'Not specified'}\nUser request: ${effectiveRequest}\nETA guide: deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈90 sec.\nSaved profile context (do not confuse with research subject):\n${contextSummary || 'No saved profile context yet.'}`;
+                const planInput = `Research mode: ${research_type || (isResearchQuery ? 'auto' : 'general')}\nResearch subject: ${detectedCompany || 'Not specified'}\nUser request: ${effectiveRequest}\nETA guide: deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈2 min.\nSaved profile context (do not confuse with research subject):\n${contextSummary || 'No saved profile context yet.'}`;
                 planPromise = (async () => {
                     try {
                         const fastStream = await openai.responses.stream({
@@ -885,7 +889,7 @@ export default async function handler(req, res) {
             }
             console.log('[DEBUG] Stream processing complete. Total chunks:', chunkCount);
             console.log('[DEBUG] Total content length:', accumulatedContent.length);
-            const shouldGenerateTldr = isResearchQuery && estimateTokens(accumulatedContent) > 350;
+            const shouldGenerateTldr = false; // Disable auto TL;DR to avoid blocking main stream
             if (shouldGenerateTldr) {
                 try {
                     safeWrite(`data: ${JSON.stringify({ type: 'tldr_status', content: 'Preparing high level summary…' })}\n\n`);
