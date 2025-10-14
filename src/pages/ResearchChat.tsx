@@ -27,7 +27,7 @@ import { useResearchEngine } from '../contexts/ResearchEngineContext';
 
 const ALL_REFINE_FACETS = ['leadership', 'funding', 'tech stack', 'news', 'competitors', 'hiring'] as const;
 
-type ResearchAction = 'new' | 'continue' | 'summarize' | 'email' | 'refine';
+type ResearchAction = 'new' | 'continue' | 'refine';
 
 type Suggestion = {
   icon: string;
@@ -282,6 +282,7 @@ export function ResearchChat() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastUsage, setLastUsage] = useState<{ tokens: number; credits: number } | null>(null);
+  const [draftEmailPending, setDraftEmailPending] = useState(false);
   const [csvUploadOpen, setCSVUploadOpen] = useState(false);
   const [bulkResearchOpen, setBulkResearchOpen] = useState(false);
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
@@ -298,6 +299,10 @@ export function ResearchChat() {
   const [activeSubject, setActiveSubject] = useState<string | null>(null);
   const currentActionCompany = actionBarCompany || activeSubject;
   const displayActionCompany = currentActionCompany ? formatDisplaySubject(currentActionCompany) : null;
+  const canRefreshResearch = Boolean(currentActionCompany);
+  const refreshLabel = canRefreshResearch
+    ? `Refresh ${displayActionCompany ?? 'research'}`
+    : 'Refresh research';
   const [showRefine, setShowRefine] = useState(false);
   const [refineFacets, setRefineFacets] = useState<string[]>([]);
   const [refineTimeframe, setRefineTimeframe] = useState<string>('last 12 months');
@@ -760,7 +765,7 @@ useEffect(() => {
     if (data) setMessages(data);
   };
 
-  const createNewChat = async () => {
+  const createNewChat = useCallback(async () => {
     if (!user) return null;
     const { data } = await supabase
       .from('chats')
@@ -776,7 +781,7 @@ useEffect(() => {
       return data.id;
     }
     return null;
-  };
+  }, [supabase, user]);
 
   const handleNewChatClick = async () => {
     if (creatingNewChat) return;
@@ -1514,47 +1519,75 @@ useEffect(() => {
     await handleSendMessageWithChat(currentChatId, lastUserMessage.content);
   };
 
+  const ensureActiveChat = useCallback(async (): Promise<string | null> => {
+    if (currentChatId) return currentChatId;
+    return await createNewChat();
+  }, [createNewChat, currentChatId]);
+
   // Next Actions helpers
-  const handleStartNewCompany = () => {
+  const handleStartNewCompany = useCallback(async () => {
+    const newChatId = await createNewChat();
+    if (!newChatId) return;
     setActiveSubject(null);
+    setActionBarCompany(null);
     setInputValue('Research ');
     setShowClarify(false);
     setPendingQuery(null);
     setFocusComposerTick(t => t + 1);
     lastResearchSummaryRef.current = '';
-  };
-  const handleContinueCompany = () => {
-    if (activeSubject) {
-      setInputValue(`Continue research on ${activeSubject}`);
+  }, [createNewChat]);
+
+  const handleContinueCompany = useCallback(async () => {
+    const subject = currentActionCompany;
+    const chatId = await ensureActiveChat();
+    if (!chatId) return;
+    if (subject) {
+      await handleSendMessageWithChat(chatId, `Update research on ${subject}`);
     } else {
       setInputValue('Research ');
+      setFocusComposerTick(t => t + 1);
     }
-    setFocusComposerTick(t => t + 1);
-  };
-  const handleSummarizeLast = async () => {
-    if (!currentChatId) return;
-    await handleSendMessageWithChat(currentChatId, 'Summarize the above into a one-line headline (<=140 chars) and a quick summary with 5–8 decision-relevant bullets. No web research.');
-    void sendPreferenceSignal('length', { kind: 'categorical', choice: 'brief' }, { weight: 1.5 });
-  };
-  const handleEmailDraftFromLast = async () => {
+  }, [currentActionCompany, ensureActiveChat, handleSendMessageWithChat]);
+
+  const handleEmailDraftFromLast = useCallback(async (markdownOverride?: string, companyOverride?: string | null) => {
+    if (draftEmailPending) return;
     try {
-      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
-      if (!lastAssistant) return addToast({ type: 'error', title: 'No content to draft', description: 'Send a research query first.' });
+      const researchMarkdown = markdownOverride ?? [...messages].reverse().find(m => m.role === 'assistant')?.content;
+      if (!researchMarkdown) {
+        addToast({ type: 'error', title: 'No content to draft', description: 'Run research before drafting an email.' });
+        return;
+      }
+      setDraftEmailPending(true);
       const { data: { session } } = await supabase.auth.getSession();
       const auth = session?.access_token;
       const resp = await fetch('/api/outreach/draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: `Bearer ${auth}` } : {}) },
-        body: JSON.stringify({ research_markdown: lastAssistant.content, company: activeSubject || undefined })
+        body: JSON.stringify({
+          research_markdown: researchMarkdown,
+          company: companyOverride || activeSubject || undefined
+        })
       });
       const json = await resp.json();
       if (!resp.ok) throw new Error(json?.error || 'Draft failed');
-      await navigator.clipboard.writeText(json.email || '');
-      addToast({ type: 'success', title: 'Draft email copied' });
+      const email = typeof json?.email === 'string' ? json.email : '';
+      if (email) {
+        if (navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(email);
+          addToast({ type: 'success', title: 'Draft email copied' });
+        } else {
+          addToast({ type: 'success', title: 'Draft email ready', description: 'Clipboard unavailable. The draft is in the console.' });
+          console.info('[email-draft]', email);
+        }
+      } else {
+        addToast({ type: 'error', title: 'No email generated', description: 'The drafting service returned an empty response.' });
+      }
     } catch (e: any) {
       addToast({ type: 'error', title: 'Failed to draft email', description: e?.message || String(e) });
+    } finally {
+      setDraftEmailPending(false);
     }
-  };
+  }, [draftEmailPending, messages, supabase, activeSubject, addToast]);
 
   const handleNextAction = async (action: string) => {
     if (!currentChatId) return;
@@ -1564,16 +1597,10 @@ useEffect(() => {
   const handleActionBarAction = useCallback(async (action: ResearchAction) => {
     switch (action) {
       case 'new':
-        handleStartNewCompany();
+        await handleStartNewCompany();
         return;
       case 'continue':
-        handleContinueCompany();
-        return;
-      case 'summarize':
-        await handleSummarizeLast();
-        return;
-      case 'email':
-        await handleEmailDraftFromLast();
+        await handleContinueCompany();
         return;
       case 'refine':
         setShowRefine(true);
@@ -1581,33 +1608,20 @@ useEffect(() => {
       default:
         return;
     }
-  }, [handleStartNewCompany, handleContinueCompany, handleSummarizeLast, handleEmailDraftFromLast, setShowRefine]);
+  }, [handleStartNewCompany, handleContinueCompany, setShowRefine]);
 
   const shortcutHandlers = useMemo<Record<string, () => void>>(() => {
+    const handlers: Record<string, () => void> = {};
     if (!actionBarVisible || streamingMessage) {
-      return {
-        n: () => {},
-        c: () => {},
-        s: () => {},
-        e: () => {},
-        r: () => {},
-      };
+      return handlers;
     }
-    return {
-      n: () => { void handleActionBarAction('new'); },
-      c: () => { void handleActionBarAction('continue'); },
-      s: () => { void handleActionBarAction('summarize'); },
-      e: () => { void handleActionBarAction('email'); },
-      r: () => { void handleActionBarAction('refine'); },
-    };
+    handlers.n = () => { void handleActionBarAction('new'); };
+    handlers.c = () => { void handleActionBarAction('continue'); };
+    handlers.r = () => { void handleActionBarAction('refine'); };
+    return handlers;
   }, [actionBarVisible, streamingMessage, handleActionBarAction]);
 
   useKeyboardShortcuts(shortcutHandlers);
-
-  const handleOpenRefine = () => {
-    setRefineFacets(prev => (prev.length ? prev : Array.from(ALL_REFINE_FACETS)));
-    setShowRefine(true);
-  };
 
   const canUndoSubject = () => {
     const at = lastSubjectRef.current.at; if (!at) return false; return (Date.now() - at) < 10000;
@@ -1637,27 +1651,6 @@ useEffect(() => {
   const handleStopStreaming = () => {
     try { streamingAbortRef.current?.abort(); } catch {}
     setThinkingEvents([]);
-  };
-
-  // Open Save dialog for the latest assistant message (also used by Next Actions bar)
-  const openSaveForLastAssistant = () => {
-    const idx = [...messages].reduce((last, m, i) => (m.role === 'assistant' ? i : last), -1);
-    if (idx === -1) return;
-    const m = messages[idx];
-    const userMessage = [...messages].slice(0, idx).reverse().find(msg => msg.role === 'user')?.content;
-    const sources = thinkingEvents
-      .filter(ev => ev.type === 'web_search' && ev.query && ev.sources)
-      .map(ev => ({ query: ev.query, sources: ev.sources })) as any[];
-    const draft = buildResearchDraft({
-      assistantMessage: m.content,
-      userMessage,
-      chatTitle: chats.find(c => c.id === currentChatId)?.title,
-      agentType: 'company_research',
-      sources,
-      activeSubject,
-    });
-    setSaveDraft(draft);
-    setSaveOpen(true);
   };
 
   const handleAccountClick = (account: TrackedAccount) => {
@@ -2036,6 +2029,8 @@ useEffect(() => {
                       setSaveDraft(normalizedDraft);
                       setSaveOpen(true);
                     } : undefined}
+                    onDraftEmail={isLastAssistant ? (markdown, company) => { void handleEmailDraftFromLast(markdown, company); } : undefined}
+                    draftEmailPending={isLastAssistant ? draftEmailPending : false}
                     onSummarize={isLastAssistant ? async () => {
                       setPostSummarizeNudge(false);
                       try {
@@ -2132,54 +2127,37 @@ useEffect(() => {
                       Shortcuts:&nbsp;
                       <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">N</kbd> new •{' '}
                       <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">C</kbd>{' '}
-                      continue •{' '}
-                      <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">S</kbd>{' '}
-                      summarize •{' '}
-                      <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">E</kbd> email •{' '}
+                      refresh •{' '}
                       <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">R</kbd> refine
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
                       className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                      onClick={handleStartNewCompany}
+                      onClick={() => { void handleActionBarAction('new'); }}
                     >
-                      ➕ Start new company
+                      ➕ New research
                     </button>
                     <button
-                      className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      onClick={handleContinueCompany}
+                      className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 transition-colors ${
+                        canRefreshResearch
+                          ? 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-400'
+                          : 'bg-gray-300 text-gray-600 cursor-not-allowed focus:ring-gray-300'
+                      }`}
+                      onClick={() => { void handleActionBarAction('continue'); }}
+                      disabled={!canRefreshResearch}
                     >
-                      ↺ Continue {displayActionCompany ?? 'current company'}
-                    </button>
-                    <button
-                      className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-amber-600 focus:outline-none focus:ring-2 focus:ring-amber-400"
-                      onClick={async () => { await handleSummarizeLast(); }}
-                    >
-                      📝 Summarize
-                    </button>
-                    <button
-                      className="inline-flex items-center gap-2 rounded-lg bg-rose-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-400"
-                      onClick={handleEmailDraftFromLast}
-                    >
-                      ✉️ Draft email
-                    </button>
-                    <button
-                      className="inline-flex items-center gap-2 rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-400"
-                      aria-label="Save to Research"
-                      onClick={openSaveForLastAssistant}
-                    >
-                      💾 Save to Research
+                      ↺ {refreshLabel}
                     </button>
                     <button
                       className="inline-flex items-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-400"
-                      onClick={handleOpenRefine}
+                      onClick={() => { void handleActionBarAction('refine'); }}
                     >
                       🎯 Refine focus
                     </button>
                   </div>
                   <div className="mt-3 text-xs text-gray-500 sm:hidden">
-                    Shortcuts: N new • C continue • S summarize • E email • R refine
+                    Shortcuts: N new • C refresh • R refine
                   </div>
                   <label className="mt-3 inline-flex items-center gap-2 text-xs text-gray-600">
                     <input
