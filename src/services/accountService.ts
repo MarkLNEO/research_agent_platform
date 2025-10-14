@@ -1,5 +1,26 @@
 import { supabase } from '../lib/supabase';
 
+export interface ResearchSnapshot {
+  id: string;
+  subject: string;
+  research_type: string;
+  created_at: string;
+  executive_summary?: string;
+  markdown_report?: string;
+  icp_fit_score?: number;
+  signal_score?: number;
+  composite_score?: number;
+  priority_level?: 'hot' | 'warm' | 'standard';
+  confidence_level?: string;
+  company_data?: any;
+  leadership_team?: any[];
+  buying_signals?: any[];
+  custom_criteria_assessment?: any[];
+  personalization_points?: any[];
+  recommended_actions?: any;
+  sources?: any;
+}
+
 export interface TrackedAccount {
   id: string;
   user_id: string;
@@ -42,6 +63,7 @@ export interface TrackedAccount {
   latest_signal_summary?: string | null;
   last_researched_relative?: string | null;
   last_updated_relative?: string | null;
+  research_history?: ResearchSnapshot[];
 }
 
 export interface AccountSignal {
@@ -216,6 +238,7 @@ export async function listTrackedAccounts(
 ): Promise<{
   accounts: TrackedAccount[];
   stats: AccountStats;
+  untrackedResearch?: ResearchSnapshot[];
 }> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not authenticated');
@@ -234,7 +257,12 @@ export async function listTrackedAccounts(
     throw new Error(error.error || 'Failed to list accounts');
   }
 
-  return await response.json();
+  const result = await response.json();
+  return {
+    accounts: (result.accounts || []) as TrackedAccount[],
+    stats: result.stats as AccountStats,
+    untrackedResearch: result.untracked_research as ResearchSnapshot[] | undefined,
+  };
 }
 
 /**

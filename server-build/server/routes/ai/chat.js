@@ -888,19 +888,19 @@ export default async function handler(req, res) {
             const shouldGenerateTldr = isResearchQuery && estimateTokens(accumulatedContent) > 350;
             if (shouldGenerateTldr) {
                 try {
-                    safeWrite(`data: ${JSON.stringify({ type: 'tldr_status', content: 'Generating executive TL;DR…' })}\n\n`);
+                    safeWrite(`data: ${JSON.stringify({ type: 'tldr_status', content: 'Preparing high level summary…' })}\n\n`);
                     const trimmedForSummary = accumulatedContent.length > 24000
                         ? accumulatedContent.slice(0, 24000)
                         : accumulatedContent;
                     const summaryStream = await openai.responses.stream({
                         model: 'gpt-5-mini',
-                        instructions: 'You craft concise executive TL;DRs for sales research. Output format:\n## TL;DR\n**Headline:** <<=140 char headline>\n- Bullet 1\n- Bullet 2\n(5-8 bullets, each ≤18 words, action-focused, referencing concrete facts.)\nDo not add extra sections.',
+                        instructions: 'You craft concise executive high level summaries for sales research. Output format:\n## High Level Summary\n**Headline:** <<=140 char headline>\n- Bullet 1\n- Bullet 2\n(5-7 bullets, each ≤18 words, action-focused, referencing concrete facts.)\nDo not add extra sections.',
                         input: [
                             {
                                 role: 'user',
                                 content: [{
                                         type: 'input_text',
-                                        text: `Create an executive TL;DR for the following research. Do not repeat the full report, focus on headline insight and 5-8 decision-ready bullets.\n\n${trimmedForSummary}`
+                                        text: `Create an executive high level summary for the following research. Do not repeat the full report, focus on headline insight and 5-7 decision-ready bullets.\n\n${trimmedForSummary}`
                                     }]
                             },
                         ],
@@ -926,10 +926,11 @@ export default async function handler(req, res) {
                     catch (summaryFinalizeErr) {
                         console.error('TL;DR finalization error:', summaryFinalizeErr);
                     }
+                    safeWrite(`data: ${JSON.stringify({ type: 'tldr_done' })}\n\n`);
                 }
                 catch (summaryErr) {
                     console.error('Auto TL;DR generation failed:', summaryErr);
-                    safeWrite(`data: ${JSON.stringify({ type: 'tldr_error', message: 'TL;DR unavailable' })}\n\n`);
+                    safeWrite(`data: ${JSON.stringify({ type: 'tldr_error', message: 'High level summary unavailable' })}\n\n`);
                 }
             }
             if (planPromise) {

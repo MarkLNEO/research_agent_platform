@@ -419,6 +419,37 @@ export function ResearchChat() {
   const canDraftEmail = !!lastAssistantMessage && !draftEmailPending && !streamingMessage;
   const chatPaddingClass = actionBarVisible && !streamingMessage ? 'pb-32 md:pb-40' : '';
 
+  const buildDraftFromLastAssistant = useCallback((): ResearchDraft | null => {
+    if (lastAssistantIndex < 0) return null;
+    const assistantMsg = messages[lastAssistantIndex];
+    if (!assistantMsg) return null;
+    const userMessage = [...messages].slice(0, lastAssistantIndex).reverse().find(msg => msg.role === 'user')?.content;
+    const sources = thinkingEvents
+      .filter(ev => ev.type === 'web_search' && ev.query && ev.sources)
+      .map(ev => ({ query: ev.query, sources: ev.sources })) as any[];
+
+    const draft = buildResearchDraft({
+      assistantMessage: assistantMsg.content,
+      userMessage,
+      chatTitle: chats.find(c => c.id === currentChatId)?.title,
+      agentType: 'company_research',
+      sources,
+      activeSubject,
+    });
+
+    const normalizedDraft = (() => {
+      const active = activeSubject?.trim();
+      if (!active) return draft;
+      const current = (draft.subject || '').trim();
+      if (current && current.toLowerCase() === active.toLowerCase()) {
+        return draft;
+      }
+      return { ...draft, subject: active };
+    })();
+
+    return normalizedDraft;
+  }, [lastAssistantIndex, messages, thinkingEvents, chats, currentChatId, activeSubject]);
+
   useEffect(() => {
     if (user) void loadChats();
   }, [user]);
@@ -673,6 +704,44 @@ useEffect(() => {
 
   // Save dialog opens via onPromote in MessageBubble (last assistant message)
 
+  const persistResearchDraft = useCallback(async (draft: ResearchDraft) => {
+    const { data: inserted, error } = await supabase.from('research_outputs').insert({
+      user_id: user?.id,
+      subject: draft.subject,
+      research_type: draft.research_type,
+      executive_summary: draft.executive_summary,
+      markdown_report: draft.markdown_report,
+      icp_fit_score: draft.icp_fit_score,
+      signal_score: draft.signal_score,
+      composite_score: draft.composite_score,
+      priority_level: draft.priority_level,
+      confidence_level: draft.confidence_level,
+      sources: draft.sources || [],
+      company_data: draft.company_data || {},
+      leadership_team: draft.leadership_team || [],
+      buying_signals: draft.buying_signals || [],
+      custom_criteria_assessment: draft.custom_criteria_assessment || [],
+      personalization_points: draft.personalization_points || [],
+      recommended_actions: draft.recommended_actions || {},
+    }).select('*').single();
+    if (error) throw error;
+    try {
+      const auth = (await supabase.auth.getSession()).data.session?.access_token;
+      if (auth) {
+        await fetch('/api/research/evaluate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth}` },
+          body: JSON.stringify({ research_id: inserted?.id, markdown: draft.markdown_report })
+        });
+      }
+    } catch (e) {
+      console.warn('Criteria evaluation failed', e);
+    }
+    window.dispatchEvent(new CustomEvent('accounts-updated'));
+    window.dispatchEvent(new CustomEvent('research-history-updated'));
+    return inserted;
+  }, [supabase, user?.id]);
+
   const handleTrackAccount = async (rawCompanyName: string) => {
     if (!user) return;
     const companyName = String(rawCompanyName || '')
@@ -693,12 +762,32 @@ useEffect(() => {
         .eq('company_name', companyName)
         .single();
 
+      const draft = buildDraftFromLastAssistant();
+      const normalizedDraft = draft ? { ...draft, subject: companyName } : null;
+
       if (existingAccount) {
-        addToast({
-          title: 'Account already tracked',
-          description: `${companyName} is already in your tracked accounts`,
-          type: 'info',
-        });
+        if (normalizedDraft) {
+          try {
+            await persistResearchDraft(normalizedDraft);
+            addToast({
+              title: 'Research updated',
+              description: `Saved latest findings for ${companyName}.`,
+              type: 'success',
+            });
+          } catch (err: any) {
+            addToast({
+              title: 'Failed to save research',
+              description: err?.message || 'Could not attach the latest report.',
+              type: 'error',
+            });
+          }
+        } else {
+          addToast({
+            title: 'Account already tracked',
+            description: `${companyName} is already in your tracked accounts`,
+            type: 'info',
+          });
+        }
         return;
       }
 
@@ -715,6 +804,23 @@ useEffect(() => {
       if (error) throw error;
 
       addToast({ title: 'Account tracked', description: `${companyName} has been added to your tracked accounts`, type: 'success' });
+
+      if (normalizedDraft) {
+        try {
+          await persistResearchDraft(normalizedDraft);
+          addToast({
+            title: 'Research attached',
+            description: `Saved the current ${companyName} report and started monitoring.`,
+            type: 'success',
+          });
+        } catch (err: any) {
+          addToast({
+            title: 'Could not save research',
+            description: err?.message || 'Account is tracked, but the latest report was not saved automatically.',
+            type: 'error',
+          });
+        }
+      }
 
       // Trigger signal detection for new account
       fetch(`/api/signals/trigger-detection`, {
@@ -742,37 +848,7 @@ useEffect(() => {
     setSaving(true);
     setSaveError(null);
     try {
-      const { data: inserted, error } = await supabase.from('research_outputs').insert({
-        user_id: user.id,
-        subject: draft.subject,
-        research_type: draft.research_type,
-        executive_summary: draft.executive_summary,
-        markdown_report: draft.markdown_report,
-        icp_fit_score: draft.icp_fit_score,
-        signal_score: draft.signal_score,
-        composite_score: draft.composite_score,
-        priority_level: draft.priority_level,
-        confidence_level: draft.confidence_level,
-        sources: draft.sources || [],
-        company_data: draft.company_data || {},
-        leadership_team: draft.leadership_team || [],
-        buying_signals: draft.buying_signals || [],
-        custom_criteria_assessment: draft.custom_criteria_assessment || [],
-        personalization_points: draft.personalization_points || [],
-        recommended_actions: draft.recommended_actions || {},
-      }).select('id').single();
-      if (error) throw error;
-      // Evaluate custom criteria post-save
-      try {
-        const auth = (await supabase.auth.getSession()).data.session?.access_token;
-        await fetch('/api/research/evaluate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${auth}` },
-          body: JSON.stringify({ research_id: inserted?.id, markdown: draft.markdown_report })
-        });
-      } catch (e) {
-        console.warn('Criteria evaluation failed', e);
-      }
+      await persistResearchDraft(draft);
       setSaveOpen(false);
       addToast({ type: 'success', title: 'Saved to history', description: 'Your research was added to History.' , actionText: 'View', onAction: () => navigate('/research') });
     } catch (e: any) {
@@ -1327,9 +1403,7 @@ useEffect(() => {
       };
       const composeOutput = () => {
         const trimmedTldr = tldrBuffer.trim();
-        if (!mainContent) {
-          return trimmedTldr;
-        }
+        if (!mainContent && !trimmedTldr) return '';
         const lines = mainContent.split('\n');
         let ackLine = '';
         let remainder = mainContent;
@@ -1340,13 +1414,10 @@ useEffect(() => {
             remainder = lines.slice(1).join('\n').trimStart();
           }
         }
-        if (!trimmedTldr) {
-          return ackLine ? `${ackLine}\n${remainder}`.trim() : mainContent;
-        }
         const parts: string[] = [];
         if (ackLine) parts.push(ackLine.trim());
-        parts.push(trimmedTldr);
-        if (remainder) parts.push(remainder);
+        if (remainder) parts.push(remainder.trim());
+        if (trimmedTldr) parts.push(trimmedTldr);
         return parts.join('\n\n').trim();
       };
       const updateStreaming = () => {
@@ -1446,19 +1517,26 @@ useEffect(() => {
                   if (typeof parsed.content === 'string') {
                     tldrBuffer += parsed.content;
                     updateStreaming();
+                    setThinkingEvents(prev =>
+                      prev.filter(e => !(e.type === 'reasoning_progress' && (e.content || '').toLowerCase().includes('summary')))
+                    );
                   }
                 } else if (parsed.type === 'tldr_status') {
                   setThinkingEvents(prev => [...prev.filter(e => e.type !== 'reasoning_progress'), {
                     id: `tldr-${Date.now()}`,
                     type: 'reasoning_progress',
-                    content: parsed.content || 'Generating TL;DR…'
+                    content: parsed.content || 'Preparing high level summary…'
                   }]);
                 } else if (parsed.type === 'tldr_error') {
                   addToast({
                     type: 'error',
-                    title: 'TL;DR unavailable',
+                    title: 'High level summary unavailable',
                     description: parsed.message || 'Could not create summary.'
                   });
+                } else if (parsed.type === 'tldr_done') {
+                  setThinkingEvents(prev =>
+                    prev.filter(e => !(e.type === 'reasoning_progress' && (e.content || '').toLowerCase().includes('summary')))
+                  );
                 } else if (parsed.type === 'response.completed' && parsed.response?.usage?.total_tokens) {
                   usedTokens = Number(parsed.response.usage.total_tokens) || usedTokens;
                 } else if (parsed.type === 'response' && parsed.usage?.total_tokens) {
@@ -2200,7 +2278,13 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
               })()}
 
               {streamingMessage && (
-                <MessageBubble role="assistant" content={streamingMessage} userName={getUserInitial()} showActions={false} />
+                <MessageBubble
+                  role="assistant"
+                  content={streamingMessage}
+                  userName={getUserInitial()}
+                  showActions={false}
+                  streaming
+                />
               )}
 
               {/* Next Actions bar after a completed assistant turn */}

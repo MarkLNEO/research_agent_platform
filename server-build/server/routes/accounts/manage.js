@@ -87,9 +87,10 @@ export default async function handler(req, res) {
                 return res.status(200).json({ success: true, ...results, summary: { added: results.added.length, skipped: results.skipped.length, errors: results.errors.length } });
             }
             case 'list': {
+                const twoWeeksAgoIso = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
                 let query = supabase
                     .from('tracked_accounts')
-                    .select(`*, latest_research:research_outputs(id, created_at, executive_summary), recent_signals:account_signals(id, signal_type, severity, description, signal_date, viewed, score)`)
+                    .select(`*, recent_signals:account_signals(id, signal_type, severity, description, signal_date, viewed, score)`)
                     .eq('user_id', user.id)
                     .order('priority', { ascending: false })
                     .order('updated_at', { ascending: false });
@@ -98,23 +99,76 @@ export default async function handler(req, res) {
                 else if (body.filter === 'warm')
                     query = query.eq('priority', 'warm');
                 else if (body.filter === 'stale')
-                    query = query.or(`last_researched_at.lt.${new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()},last_researched_at.is.null`);
+                    query = query.or(`last_researched_at.lt.${twoWeeksAgoIso},last_researched_at.is.null`);
                 const { data, error } = await query;
                 if (error)
                     throw error;
-                const accounts = (data || []).map((a) => {
-                    const signals = a.recent_signals || [];
-                    return { ...a, signal_count: signals.length, unviewed_signal_count: signals.filter((s) => !s.viewed).length };
+                const normalize = (value) => (value || '').trim().toLowerCase();
+                const accountsRaw = Array.isArray(data) ? data : [];
+                const accounts = accountsRaw.map((a) => {
+                    const signals = Array.isArray(a.recent_signals) ? a.recent_signals : [];
+                    return {
+                        ...a,
+                        signal_count: signals.length,
+                        unviewed_signal_count: signals.filter((s) => !s.viewed).length,
+                    };
+                });
+                const trackedKeys = new Set();
+                for (const acc of accounts) {
+                    const key = normalize(acc.company_name);
+                    if (key)
+                        trackedKeys.add(key);
+                }
+                const { data: researchRows, error: researchError } = await supabase
+                    .from('research_outputs')
+                    .select('id, subject, research_type, created_at, executive_summary, markdown_report, icp_fit_score, signal_score, composite_score, priority_level, confidence_level, company_data, leadership_team, buying_signals, custom_criteria_assessment, personalization_points, recommended_actions, sources')
+                    .eq('user_id', user.id)
+                    .eq('research_type', 'company')
+                    .order('created_at', { ascending: false })
+                    .limit(120);
+                if (researchError)
+                    throw researchError;
+                const historyMap = new Map();
+                const untrackedMap = new Map();
+                for (const row of researchRows || []) {
+                    const subjectKey = normalize(row.subject);
+                    if (!subjectKey)
+                        continue;
+                    if (trackedKeys.has(subjectKey)) {
+                        if (!historyMap.has(subjectKey)) {
+                            historyMap.set(subjectKey, []);
+                        }
+                        historyMap.get(subjectKey).push(row);
+                    }
+                    else if (!untrackedMap.has(subjectKey)) {
+                        untrackedMap.set(subjectKey, row);
+                    }
+                }
+                const enrichedAccounts = accounts.map((acc) => {
+                    const key = normalize(acc.company_name);
+                    return {
+                        ...acc,
+                        research_history: (historyMap.get(key) || []).slice(0, 6),
+                    };
                 });
                 const stats = {
-                    total: accounts.length,
-                    hot: accounts.filter((a) => a.priority === 'hot').length,
-                    warm: accounts.filter((a) => a.priority === 'warm').length,
-                    standard: accounts.filter((a) => a.priority === 'standard').length,
-                    with_signals: accounts.filter((a) => (a.recent_signals || []).length > 0).length,
-                    stale: accounts.filter((a) => { const d = a.last_researched_at ? new Date(a.last_researched_at).getTime() : 0; return !d || (Date.now() - d) > (14 * 24 * 60 * 60 * 1000); }).length,
+                    total: enrichedAccounts.length,
+                    hot: enrichedAccounts.filter((a) => a.priority === 'hot').length,
+                    warm: enrichedAccounts.filter((a) => a.priority === 'warm').length,
+                    standard: enrichedAccounts.filter((a) => a.priority === 'standard').length,
+                    with_signals: enrichedAccounts.filter((a) => (a.recent_signals || []).length > 0).length,
+                    stale: enrichedAccounts.filter((a) => {
+                        const d = a.last_researched_at ? new Date(a.last_researched_at).getTime() : 0;
+                        return !d || (Date.now() - d) > (14 * 24 * 60 * 60 * 1000);
+                    }).length,
                 };
-                return res.status(200).json({ success: true, accounts, stats });
+                const untracked = Array.from(untrackedMap.values()).slice(0, 30);
+                return res.status(200).json({
+                    success: true,
+                    accounts: enrichedAccounts,
+                    stats,
+                    untracked_research: untracked,
+                });
             }
             case 'update': {
                 const { data, error } = await supabase

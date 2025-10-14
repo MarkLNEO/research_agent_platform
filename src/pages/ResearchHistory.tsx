@@ -1,22 +1,13 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
+import { jsPDF } from 'jspdf';
+import { Building2, RefreshCw, Clock, Sparkles, Layers } from 'lucide-react';
 import { Sidebar } from '../components/Sidebar';
 import { ResearchOutput } from '../components/ResearchOutput';
-import {
-  Search,
-  TrendingUp,
-  Clock,
-  Target,
-  ChevronLeft,
-  ChevronRight,
-  CheckSquare,
-  Square,
-  FileDown,
-  FileSpreadsheet,
-} from 'lucide-react';
-import { jsPDF } from 'jspdf';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
+import { useToast } from '../components/ToastProvider';
+import { listTrackedAccounts, type TrackedAccount, type AccountStats, type ResearchSnapshot } from '../services/accountService';
 
 interface Chat {
   id: string;
@@ -24,285 +15,243 @@ interface Chat {
   created_at: string;
 }
 
-interface ResearchItem {
-  id: string;
-  subject: string;
-  research_type: string;
-  icp_fit_score?: number;
-  signal_score?: number;
-  composite_score?: number;
-  priority_level?: 'hot' | 'warm' | 'standard';
-  executive_summary?: string;
-  company_data?: any;
-  leadership_team?: any[];
-  buying_signals?: any[];
-  custom_criteria_assessment?: any[];
-  personalization_points?: any[];
-  recommended_actions?: any;
-  confidence_level?: 'high' | 'medium' | 'low';
-  markdown_report?: string;
-  sources?: any;
-  created_at: string;
-}
+const RELATIVE_DAY_MS = 1000 * 60 * 60 * 24;
+
+const slugify = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'research-report';
+
+const toCsvValue = (value: unknown) => {
+  if (value === null || value === undefined) return '""';
+  return `"${String(value).replace(/"/g, '""')}"`;
+};
+
+const formatRelativeDate = (dateString?: string | null) => {
+  if (!dateString) return '—';
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return '—';
+  const diffMs = Date.now() - date.getTime();
+  const diffDays = Math.floor(diffMs / RELATIVE_DAY_MS);
+  if (diffDays <= 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays} days ago`;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+const formatFullDate = (dateString?: string | null) => {
+  if (!dateString) return '—';
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
+const appendResearchToPdf = (doc: jsPDF, research: ResearchSnapshot) => {
+  const margin = 48;
+  let cursor = margin;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.text(research.subject || 'Research Report', margin, cursor);
+  cursor += 28;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(12);
+  doc.text(`Type: ${research.research_type || 'company'}`, margin, cursor);
+  cursor += 18;
+
+  if (research.priority_level) {
+    doc.text(`Priority: ${research.priority_level}`, margin, cursor);
+    cursor += 18;
+  }
+
+  if (research.confidence_level) {
+    doc.text(`Confidence: ${research.confidence_level}`, margin, cursor);
+    cursor += 18;
+  }
+
+  const scoreParts: string[] = [];
+  if (typeof research.icp_fit_score === 'number') scoreParts.push(`ICP: ${research.icp_fit_score}`);
+  if (typeof research.signal_score === 'number') scoreParts.push(`Signal: ${research.signal_score}`);
+  if (typeof research.composite_score === 'number') scoreParts.push(`Composite: ${research.composite_score}`);
+  if (scoreParts.length) {
+    doc.text(scoreParts.join(' • '), margin, cursor);
+    cursor += 18;
+  }
+
+  if (research.executive_summary) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('Executive Summary', margin, cursor);
+    cursor += 20;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    const summaryLines = doc.splitTextToSize(research.executive_summary, 520);
+    doc.text(summaryLines, margin, cursor);
+    cursor += summaryLines.length * 14 + 20;
+  }
+
+  const report = research.markdown_report || '';
+  if (report) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('Full Report', margin, cursor);
+    cursor += 20;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    const cleanedReport = report.replace(/[#*_`>-]/g, '');
+    const reportLines = doc.splitTextToSize(cleanedReport, 520);
+    doc.text(reportLines, margin, cursor);
+    cursor += reportLines.length * 14 + 20;
+  }
+
+  if (Array.isArray(research.sources) && research.sources.length > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('Sources', margin, cursor);
+    cursor += 20;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    research.sources.forEach((source: any) => {
+      const label =
+        typeof source === 'string'
+          ? source
+          : `${source.url || ''}${source.query ? ` (${source.query})` : ''}`;
+      const lines = doc.splitTextToSize(label, 520);
+      doc.text(lines, margin, cursor);
+      cursor += lines.length * 12;
+    });
+  }
+};
+
+const flattenResearchForCsv = (research: ResearchSnapshot) => {
+  const sources = Array.isArray(research.sources)
+    ? research.sources
+        .map((source: any) =>
+          typeof source === 'string'
+            ? source
+            : `${source.url || ''}${source.query ? ` (${source.query})` : ''}`
+        )
+        .join(' | ')
+    : '';
+
+  return {
+    Subject: research.subject,
+    'Research Type': research.research_type,
+    Priority: research.priority_level || '',
+    Confidence: research.confidence_level || '',
+    'ICP Fit Score': research.icp_fit_score ?? '',
+    'Signal Score': research.signal_score ?? '',
+    'Composite Score': research.composite_score ?? '',
+    'Executive Summary': research.executive_summary || '',
+    'Markdown Report': research.markdown_report || '',
+    'Company Data': research.company_data ? JSON.stringify(research.company_data) : '',
+    'Buying Signals': research.buying_signals ? JSON.stringify(research.buying_signals) : '',
+    'Custom Criteria': research.custom_criteria_assessment ? JSON.stringify(research.custom_criteria_assessment) : '',
+    'Personalization Points': research.personalization_points ? JSON.stringify(research.personalization_points) : '',
+    'Recommended Actions': research.recommended_actions ? JSON.stringify(research.recommended_actions) : '',
+    Sources: sources,
+  } as Record<string, unknown>;
+};
 
 export function ResearchHistory() {
   const { user } = useAuth();
+  const { addToast } = useToast();
   const navigate = useNavigate();
-  const [chats, setChats] = useState<Chat[]>([]);
-  const [research, setResearch] = useState<ResearchItem[]>([]);
-  const [filteredResearch, setFilteredResearch] = useState<ResearchItem[]>([]);
-  const [selectedResearch, setSelectedResearch] = useState<ResearchItem | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState<string>('all');
-  const [filterPriority, setFilterPriority] = useState<string>('all');
-  const [sortBy, setSortBy] = useState<'recent' | 'score'>('recent');
+  const [accounts, setAccounts] = useState<TrackedAccount[]>([]);
+  const [stats, setStats] = useState<AccountStats | null>(null);
+  const [untrackedResearch, setUntrackedResearch] = useState<ResearchSnapshot[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [selectedResearchId, setSelectedResearchId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'tracked' | 'recent'>('tracked');
   const [loading, setLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const pageSize = 10;
+  const [chats, setChats] = useState<Chat[]>([]);
 
-  useEffect(() => {
-    if (user) {
-      loadData();
+  const loadAccounts = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const result = await listTrackedAccounts('all');
+      setAccounts(result.accounts);
+      setStats(result.stats);
+      setUntrackedResearch(result.untrackedResearch || []);
+      setSelectedAccountId(prev => {
+        if (prev && result.accounts.some(acc => acc.id === prev)) {
+          return prev;
+        }
+        return result.accounts[0]?.id ?? null;
+      });
+    } catch (err: any) {
+      console.error('Failed to load tracked accounts', err);
+      addToast({
+        type: 'error',
+        title: 'Could not load accounts',
+        description: err?.message || 'Please try again.',
+      });
+    } finally {
+      setLoading(false);
     }
+  }, [user, addToast]);
+
+  const loadChats = useCallback(async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from('chats')
+      .select('id, title, created_at')
+      .eq('user_id', user.id)
+      .order('updated_at', { ascending: false })
+      .limit(20);
+    if (data) setChats(data);
   }, [user]);
 
   useEffect(() => {
-    applyFilters();
-  }, [research, searchQuery, filterType, filterPriority, sortBy]);
+    if (user) {
+      void loadAccounts();
+      void loadChats();
+    }
+  }, [user, loadAccounts, loadChats]);
 
   useEffect(() => {
-    setSelectedIds(prev => prev.filter(id => filteredResearch.some(item => item.id === id)));
+    const handler = () => { void loadAccounts(); };
+    window.addEventListener('accounts-updated', handler);
+    return () => window.removeEventListener('accounts-updated', handler);
+  }, [loadAccounts]);
 
-    const totalPages = Math.max(1, Math.ceil(filteredResearch.length / pageSize));
-    setCurrentPage(prev => Math.min(prev, totalPages));
-  }, [filteredResearch, pageSize]);
+  const selectedAccount = useMemo(
+    () => accounts.find(acc => acc.id === selectedAccountId) ?? null,
+    [accounts, selectedAccountId]
+  );
 
-  const loadData = async () => {
-    if (!user) return;
-
-    setLoading(true);
-
-    const [chatsResult, researchResult] = await Promise.all([
-      supabase
-        .from('chats')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('updated_at', { ascending: false }),
-      supabase
-        .from('research_outputs')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-    ]);
-
-    if (chatsResult.data) {
-      setChats(chatsResult.data);
+  useEffect(() => {
+    if (!selectedAccount?.research_history?.length) {
+      setSelectedResearchId(null);
+      return;
     }
-
-    if (researchResult.data) {
-      setResearch(researchResult.data);
+    if (selectedResearchId && selectedAccount.research_history.some(r => r.id === selectedResearchId)) {
+      return;
     }
+    setSelectedResearchId(selectedAccount.research_history[0].id);
+  }, [selectedAccount, selectedResearchId]);
 
-    setLoading(false);
-  };
+  const selectedResearch = useMemo(() => {
+    if (!selectedAccount?.research_history?.length) return null;
+    if (!selectedResearchId) return selectedAccount.research_history[0];
+    return selectedAccount.research_history.find(r => r.id === selectedResearchId) ?? selectedAccount.research_history[0];
+  }, [selectedAccount, selectedResearchId]);
 
-  const applyFilters = () => {
-    let filtered = [...research];
-
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(item =>
-        item.subject.toLowerCase().includes(query) ||
-        item.executive_summary?.toLowerCase().includes(query)
-      );
-    }
-
-    if (filterType !== 'all') {
-      filtered = filtered.filter(item => item.research_type === filterType);
-    }
-
-    if (filterPriority !== 'all') {
-      filtered = filtered.filter(item => item.priority_level === filterPriority);
-    }
-
-    if (sortBy === 'score') {
-      filtered.sort((a, b) => (b.composite_score || 0) - (a.composite_score || 0));
-    } else {
-      filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    }
-
-    setFilteredResearch(filtered);
-    setCurrentPage(1);
-  };
-
-  const getUserInitial = () => {
-    if (user?.email) {
-      return user.email[0].toUpperCase();
-    }
-    return 'Y';
-  };
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-    if (diffDays === 0) return 'Today';
-    if (diffDays === 1) return 'Yesterday';
-    if (diffDays < 7) return `${diffDays} days ago`;
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
-
-  const slugify = (value: string) =>
-    value
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 60) || 'research-report';
-
-  const toCsvValue = (value: unknown) => {
-    if (value === null || value === undefined) return '""';
-    return `"${String(value).replace(/"/g, '""')}"`;
-  };
-
-  const appendResearchToPdf = (doc: jsPDF, researchItem: ResearchItem, isFirstPage: boolean) => {
-    if (!isFirstPage) {
-      doc.addPage();
-    }
-
-    const margin = 48;
-    let cursor = margin;
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(18);
-    doc.text(researchItem.subject, margin, cursor);
-    cursor += 28;
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(12);
-    doc.text(`Type: ${researchItem.research_type}`, margin, cursor);
-    cursor += 18;
-
-    if (researchItem.priority_level) {
-      doc.text(`Priority: ${researchItem.priority_level}`, margin, cursor);
-      cursor += 18;
-    }
-
-    if (researchItem.confidence_level) {
-      doc.text(`Confidence: ${researchItem.confidence_level}`, margin, cursor);
-      cursor += 18;
-    }
-
-    if (
-      researchItem.icp_fit_score !== undefined ||
-      researchItem.signal_score !== undefined ||
-      researchItem.composite_score !== undefined
-    ) {
-      const scoreLine = [
-        researchItem.icp_fit_score !== undefined ? `ICP: ${researchItem.icp_fit_score}` : null,
-        researchItem.signal_score !== undefined ? `Signal: ${researchItem.signal_score}` : null,
-        researchItem.composite_score !== undefined ? `Composite: ${researchItem.composite_score}` : null,
-      ]
-        .filter(Boolean)
-        .join(' • ');
-
-      if (scoreLine) {
-        doc.text(scoreLine, margin, cursor);
-        cursor += 18;
-      }
-    }
-
-    if (researchItem.executive_summary) {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(14);
-      doc.text('Executive Summary', margin, cursor);
-      cursor += 20;
-
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(11);
-      const summaryLines = doc.splitTextToSize(researchItem.executive_summary, 540);
-      doc.text(summaryLines, margin, cursor);
-      cursor += summaryLines.length * 14 + 20;
-    }
-
-    const report = researchItem.markdown_report || '';
-    if (report) {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(14);
-      doc.text('Full Report', margin, cursor);
-      cursor += 20;
-
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(11);
-      const cleanedReport = report.replace(/[#*_`>-]/g, '');
-      const reportLines = doc.splitTextToSize(cleanedReport, 540);
-      doc.text(reportLines, margin, cursor);
-      cursor += reportLines.length * 14 + 20;
-    }
-
-    if (Array.isArray(researchItem.sources) && researchItem.sources.length > 0) {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(14);
-      doc.text('Sources', margin, cursor);
-      cursor += 20;
-
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(10);
-      researchItem.sources.forEach((source: any) => {
-        const label =
-          typeof source === 'string'
-            ? source
-            : `${source.url}${source.query ? ` (${source.query})` : ''}`;
-        const lines = doc.splitTextToSize(label, 540);
-        doc.text(lines, margin, cursor);
-        cursor += lines.length * 12;
-      });
-    }
-  };
-
-  const flattenResearchForCsv = (researchItem: ResearchItem) => {
-    const sources = Array.isArray(researchItem.sources)
-      ? researchItem.sources
-          .map((source: any) =>
-            typeof source === 'string'
-              ? source
-              : `${source.url}${source.query ? ` (${source.query})` : ''}`
-          )
-          .join(' | ')
-      : '';
-
-    return {
-      Subject: researchItem.subject,
-      'Research Type': researchItem.research_type,
-      Priority: researchItem.priority_level || '',
-      Confidence: researchItem.confidence_level || '',
-      'ICP Fit Score': researchItem.icp_fit_score ?? '',
-      'Signal Score': researchItem.signal_score ?? '',
-      'Composite Score': researchItem.composite_score ?? '',
-      'Executive Summary': researchItem.executive_summary || '',
-      'Markdown Report': researchItem.markdown_report || '',
-      'Company Data': researchItem.company_data ? JSON.stringify(researchItem.company_data) : '',
-      'Buying Signals': researchItem.buying_signals ? JSON.stringify(researchItem.buying_signals) : '',
-      'Custom Criteria': researchItem.custom_criteria_assessment
-        ? JSON.stringify(researchItem.custom_criteria_assessment)
-        : '',
-      'Recommended Actions': researchItem.recommended_actions
-        ? JSON.stringify(researchItem.recommended_actions)
-        : '',
-      Sources: sources,
-    } as Record<string, unknown>;
-  };
-
-  const handleExportPDF = (researchItem: ResearchItem) => {
+  const handleExportPdf = useCallback((research: ResearchSnapshot) => {
     const doc = new jsPDF({ unit: 'pt', format: 'letter' });
-    appendResearchToPdf(doc, researchItem, true);
-    doc.save(`${slugify(researchItem.subject)}.pdf`);
-  };
+    appendResearchToPdf(doc, research);
+    doc.save(`${slugify(research.subject || 'research-report')}.pdf`);
+  }, []);
 
-  const handleExportCSV = (researchItem: ResearchItem) => {
-    const flat = flattenResearchForCsv(researchItem);
+  const handleExportCsv = useCallback((research: ResearchSnapshot) => {
+    const flat = flattenResearchForCsv(research);
     const csvContent = Object.entries(flat)
       .map(([key, value]) => `${toCsvValue(key)},${toCsvValue(value)}`)
       .join('\n');
@@ -311,104 +260,48 @@ export function ResearchHistory() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${slugify(researchItem.subject)}.csv`;
+    link.download = `${slugify(research.subject || 'research-report')}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  };
+  }, []);
 
-  const selectedItems = useMemo(
-    () => filteredResearch.filter(item => selectedIds.includes(item.id)),
-    [filteredResearch, selectedIds]
-  );
-
-  const selectedCount = selectedItems.length;
-
-  const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(filteredResearch.length / pageSize)),
-    [filteredResearch.length, pageSize]
-  );
-
-  const paginatedResearch = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredResearch.slice(start, start + pageSize);
-  }, [filteredResearch, currentPage, pageSize]);
-
-  const pageIds = useMemo(() => paginatedResearch.map(item => item.id), [paginatedResearch]);
-  const isPageFullySelected = pageIds.length > 0 && pageIds.every(id => selectedIds.includes(id));
-
-  const pageRangeStart = filteredResearch.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-  const pageRangeEnd = Math.min(currentPage * pageSize, filteredResearch.length);
-
-  const toggleSelection = (id: string) => {
-    setSelectedIds(prev =>
-      prev.includes(id) ? prev.filter(itemId => itemId !== id) : [...prev, id]
-    );
-  };
-
-  const handleSelectAllOnPage = () => {
-    setSelectedIds(prev => {
-      if (isPageFullySelected) {
-        const pageIdSet = new Set(pageIds);
-        return prev.filter(id => !pageIdSet.has(id));
+  const openResearchInChat = useCallback((subject: string) => {
+    if (!subject) return;
+    navigate('/');
+    setTimeout(() => {
+      try {
+        window.dispatchEvent(new CustomEvent('chat:prefill', { detail: { prompt: `Research ${subject}` } }));
+      } catch {
+        // no-op
       }
+    }, 0);
+  }, [navigate]);
 
-      const next = [...prev];
-      pageIds.forEach(id => {
-        if (!next.includes(id)) {
-          next.push(id);
-        }
-      });
-      return next;
-    });
+  const getUserInitial = () => (user?.email ? user.email[0].toUpperCase() : 'Y');
+
+  const handleSidebarAccountClick = (account: TrackedAccount) => {
+    setActiveTab('tracked');
+    setSelectedAccountId(account.id);
   };
 
-  const clearSelection = () => setSelectedIds([]);
-
-  const handleBulkExportPDF = () => {
-    if (selectedItems.length === 0) return;
-    const doc = new jsPDF({ unit: 'pt', format: 'letter' });
-    selectedItems.forEach((item, index) => appendResearchToPdf(doc, item, index === 0));
-    doc.save(`research-bundle-${selectedItems.length}.pdf`);
+  const handleSidebarAddAccount = () => {
+    navigate('/');
+    setTimeout(() => {
+      window.dispatchEvent(new Event('show-tracked-accounts'));
+    }, 0);
   };
 
-  const handleBulkExportCSV = () => {
-    if (selectedItems.length === 0) return;
-    const headerOrder = Object.keys(flattenResearchForCsv(selectedItems[0]));
-    const rows = selectedItems.map(item => {
-      const flat = flattenResearchForCsv(item) as Record<string, unknown>;
-      return headerOrder.map(key => toCsvValue(flat[key])).join(',');
-    });
-
-    const csvContent = [
-      headerOrder.map(key => toCsvValue(key)).join(','),
-      ...rows,
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `research-bundle.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  const goToPage = (page: number) => {
-    const target = Math.min(totalPages, Math.max(1, page));
-    setCurrentPage(target);
-  };
-
-  const getPriorityColor = (level?: string) => {
-    switch (level) {
-      case 'hot': return 'text-red-600 bg-red-50 border-red-200';
-      case 'warm': return 'text-orange-600 bg-orange-50 border-orange-200';
-      default: return 'text-blue-600 bg-blue-50 border-blue-200';
-    }
-  };
+  const statsSummary = useMemo(() => {
+    if (!stats) return [];
+    return [
+      { label: 'Tracked', value: stats.total },
+      { label: 'Hot', value: stats.hot },
+      { label: 'Needs update', value: stats.stale },
+      { label: 'Signals', value: stats.with_signals },
+    ];
+  }, [stats]);
 
   return (
     <div className="flex h-screen bg-gray-50" data-testid="research-history">
@@ -421,285 +314,239 @@ export function ResearchHistory() {
         onCompanyProfile={() => navigate('/profile-coach')}
         onSettings={() => navigate('/settings')}
         onHome={() => navigate('/')}
+        onResearchHistory={() => undefined}
+        onAccountClick={handleSidebarAccountClick}
+        onAddAccount={handleSidebarAddAccount}
       />
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="bg-white border-b border-gray-200 px-6 py-4">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Research History</h1>
-          <p className="text-sm text-gray-600 mb-4">
-            This list shows the reports you save from the Company Researcher. Use the “Save to Research” button after a run and it will appear here for later reference or export.
-          </p>
-
-          <div className="space-y-3">
+        <header className="border-b border-gray-200 bg-white px-6 py-5">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <label htmlFor="history-search" className="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">
-                Search all research
-              </label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <input
-                  id="history-search"
-                  type="text"
-                  placeholder="Search by company, topic, or keyword"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  data-testid="research-history-search"
-                  autoComplete="off"
-                />
-              </div>
+              <h1 className="text-2xl font-bold text-gray-900">Tracked Accounts</h1>
+              <p className="mt-1 text-sm text-gray-600">
+                Every account you monitor keeps its research timeline here. Pick an account to review the latest report or step through prior updates.
+              </p>
             </div>
-
-            <div className="flex flex-wrap gap-2 text-xs" aria-label="Filters and sorting controls">
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500 uppercase tracking-wide">Type</span>
-                <div className="flex gap-1">
-                  {[
-                    { value: 'all', label: 'All' },
-                    { value: 'company', label: 'Company' },
-                    { value: 'prospect', label: 'Prospect' },
-                    { value: 'competitive', label: 'Competitive' },
-                    { value: 'market', label: 'Market' },
-                  ].map(option => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`px-2.5 py-1 rounded-full border ${filterType === option.value ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'}`}
-                      onClick={() => setFilterType(option.value)}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500 uppercase tracking-wide">Priority</span>
-                <div className="flex gap-1">
-                  {[
-                    { value: 'all', label: 'All' },
-                    { value: 'hot', label: '🔥 Hot' },
-                    { value: 'warm', label: '⚡ Warm' },
-                    { value: 'standard', label: '📍 Standard' },
-                  ].map(option => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`px-2.5 py-1 rounded-full border ${filterPriority === option.value ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'}`}
-                      onClick={() => setFilterPriority(option.value)}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1 ml-auto">
-                <span className="text-gray-500 uppercase tracking-wide">Sort</span>
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as 'recent' | 'score')}
-                  className="px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
-                  aria-label="Sort research"
-                >
-                  <option value="recent">Most recent</option>
-                  <option value="score">Highest score</option>
-                </select>
-              </div>
-            </div>
+            <button
+              type="button"
+              onClick={() => { void loadAccounts(); }}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Refresh
+            </button>
           </div>
-
-          {selectedCount > 0 && !selectedResearch && (
-            <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex flex-wrap items-center gap-3">
-              <div className="text-sm font-medium text-blue-900">
-                {selectedCount} report{selectedCount === 1 ? '' : 's'} selected
-              </div>
-              <button
-                type="button"
-                onClick={handleBulkExportPDF}
-                className="inline-flex items-center gap-2 text-sm font-medium text-blue-800 hover:text-blue-900"
-              >
-                <FileDown className="w-4 h-4" />
-                Export PDFs
-              </button>
-              <button
-                type="button"
-                onClick={handleBulkExportCSV}
-                className="inline-flex items-center gap-2 text-sm font-medium text-blue-800 hover:text-blue-900"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                Export CSV bundle
-              </button>
-              <button
-                type="button"
-                onClick={clearSelection}
-                className="ml-auto text-sm text-blue-700 hover:text-blue-900"
-              >
-                Clear selection
-              </button>
+          {statsSummary.length > 0 && (
+            <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+              {statsSummary.map(item => (
+                <div key={item.label} className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">{item.label}</div>
+                  <div className="mt-1 text-lg font-bold text-gray-900">{item.value}</div>
+                </div>
+              ))}
             </div>
           )}
-        </div>
 
-        <div className="flex-1 overflow-y-auto">
-          {loading ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="flex gap-1">
-                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
-                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }}></div>
-                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></div>
-              </div>
-            </div>
-          ) : filteredResearch.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center px-4">
-              <Target className="w-16 h-16 text-gray-300 mb-4" />
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">No Research Found</h3>
-              <p className="text-gray-600 mb-6">
-                {searchQuery || filterType !== 'all' || filterPriority !== 'all'
-                  ? 'Try adjusting your filters or search query.'
-                  : 'Run company research and use “Save to Research” to keep the report here for future reference.'}
-              </p>
-              <button
-                onClick={() => navigate('/')}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Start Research
-              </button>
-            </div>
-          ) : selectedResearch ? (
-            <div className="max-w-5xl mx-auto px-6 py-8">
-              <button
-                onClick={() => setSelectedResearch(null)}
-                className="mb-6 text-blue-600 hover:text-blue-700 font-medium flex items-center gap-2"
-              >
-                ← Back to list
-              </button>
-              <ResearchOutput
-                research={selectedResearch}
-                onExportPDF={() => handleExportPDF(selectedResearch)}
-                onExportCSV={() => handleExportCSV(selectedResearch)}
-              />
-            </div>
-          ) : (
-            <div className="max-w-5xl mx-auto px-6 py-8">
-              <div className="flex items-center justify-between mb-4">
-                <div className="text-sm text-gray-600">
-                  Showing {pageRangeStart}-{pageRangeEnd} of {filteredResearch.length} reports
+          <div className="mt-6 inline-flex rounded-full border border-blue-200 bg-blue-50 p-1">
+            <button
+              type="button"
+              onClick={() => setActiveTab('tracked')}
+              className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors ${
+                activeTab === 'tracked' ? 'bg-white text-blue-700 shadow-sm' : 'text-blue-600'
+              }`}
+            >
+              Timeline by account
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('recent')}
+              className={`px-4 py-1.5 text-sm font-medium rounded-full transition-colors ${
+                activeTab === 'recent' ? 'bg-white text-blue-700 shadow-sm' : 'text-blue-600'
+              }`}
+            >
+              Recent untracked research
+            </button>
+          </div>
+        </header>
+
+        <div className="flex-1 flex overflow-hidden">
+          {activeTab === 'tracked' ? (
+            accounts.length === 0 && !loading ? (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="text-center max-w-sm">
+                  <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                    <Building2 className="w-8 h-8" />
+                  </div>
+                  <h2 className="text-lg font-semibold text-gray-900 mb-1">No tracked accounts yet</h2>
+                  <p className="text-sm text-gray-600">
+                    Track an account from the action bar after a research run and the full history will collect here automatically.
+                  </p>
                 </div>
-                {filteredResearch.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleSelectAllOnPage}
-                    className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
-                  >
-                    {isPageFullySelected ? (
-                      <CheckSquare className="w-4 h-4" />
-                    ) : (
-                      <Square className="w-4 h-4" />
-                    )}
-                    {isPageFullySelected ? 'Deselect page' : 'Select page'}
-                  </button>
-                )}
               </div>
-
-              <div className="grid grid-cols-1 gap-4">
-                {paginatedResearch.map((item) => {
-                  const isSelected = selectedIds.includes(item.id);
-                  return (
-                    <div
-                      key={item.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setSelectedResearch(item)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          setSelectedResearch(item);
-                        }
-                      }}
-                      className={`bg-white border rounded-xl p-5 transition-all text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-                        isSelected
-                          ? 'border-blue-400 ring-2 ring-blue-100'
-                          : 'border-gray-200 hover:border-blue-300 hover:shadow-md'
-                      }`}
-                      data-testid="research-history-card"
-                      data-subject={item.subject}
-                    >
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex items-start gap-3 flex-1">
+            ) : (
+              <div className="flex w-full overflow-hidden">
+                <aside className="w-80 border-r border-gray-200 bg-white overflow-y-auto">
+                  {loading && accounts.length === 0 ? (
+                    <div className="p-4 space-y-3">
+                      {[1, 2, 3].map(i => (
+                        <div key={i} className="h-16 rounded-xl bg-gray-100 animate-pulse" />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-3 space-y-2">
+                      {accounts.map(account => {
+                        const isActive = account.id === selectedAccountId;
+                        const latest = account.research_history?.[0];
+                        return (
                           <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              toggleSelection(item.id);
-                            }}
-                            aria-pressed={isSelected}
-                            aria-label={isSelected ? 'Remove from bulk selection' : 'Add to bulk selection'}
-                            className="mt-1 text-gray-500 hover:text-blue-600 transition-colors"
+                            key={account.id}
+                            onClick={() => setSelectedAccountId(account.id)}
+                            className={`w-full rounded-xl border px-3 py-3 text-left transition-all ${
+                              isActive
+                                ? 'border-blue-400 bg-blue-50 shadow-sm'
+                                : 'border-gray-200 bg-white hover:border-blue-200'
+                            }`}
                           >
-                            {isSelected ? (
-                              <CheckSquare className="w-4 h-4" />
-                            ) : (
-                              <Square className="w-4 h-4" />
-                            )}
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-semibold text-gray-900 truncate">{account.company_name}</span>
+                              {latest && (
+                                <span className="text-[11px] font-medium text-blue-700">
+                                  {formatRelativeDate(latest.created_at)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-1 flex items-center gap-2 text-xs text-gray-600">
+                              <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5">
+                                {account.priority === 'hot' ? '🔥 Hot' : account.priority === 'warm' ? '⚡ Warm' : '📍 Standard'}
+                              </span>
+                              <span>Research runs: {account.research_history?.length ?? 0}</span>
+                            </div>
                           </button>
-                          <div className="flex-1">
-                            <h3 className="text-lg font-semibold text-gray-900 mb-1">{item.subject}</h3>
-                            <p className="text-sm text-gray-600 line-clamp-2">{item.executive_summary}</p>
-                          </div>
-                        </div>
-                        {item.priority_level && (
-                          <span className={`ml-4 px-3 py-1 rounded-full text-xs font-semibold border flex-shrink-0 ${getPriorityColor(item.priority_level)}`}>
-                            {item.priority_level === 'hot'
-                              ? '🔥 HOT'
-                              : item.priority_level === 'warm'
-                                ? '⚡ WARM'
-                                : '📍 STANDARD'}
-                          </span>
-                        )}
-                      </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </aside>
 
-                      <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
-                        <div className="flex items-center gap-1">
-                          <Clock className="w-4 h-4" />
-                          {formatDate(item.created_at)}
+                <main className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+                  {selectedAccount && selectedResearch ? (
+                    <>
+                      <section className="rounded-2xl border border-gray-200 bg-white px-5 py-4">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-800">
+                            <Layers className="w-4 h-4" />
+                            {selectedAccount.company_name}
+                          </span>
+                          <span className="text-xs text-gray-500">Tracked since {formatFullDate(selectedAccount.added_at)}</span>
                         </div>
-                        {item.composite_score !== undefined && (
-                          <div className="flex items-center gap-1">
-                            <TrendingUp className="w-4 h-4" />
-                            Score: {item.composite_score}/100
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-600">
+                          {typeof selectedAccount.icp_fit_score === 'number' && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                              ICP Fit {selectedAccount.icp_fit_score}
+                            </span>
+                          )}
+                          {typeof selectedAccount.signal_score === 'number' && selectedAccount.signal_score > 0 && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                              Signal score {selectedAccount.signal_score}
+                            </span>
+                          )}
+                          {selectedAccount.last_researched_at && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                              Last researched {formatRelativeDate(selectedAccount.last_researched_at)}
+                            </span>
+                          )}
+                        </div>
+                      </section>
+
+                      <ResearchOutput
+                        research={selectedResearch}
+                        onExportPDF={() => handleExportPdf(selectedResearch)}
+                        onExportCSV={() => handleExportCsv(selectedResearch)}
+                      />
+
+                      {selectedAccount.research_history && selectedAccount.research_history.length > 1 && (
+                        <section className="rounded-2xl border border-gray-200 bg-white px-5 py-4">
+                          <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-wide">Research timeline</h3>
+                            <span className="text-xs text-gray-500">{selectedAccount.research_history.length} reports saved</span>
                           </div>
-                        )}
-                        <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs capitalize">
-                          {item.research_type}
-                        </span>
+                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            {selectedAccount.research_history.map(entry => {
+                              const isCurrent = entry.id === selectedResearchId;
+                              return (
+                                <button
+                                  key={entry.id}
+                                  onClick={() => setSelectedResearchId(entry.id)}
+                                  className={`rounded-xl border px-3 py-3 text-left transition-colors ${
+                                    isCurrent
+                                      ? 'border-blue-400 bg-blue-50 shadow-sm'
+                                      : 'border-gray-200 bg-gray-50 hover:border-blue-200'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between text-xs text-gray-600">
+                                    <span>{formatFullDate(entry.created_at)}</span>
+                                    {isCurrent && <span className="font-semibold text-blue-600">Viewing</span>}
+                                  </div>
+                                  {entry.executive_summary && (
+                                    <p className="mt-1 text-sm text-gray-700 line-clamp-2">{entry.executive_summary}</p>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex h-full items-center justify-center">
+                      <div className="text-center text-sm text-gray-600">
+                        Select an account to review its research history.
                       </div>
                     </div>
-                  );
-                })}
+                  )}
+                </main>
               </div>
-
-              {totalPages > 1 && (
-                <div className="mt-6 flex items-center justify-between">
-                  <button
-                    type="button"
-                    onClick={() => goToPage(currentPage - 1)}
-                    disabled={currentPage === 1}
-                    className="inline-flex items-center gap-1 px-3 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                    Previous
-                  </button>
-                  <div className="text-sm text-gray-600">Page {currentPage} of {totalPages}</div>
-                  <button
-                    type="button"
-                    onClick={() => goToPage(currentPage + 1)}
-                    disabled={currentPage === totalPages}
-                    className="inline-flex items-center gap-1 px-3 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Next
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
+            )
+          ) : (
+            <div className="flex-1 overflow-y-auto px-6 py-6">
+              {untrackedResearch.length === 0 ? (
+                <div className="flex h-full items-center justify-center">
+                  <div className="text-center max-w-sm">
+                    <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+                      <Sparkles className="w-8 h-8" />
+                    </div>
+                    <h2 className="text-lg font-semibold text-gray-900 mb-1">No untracked research yet</h2>
+                    <p className="text-sm text-gray-600">
+                      When you run research without tracking the account, the most recent reports will appear here so nothing gets lost.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="mx-auto max-w-5xl space-y-4">
+                  {untrackedResearch.map(research => (
+                    <div key={research.id} className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900">{research.subject}</h3>
+                          <div className="text-xs text-gray-500">
+                            Saved {formatRelativeDate(research.created_at)} • {research.research_type}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openResearchInChat(research.subject)}
+                          className="inline-flex items-center gap-2 rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                        >
+                          <Clock className="w-3.5 h-3.5" />
+                          Research again
+                        </button>
+                      </div>
+                      {research.executive_summary && (
+                        <p className="mt-3 text-sm text-gray-700">{research.executive_summary}</p>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

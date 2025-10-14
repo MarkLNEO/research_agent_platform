@@ -89,7 +89,7 @@ export function MessageBubble({
     try { return stripMd(safeContent).trim().split(/\s+/).filter(Boolean).length; } catch { return 0; }
   })();
   const structured = useMemo(() => {
-    if (role !== 'assistant') return null;
+    if (role !== 'assistant' || streaming) return null;
     let remaining = safeContent.trim();
     if (!remaining) return null;
 
@@ -103,7 +103,7 @@ export function MessageBubble({
       }
     }
 
-    const tldrRegex = /##\s+TL;DR\s*([\s\S]*?)(?=\n##\s+|$)/i;
+    const tldrRegex = /##\s+(?:TL;DR|High Level Summary)\s*([\s\S]*?)(?=\n##\s+|$)/i;
     let tldrBody: string | null = null;
     const tldrMatch = tldrRegex.exec(remaining);
     if (tldrMatch) {
@@ -312,26 +312,6 @@ export function MessageBubble({
             <p className="text-xs text-gray-500 italic">{ackLine}</p>
           )}
           {renderIcpScorecard}
-          {tldrBody && (
-            <div className="bg-blue-600/10 border border-blue-400/60 rounded-2xl p-4">
-              <div className="flex items-start gap-3">
-                <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center text-lg">
-                  ⚡
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-sm font-semibold text-blue-900">TL;DR</h3>
-                    <span className="px-2 py-1 text-[11px] font-bold bg-blue-700 text-white rounded-full">
-                      Auto TL;DR
-                    </span>
-                  </div>
-                  <Streamdown className="prose prose-sm text-blue-900 max-w-none">
-                    {tldrBody}
-                  </Streamdown>
-                </div>
-              </div>
-            </div>
-          )}
           {execBody && (
             <div className="bg-gradient-to-br from-blue-50 to-purple-50 border border-blue-200 rounded-2xl p-4">
               <div className="flex items-start gap-3">
@@ -394,6 +374,26 @@ export function MessageBubble({
           )}
           {!remainingMarkdown && !execBody && effectiveContent && (
             <MarkdownContent content={effectiveContent} />
+          )}
+          {tldrBody && (
+            <div className="bg-blue-600/10 border border-blue-400/60 rounded-2xl p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center text-lg">
+                  ⚡
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-semibold text-blue-900">High Level Summary</h3>
+                    <span className="px-2 py-1 text-[11px] font-bold bg-blue-700 text-white rounded-full">
+                      Auto Summary
+                    </span>
+                  </div>
+                  <Streamdown className="prose prose-sm text-blue-900 max-w-none">
+                    {tldrBody}
+                  </Streamdown>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       ) : (

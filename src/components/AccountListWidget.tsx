@@ -90,6 +90,18 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
     standard: 'Standard',
   };
 
+  const formatRelativeDate = (value?: string | null) => {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '—';
+    const diffMs = Date.now() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays <= 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
   const getPriorityIcon = (priority: string) => {
     switch (priority) {
       case 'hot':
@@ -231,6 +243,7 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
               const isStale = account.last_researched_at
                 ? Math.floor((Date.now() - new Date(account.last_researched_at).getTime()) / (1000 * 60 * 60 * 24)) > 14
                 : true;
+              const latestResearch = account.research_history?.[0];
 
               return (
                 <button
@@ -300,6 +313,22 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
                           <div>Last research {formatRelative(account.last_researched_relative)}</div>
                         )}
                       </div>
+
+                      {latestResearch && (
+                        <div className="mt-3 bg-blue-50/70 border border-blue-100 rounded-lg px-3 py-2 text-xs text-blue-900">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold">Latest research</span>
+                            <span className="text-[11px] text-blue-700/80">
+                              {formatRelativeDate(latestResearch.created_at)}
+                            </span>
+                          </div>
+                          {latestResearch.executive_summary && (
+                            <p className="mt-1 text-blue-900/80 line-clamp-2">
+                              {latestResearch.executive_summary}
+                            </p>
+                          )}
+                        </div>
+                      )}
 
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <button

@@ -11,6 +11,19 @@ export function useKeyboardShortcuts(handlers: ShortcutMap) {
         return;
       }
 
+      if (event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+
+      try {
+        const selection = window.getSelection?.();
+        if (selection && !selection.isCollapsed) {
+          return;
+        }
+      } catch {
+        // ignore selection errors in non-DOM environments
+      }
+
       const key = event.key.toLowerCase();
       if (handlers[key]) {
         event.preventDefault();

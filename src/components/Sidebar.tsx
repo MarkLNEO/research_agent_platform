@@ -136,7 +136,7 @@ export function Sidebar({
             className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors"
           >
             <FileText className="w-4 h-4" />
-            <span className="text-sm font-medium">Research History</span>
+            <span className="text-sm font-medium">Tracked Accounts</span>
           </button>
         </div>
       )}
