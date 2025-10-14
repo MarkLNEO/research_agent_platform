@@ -280,7 +280,7 @@ export function ResearchChat() {
   const [accountStats, setAccountStats] = useState<{ total: number; hot: number; warm: number; stale: number; with_signals: number } | null>(null);
   const lastSentRef = useRef<{ text: string; at: number } | null>(null);
   const [postSummarizeNudge, setPostSummarizeNudge] = useState(false);
-  const [clarifiersLocked, setClarifiersLocked] = useState(false);
+  const [clarifiersLocked, setClarifiersLocked] = useState(true);
   const [activeSubject, setActiveSubject] = useState<string | null>(null);
   const currentActionCompany = actionBarCompany || activeSubject;
   const displayActionCompany = currentActionCompany ? formatDisplaySubject(currentActionCompany) : null;

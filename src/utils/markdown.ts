@@ -51,9 +51,10 @@ export function normalizeMarkdown(raw: string): string {
   text = renumberOrderedLists(text);
 
   const clarifierPatterns: RegExp[] = [
-    /Do you mean the company[^?]+\?[\s\S]*?(Which do you want\?|If you want research)/gi,
-    /If you want research[^\.]*\.[\s\S]*?(Which do you want\?|Example request you can copy)/gi,
-    /Pick one of these and give a date range and depth[^\.]*\.[\s\S]*?(Which do you want\?)/gi
+    /Do you mean the company[^?]+\?[\s\S]*?(Which do you want\?|If you want research|Also specify depth)/gi,
+    /If you want research[^\.]*\.[\s\S]*?(Which do you want\?|Example request you can copy|Also specify depth)/gi,
+    /Pick one of these and give a date range and depth[^\.]*\.[\s\S]*?(Which do you want\?|Also specify depth)/gi,
+    /Tell me what you want to learn and pick scope:[\s\S]*?(Also specify depth|Which do you want\?)/gi
   ];
   for (const pattern of clarifierPatterns) {
     text = text.replace(pattern, '');
