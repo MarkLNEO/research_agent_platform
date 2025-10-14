@@ -1,12 +1,13 @@
 const CLARIFIER_PATTERNS: RegExp[] = [
   /Do you mean the company[^?]+\?[\s\S]*?(Which do you want\?|If you want research|Also specify depth)/gi,
   /Do you mean the company[^?]+\?[\s\S]*?Tell me which items to research[^\n]*\n?/gi,
-  /Do you mean the company[^?]+\?[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|Retry|Agent can make mistakes|$))/gi,
-  /What specifically do you want researched[—-]?[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|Retry|Agent can make mistakes|$))/gi,
+  /Do you mean the company[^?]+\?[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|##\s+Detailed Findings|\nDetailed Findings|Detailed Findings|Retry|Agent can make mistakes|$))/gi,
+  /What specifically do you want researched[—-]?[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|##\s+Detailed Findings|\nDetailed Findings|Detailed Findings|Retry|Agent can make mistakes|$))/gi,
+  /If you want research[^\n]*\n[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|##\s+Detailed Findings|\nDetailed Findings|Detailed Findings|Retry|Agent can make mistakes|$))/gi,
   /If you want research[^\.]*\.[\s\S]*?(Which do you want\?|Example request you can copy|Also specify depth)/gi,
   /Pick one of these and give a date range and depth[^\.]*\.[\s\S]*?(Which do you want\?|Also specify depth)/gi,
   /Tell me what you want to learn and pick scope:[\s\S]*?(Also specify depth|Which do you want\?)/gi,
-  /Do you mean the company\/product[^?]+\?[\s\S]*?(?=\n##\s+Key Findings|\nKey Findings|$)/gi
+  /Do you mean the company\/product[^?]+\?[\s\S]*?(?=\n##\s+Key Findings|\nKey Findings|\nDetailed Findings|Detailed Findings|$)/gi
 ];
 
 export function stripClarifierBlocks(raw: string): string {
