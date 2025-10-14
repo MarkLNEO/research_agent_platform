@@ -1068,10 +1068,10 @@ useEffect(() => {
     setInputValue('');
     if (!currentChatId) {
       const id = await createNewChat();
-      if (id) await handleSendMessageWithChat(id, content, type);
+      if (id) await handleSendMessageWithChat(id, content, preferredResearchType || undefined);
       return;
     }
-    await handleSendMessageWithChat(currentChatId, content, type);
+    await handleSendMessageWithChat(currentChatId, content, preferredResearchType || undefined);
   };
 
   const persistPreference = async (type: 'deep' | 'quick' | 'specific') => {
