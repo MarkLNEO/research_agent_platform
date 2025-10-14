@@ -1188,6 +1188,7 @@ export function DashboardNew() {
                     content={message.content}
                     userName={getUserInitial()}
                     showActions={canInteract}
+                    agentType={selectedAgent.id}
                     onPromote={canInteract ? () => handleOpenSaveDialog(message) : undefined}
                     disablePromote={loading}
                     streaming={message.streaming}
@@ -1216,6 +1217,7 @@ export function DashboardNew() {
                     content={streamingMessage}
                     userName={getUserInitial()}
                     showActions={false}
+                    agentType={selectedAgent.id}
                   />
                 )}
 

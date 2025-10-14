@@ -2296,6 +2296,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     collapseEnabled={isLastAssistant && lastRunMode === 'quick'}
                     collapseThresholdWords={150}
                     onTrackAccount={handleTrackAccount}
+                    agentType="company_research"
                     onPromote={isLastAssistant ? () => {
                       // Find the user message that triggered this response
                       const userMessage = [...messages].slice(0, idx).reverse().find(msg => msg.role === 'user')?.content;
@@ -2411,13 +2412,14 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
               })()}
 
               {streamingMessage && (
-                <MessageBubble
-                  role="assistant"
-                  content={streamingMessage}
-                  userName={getUserInitial()}
-                  showActions={false}
-                  streaming
-                />
+                  <MessageBubble
+                    role="assistant"
+                    content={streamingMessage}
+                    userName={getUserInitial()}
+                    showActions={false}
+                    streaming
+                    agentType="company_research"
+                  />
               )}
 
               {/* Next Actions bar after a completed assistant turn */}

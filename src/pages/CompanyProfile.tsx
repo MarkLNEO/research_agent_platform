@@ -981,6 +981,7 @@ export function CompanyProfile() {
                     content={message.content}
                     userName={getUserInitial()}
                     showActions={message.role === 'assistant' && index === messages.length - 1 && !streamingMessage}
+                    agentType="company_profiler"
                   />
                 ))}
 
@@ -990,6 +991,7 @@ export function CompanyProfile() {
                     content={streamingMessage}
                     userName={getUserInitial()}
                     showActions={false}
+                    agentType="company_profiler"
                   />
                 )}
 
