@@ -1265,8 +1265,9 @@ useEffect(() => {
 
       history.push({ role: 'user', content: enrichedMessage });
 
-      const { data: { session } } = await supabase.auth.getSession();
+      let { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('No session');
+      let authToken = session.access_token;
 
       // Feature flag for safe API migration
       // Set VITE_USE_VERCEL_API=true in .env to use Vercel API instead of Edge Functions
@@ -1295,32 +1296,49 @@ useEffect(() => {
       const controller = new AbortController();
       streamingAbortRef.current = controller;
 
-      const response = await fetch(chatUrl, {
+      const requestPayload = JSON.stringify({
+        messages: history,
+        stream: true,
+        chatId: chatId ?? currentChatId,
+        config: {
+          ...cfg,
+          template: selectedTemplate ? {
+            id: selectedTemplateId,
+            version: selectedTemplate.version,
+            sections: (selectedTemplate.sections || []).map(s => ({ id: s.id, label: s.label, required: Boolean((s as any).required) })),
+            inputs: templateInputs || {},
+            guardrail_profile_id: selectedGuardrailProfile?.id,
+            signal_set_id: selectedSignalSet?.id,
+          } : undefined
+        },
+        research_type: depth,
+        active_subject: activeSubject || null
+      });
+
+      const makeRequest = (token: string) => fetch(chatUrl, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          messages: history,
-          stream: true,
-          chatId: chatId ?? currentChatId,
-          config: {
-            ...cfg,
-            template: selectedTemplate ? {
-              id: selectedTemplateId,
-              version: selectedTemplate.version,
-              sections: (selectedTemplate.sections || []).map(s => ({ id: s.id, label: s.label, required: Boolean((s as any).required) })),
-              inputs: templateInputs || {},
-              guardrail_profile_id: selectedGuardrailProfile?.id,
-              signal_set_id: selectedSignalSet?.id,
-            } : undefined
-          },
-          research_type: depth,
-          active_subject: activeSubject || null
-        }),
+        body: requestPayload,
         signal: controller.signal,
       });
+
+      let response = await makeRequest(authToken);
+
+      if (response.status === 401) {
+        try {
+          const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+          if (!refreshError && refreshed?.session?.access_token) {
+            session = refreshed.session;
+            authToken = refreshed.session.access_token;
+            response = await makeRequest(authToken);
+          }
+        } catch (refreshErr) {
+          console.warn('Token refresh failed', refreshErr);
+        }
+      }
       console.log('[DEBUG] Response status:', response.status, response.statusText);
       if (!response.ok) {
         try {
@@ -1355,7 +1373,7 @@ useEffect(() => {
           const retry = await fetch(chatUrl, {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${session.access_token}`,
+              'Authorization': `Bearer ${authToken}`,
               'Content-Type': 'application/json',
               'apikey': `${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
             },
@@ -1666,7 +1684,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
   const handleEmailDraftFromLast = useCallback(async (markdownOverride?: string, companyOverride?: string | null) => {
     if (draftEmailPending) return;
     try {
-      const researchMarkdown = markdownOverride ?? [...messages].reverse().find(m => m.role === 'assistant')?.content;
+      const researchMarkdown = markdownOverride ?? lastAssistantMessage?.content;
       if (!researchMarkdown) {
         addToast({ type: 'error', title: 'No content to draft', description: 'Run research before drafting an email.' });
         return;
@@ -1701,7 +1719,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
     } finally {
       setDraftEmailPending(false);
     }
-  }, [draftEmailPending, messages, supabase, activeSubject, addToast]);
+  }, [draftEmailPending, lastAssistantMessage, supabase, activeSubject, addToast]);
 
   const handleNextAction = async (action: string) => {
     if (!currentChatId) return;
@@ -2581,6 +2599,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
             disabled={loading}
             isStreaming={Boolean(streamingMessage)}
             onStop={handleStopStreaming}
+            onAttach={() => setCSVUploadOpen(true)}
             // Use a single clear CTA above for bulk research; keep Settings action to open dialog if needed
             onSettings={() => setBulkResearchOpen(true)}
             selectedAgent="Company Researcher"

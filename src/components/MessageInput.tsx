@@ -20,6 +20,8 @@ interface MessageInputProps {
   focusSignal?: number;
 }
 
+const MAX_TEXTAREA_HEIGHT = 200;
+
 export function MessageInput({
   value,
   onChange,
@@ -54,8 +56,11 @@ export function MessageInput({
 
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+      const el = textareaRef.current;
+      el.style.height = 'auto';
+      const newHeight = Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT);
+      el.style.height = `${newHeight}px`;
+      el.style.overflowY = el.scrollHeight > MAX_TEXTAREA_HEIGHT ? 'auto' : 'hidden';
     }
   }, [value]);
 
@@ -89,7 +94,7 @@ export function MessageInput({
         disabled={disabled}
         rows={1}
         className="w-full resize-none border-none outline-none text-gray-900 placeholder-gray-400 text-sm"
-        style={{ minHeight: '24px', maxHeight: '200px', overflow: 'hidden' }}
+        style={{ minHeight: '24px', maxHeight: '200px', overflowY: 'hidden', overflowX: 'hidden' }}
         aria-label={placeholder || 'Message agent'}
       />
 
