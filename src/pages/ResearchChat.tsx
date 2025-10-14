@@ -522,6 +522,12 @@ export function ResearchChat() {
     return normalizedDraft;
   }, [findLatestResearchAssistant, messages, thinkingEvents, chats, currentChatId, activeSubject]);
 
+  // Helper: get latest research assistant message id (skip Draft Email)
+  const getLatestResearchMessageId = useCallback((): string | null => {
+    const latest = findLatestResearchAssistant();
+    return latest?.message?.id ?? null;
+  }, [findLatestResearchAssistant]);
+
   useEffect(() => {
     if (user) void loadChats();
   }, [user]);
@@ -2426,6 +2432,10 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
               )}
               {messages.map((m, idx) => {
                 const isLastAssistant = m.role === 'assistant' && idx === messages.length - 1 && !streamingMessage;
+                const summarizeReady = (() => {
+                  const rid = getLatestResearchMessageId();
+                  return !!(rid && summaryCache[rid]);
+                })();
                 return (
                   <MessageBubble
                     key={m.id}
@@ -2437,6 +2447,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     collapseThresholdWords={150}
                     onTrackAccount={handleTrackAccount}
                     agentType="company_research"
+                    summarizeReady={isLastAssistant ? summarizeReady : false}
                     onPromote={isLastAssistant ? () => {
                       // Build draft using the latest research message (skip any later email drafts)
                       const research = (() => {

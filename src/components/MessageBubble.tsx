@@ -21,6 +21,7 @@ interface MessageBubbleProps {
   collapseEnabled?: boolean;
   collapseThresholdWords?: number;
   agentType?: string;
+  summarizeReady?: boolean;
 }
 
 function MarkdownContent({ content }: { content: string }) {
@@ -64,6 +65,7 @@ export function MessageBubble({
   collapseEnabled = false,
   collapseThresholdWords = 150,
   agentType = 'company_research',
+  summarizeReady = false,
 }: MessageBubbleProps) {
   const { addToast } = useToast();
   const [expanded, setExpanded] = useState(false);
@@ -530,6 +532,11 @@ export function MessageBubble({
             >
               Summarize
             </button>
+          )}
+          {onSummarize && summarizeReady && (
+            <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+              Ready
+            </span>
           )}
           {onTrackAccount && companyName && (
             <button
