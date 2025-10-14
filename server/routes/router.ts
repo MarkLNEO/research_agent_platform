@@ -6,6 +6,7 @@ import triggerSignals from './signals/trigger-detection.ts';
 import extractSignals from './signals/extract.ts';
 import bulk from './research/bulk.ts';
 import bulkRunner from './research/bulk-runner.ts';
+import bulkCancel from './research/cancel.ts';
 import evaluateResearch from './research/evaluate.ts';
 import approvalsNotify from './approvals/notify.ts';
 import approvalsConfirm from './approvals/confirm.ts';
@@ -48,6 +49,8 @@ export const routeDefinitions: RouteDefinition[] = [
   { method: 'options', path: '/research/bulk', handler: bulk },
   { method: 'post', path: '/research/bulk-runner', handler: bulkRunner },
   { method: 'options', path: '/research/bulk-runner', handler: bulkRunner },
+  { method: 'post', path: '/research/bulk-cancel', handler: bulkCancel },
+  { method: 'options', path: '/research/bulk-cancel', handler: bulkCancel },
   { method: 'post', path: '/research/evaluate', handler: evaluateResearch },
   { method: 'options', path: '/research/evaluate', handler: evaluateResearch },
 

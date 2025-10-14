@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Clock, CheckCircle, AlertCircle, Download } from 'lucide-react';
+import { Clock, CheckCircle, AlertCircle, Download, Square } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useToast } from './ToastProvider';
 
@@ -87,11 +87,19 @@ export function BulkResearchStatus({ onJobComplete }: BulkResearchStatusProps) {
         if (prev.length > 0) {
           const newlyCompleted = nextJobs.filter(job => job.status === 'completed' && !prev.find(prevJob => prevJob.id === job.id && prevJob.status === 'completed'));
           newlyCompleted.forEach(job => {
+            const jobElementId = `bulk-job-${job.id}`;
             addToast({
               type: 'success',
               title: 'Bulk research complete',
-              description: `Research finished for ${job.total_count} companies. Check your results below.`,
-            });
+              description: `Finished ${job.total_count} companies.`,
+              actionText: 'View results',
+              onAction: () => {
+                try {
+                  const el = document.getElementById(jobElementId);
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                } catch {}
+              }
+            } as any);
             if (onJobComplete) {
               onJobComplete(job.id);
             }
@@ -196,6 +204,27 @@ export function BulkResearchStatus({ onJobComplete }: BulkResearchStatusProps) {
     a.click();
     window.URL.revokeObjectURL(url);
   };
+  
+  const stopJob = async (job: BulkResearchJob) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const resp = await fetch('/api/research/bulk-cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ job_id: job.id })
+      });
+      if (!resp.ok) {
+        const msg = await resp.text();
+        addToast({ type: 'error', title: 'Failed to stop job', description: msg.slice(0, 200) });
+      } else {
+        addToast({ type: 'success', title: 'Job stopped', description: 'Bulk research was cancelled.' });
+        void loadJobs();
+      }
+    } catch (e: any) {
+      addToast({ type: 'error', title: 'Failed to stop job', description: e?.message || String(e) });
+    }
+  };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -261,6 +290,7 @@ export function BulkResearchStatus({ onJobComplete }: BulkResearchStatusProps) {
         {jobs.map((job) => (
           <div
             key={job.id}
+            id={`bulk-job-${job.id}`}
             className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
           >
             <div className="flex items-center justify-between">
@@ -287,6 +317,15 @@ export function BulkResearchStatus({ onJobComplete }: BulkResearchStatusProps) {
                     <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></div>
                     {Math.round((job.completed_count / job.total_count) * 100)}%
                   </div>
+                )}
+                {(job.status === 'running' || job.status === 'pending') && (
+                  <button
+                    onClick={() => void stopJob(job)}
+                    className="flex items-center gap-1 px-3 py-1 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
+                    title="Stop this bulk job"
+                  >
+                    <Square size={14} /> Stop
+                  </button>
                 )}
                 
                 {job.status === 'completed' && job.results && (
