@@ -2,6 +2,27 @@ import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import { buildSystemPrompt } from '../_lib/systemPrompt.js';
 import { assertEmailAllowed } from '../_lib/access.js';
+const NON_RESEARCH_TERMS = new Set([
+    'hi',
+    'hello',
+    'hey',
+    'thanks',
+    'thank you',
+    'agenda',
+    'notes',
+    'help',
+    'update',
+    'updates',
+    'plan',
+    'planning',
+    'what',
+    'who',
+    'why',
+    'how',
+    'where',
+    'when',
+    'test'
+]);
 // Helper function to estimate tokens
 function estimateTokens(text = '') {
     return Math.ceil((text || '').length / 4);
@@ -106,7 +127,19 @@ function classifyResearchIntent(raw) {
     const hasVerb = RESEARCH_VERBS.test(text);
     const companyLike = /\b[A-Z][\w&]+(?:\s+[A-Z][\w&]+){0,3}\b/.test(text) && COMPANY_INDICATORS.test(text);
     const allPhrase = ALL_SYNONYMS.test(text);
-    return hasVerb || companyLike || allPhrase;
+    if (hasVerb || companyLike || allPhrase)
+        return true;
+    const extracted = extractCompanyName(text);
+    if (extracted) {
+        if (NON_RESEARCH_TERMS.has(text.toLowerCase())) {
+            return false;
+        }
+        const wordCount = text.split(/\s+/).filter(Boolean).length;
+        if (wordCount > 0 && wordCount <= 4) {
+            return true;
+        }
+    }
+    return false;
 }
 function summarizeContextForPlan(userContext) {
     if (!userContext)
@@ -239,9 +272,17 @@ export default async function handler(req, res) {
             if (lastUserMessage) {
                 // Intent classification: decide whether to perform research or just reply briefly
                 const _text = String(lastUserMessage.content || '').trim();
-                const _isResearchQuery = classifyResearchIntent(_text);
+                let _isResearchQuery = classifyResearchIntent(_text);
+                if (!_isResearchQuery && research_type) {
+                    _isResearchQuery = true;
+                }
+                console.log('[DEBUG] Research classification', {
+                    raw: _text,
+                    classified: _isResearchQuery,
+                    research_type
+                });
                 req.__isResearchQuery = _isResearchQuery;
-                if (_isResearchQuery) {
+                if (_isResearchQuery || research_type) {
                     // Build explicit research task input
                     // Include brief recent context (last 4 messages) so we don't lose company URL or scope already provided
                     const recent = (messages || []).slice(-4).map(m => {
@@ -323,8 +364,9 @@ export default async function handler(req, res) {
         try {
             // Add more detailed debugging
             console.log('[DEBUG] System instructions length:', instructions?.length || 0);
-            console.log('[DEBUG] First 500 chars of instructions:', instructions?.substring(0, 500));
-            console.log('[DEBUG] Input:', input);
+            console.log('[DEBUG] System instructions full text:\n', instructions);
+            console.log('[DEBUG] Input full text:\n', input);
+            console.log('[DEBUG] ENABLE_PROMPT_DEBUG resolved to:', process.env.ENABLE_PROMPT_DEBUG);
             const requestText = lastUserMessage?.content || '';
             const isResearchQuery = research_type ? true : !!req.__isResearchQuery;
             const defaultModel = (() => {
@@ -503,6 +545,14 @@ export default async function handler(req, res) {
             };
             scheduleKeepAlive();
             console.log('[DEBUG] Starting to process stream...');
+            if (process.env.ENABLE_PROMPT_DEBUG === 'true') {
+                try {
+                    safeWrite(`data: ${JSON.stringify({ type: 'debug_prompt', instructions, input })}\n\n`);
+                }
+                catch (debugErr) {
+                    console.warn('Failed to emit prompt debug event', debugErr);
+                }
+            }
             // Process the stream
             for await (const chunk of stream) {
                 chunkCount++;
