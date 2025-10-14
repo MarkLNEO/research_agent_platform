@@ -341,6 +341,14 @@ export function CompanyProfile() {
     return null;
   };
 
+  const summarizeMissingForCoach = (profile: any) => {
+    const missing: string[] = [];
+    if (!profile?.target_titles || (profile.target_titles || []).length === 0) missing.push('target_titles');
+    if (customCriteriaCount < 3) missing.push('custom_criteria');
+    if (signalPreferencesCount < 2) missing.push('signal_preferences');
+    return missing;
+  };
+
   const sendInitialGreeting = async (hasExistingProfile: boolean, profile: any, chatId: string) => {
     setLoading(true);
     // Show immediate acknowledgment so the UI isn't blank
@@ -359,9 +367,23 @@ export function CompanyProfile() {
       if (profile.icp_definition) profileSummary.push(`ICP: ${profile.icp_definition.slice(0, 100)}...`);
       if (profile.target_titles?.length) profileSummary.push(`Target Titles: ${profile.target_titles.slice(0, 3).join(', ')}`);
 
-      systemPrompt = `The user ${userName} already has a company profile with the following details:\n${profileSummary.join('\n')}\n\nGreet them warmly, acknowledge their existing profile, and offer to help them review, update, or refine any aspect of it. Be conversational and helpful. Mention 1-2 specific things from their profile to show you're aware of it.`;
+      const missing = summarizeMissingForCoach(profile);
+      const needs = missing.length
+        ? `Missing prioritized fields: ${missing.join(', ')}.`
+        : 'All critical fields appear present.';
+      const guidance = missing.length ? `
+Coach flow requirements:
+- Guide the user to complete missing items in this order: target_titles -> custom_criteria -> signal_preferences.
+- Ask one concise question at a time; propose examples.
+- When the user provides values, emit a JSON block so the app can persist it. Example JSON:
+{ "action": "save_profile", "profile": { "target_titles": ["VP Security", "CISO"] }, "custom_criteria": [ {"field_name":"Has CISO","importance":"critical"} ], "signal_preferences": [ {"signal_type":"security_breach","importance":"critical"} ] }
+- After saving, briefly confirm and move to the next missing item automatically.
+- If nothing is missing, offer two actionable improvements (e.g., refine ICP or add competitors).
+` : '';
+
+      systemPrompt = `The user ${userName} already has a company profile with the following details:\n${profileSummary.join('\n')}\n\n${needs}\n${guidance}\nGreet them warmly, then begin.`;
     } else {
-      systemPrompt = `Greet the user ${userName} warmly and help them get started with creating their company profile. Explain briefly how having a detailed profile will help with research quality, then ask them to start by sharing their company name and industry.`;
+      systemPrompt = `Greet the user ${userName} warmly and help them get started with creating their company profile. Explain briefly how a detailed profile improves research quality. Start by asking for company name and industry, then guide them through target_titles, custom_criteria (3+ items), and signal_preferences (2+ items) using the same JSON \"save_profile\" format described earlier. Keep each question short and proceed step-by-step.`;
     }
 
     try {
