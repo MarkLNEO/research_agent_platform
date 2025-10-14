@@ -370,9 +370,15 @@ export default async function handler(req: any, res: any) {
         // Intent classification: decide whether to perform research or just reply briefly
         const _text = String(lastUserMessage.content || '').trim();
         let _isResearchQuery = classifyResearchIntent(_text);
-        if (!_isResearchQuery && activeContextCompany) {
+        if (!_isResearchQuery && (research_type || activeContextCompany)) {
           _isResearchQuery = true;
         }
+        console.log('[DEBUG] Research classification', {
+          raw: _text,
+          classified: _isResearchQuery,
+          research_type,
+          activeContextCompany
+        });
         req.__isResearchQuery = _isResearchQuery;
 
         effectiveRequest = lastUserMessage.content || '';
@@ -391,7 +397,7 @@ export default async function handler(req: any, res: any) {
           }
         }
 
-        if (_isResearchQuery) {
+        if (_isResearchQuery || research_type) {
           // Build explicit research task input and include brief recent context
           const recent = (messages || []).slice(-4).map((m: any) => {
             const role = m.role === 'user' ? 'User' : (m.role === 'assistant' ? 'Assistant' : 'System');
