@@ -305,6 +305,25 @@ export function ResearchChat() {
   const [showInlineReasoning, setShowInlineReasoning] = useState<boolean>(() => {
     try { return localStorage.getItem('showInlineReasoning') !== '0'; } catch { return true; }
   });
+  // Fast mode toggle: prioritizes speed via concise outputs and minimal reasoning
+  const [fastMode, setFastMode] = useState<boolean>(() => {
+    try {
+      const v = localStorage.getItem('fastMode');
+      if (v === '1') return true;
+      if (v === '0') return false;
+      // Default ON for users asking for faster responses
+      return true;
+    } catch { return true; }
+  });
+  const persistFastMode = (v: boolean) => {
+    setFastMode(v);
+    try { localStorage.setItem('fastMode', v ? '1' : '0'); } catch {}
+    // When fast mode is enabled, hide inline reasoning to reduce UI noise
+    if (v) {
+      try { localStorage.setItem('showInlineReasoning', '0'); } catch {}
+      setShowInlineReasoning(false);
+    }
+  };
   const persistInlineReasoning = (v: boolean) => {
     setShowInlineReasoning(v);
     try { localStorage.setItem('showInlineReasoning', v ? '1' : '0'); } catch {}
@@ -322,6 +341,8 @@ export function ResearchChat() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastUsage, setLastUsage] = useState<{ tokens: number; credits: number } | null>(null);
   const [draftEmailPending, setDraftEmailPending] = useState(false);
+  // Cache for background-generated summaries keyed by assistant message id
+  const [summaryCache, setSummaryCache] = useState<Record<string, string>>({});
   const [csvUploadOpen, setCSVUploadOpen] = useState(false);
   const [bulkResearchOpen, setBulkResearchOpen] = useState(false);
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
@@ -1136,6 +1157,59 @@ useEffect(() => {
       setThinkingEvents([]);
       lastResearchSummaryRef.current = summarizeForMemory(assistant);
 
+      // Background: precompute a concise summary for instant access on click
+      try {
+        const msgId = (savedAssistant as any)?.id as string | undefined;
+        if (msgId && assistant && assistant.trim().length > 0) {
+          (async () => {
+            try {
+              const { data: { session } } = await supabase.auth.getSession();
+              const token = session?.access_token;
+              const chatUrl = '/api/ai/chat';
+              const payload = {
+                messages: [
+                  { role: 'user', content: 'Summarize the previous research for executive consumption.' }
+                ],
+                stream: true,
+                chatId,
+                config: { summarize_source: assistant }
+              } as any;
+              const resp = await fetch(chatUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                body: JSON.stringify(payload)
+              });
+              if (!resp.ok || !resp.body) return;
+              const reader = resp.body.getReader();
+              const decoder = new TextDecoder();
+              let buffer = '';
+              let summary = '';
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                for (const line of lines) {
+                  if (!line.startsWith('data: ')) continue;
+                  const data = line.slice(6).trim();
+                  if (!data || data === '[DONE]') continue;
+                  try {
+                    const evt = JSON.parse(data);
+                    if (evt.type === 'content' && typeof evt.content === 'string') {
+                      summary += evt.content;
+                    }
+                  } catch {}
+                }
+              }
+              if (summary && summary.trim().length > 0) {
+                setSummaryCache(prev => ({ ...prev, [msgId]: normalizeMarkdown(summary) }));
+              }
+            } catch {}
+          })();
+        }
+      } catch {}
+
       if (assistant?.trim()) {
         const assistantCandidate = extractCompanyNameFromQuery(assistant);
         const nextCompany = isLikelySubject(detectedCompany)
@@ -1397,6 +1471,13 @@ useEffect(() => {
       if (depth === 'specific') cfg.model = 'gpt-5-mini';
       cfg.clarifiers_locked = clarifiersLocked;
       cfg.facet_budget = depth === 'quick' ? 3 : depth === 'deep' ? 10 : 6;
+      // Fast mode hints to server for lower verbosity/reasoning and shorter summaries
+      if (fastMode) {
+        cfg.fast_mode = true;
+        cfg.summary_brevity = 'short';
+        // Lock clarifiers to avoid back-and-forth and save time
+        cfg.clarifiers_locked = true;
+      }
 
       // Setup abort controller for Stop action
       const controller = new AbortController();
@@ -2068,7 +2149,18 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                 Bulk Research
               </button>
             </div>
-            <div className="relative">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => persistFastMode(!fastMode)}
+                className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${fastMode ? 'bg-yellow-50 border-yellow-200 text-yellow-800 hover:bg-yellow-100' : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100'}`}
+                aria-pressed={fastMode}
+                title="Fast mode: shorter outputs, minimal reasoning"
+                data-testid="fast-mode-toggle"
+              >
+                <span className="mr-1">⚡</span>
+                <span className="font-medium">{fastMode ? 'Fast' : 'Standard'}</span>
+              </button>
+              <div className="relative">
               <button
                 onClick={() => setAgentMenuOpen(prev => !prev)}
                 className="flex items-center gap-2 text-sm text-gray-700 px-3 py-1.5 bg-gray-50 rounded-lg hover:bg-gray-100"
@@ -2088,6 +2180,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                   </button>
                 </div>
               )}
+              </div>
             </div>
           </div>
         </div>
@@ -2366,7 +2459,27 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     onSummarize={isLastAssistant ? async () => {
                       setPostSummarizeNudge(false);
                       try {
-                        await startSummarize(currentChatId!, m.content);
+                        const cached = summaryCache[m.id];
+                        if (cached) {
+                          // Insert cached summary instantly
+                          let savedAssistant: Message | null = null;
+                          if (currentChatId) {
+                            try {
+                              const { data } = await supabase
+                                .from('messages')
+                                .insert({ chat_id: currentChatId, role: 'assistant', content: cached })
+                                .select()
+                                .single();
+                              if (data) savedAssistant = data;
+                            } catch {}
+                          }
+                          if (!savedAssistant) {
+                            savedAssistant = { id: `summary-${Date.now()}`, role: 'assistant', content: cached, created_at: new Date().toISOString() } as Message;
+                          }
+                          setMessages(prev => [...prev, savedAssistant!]);
+                        } else {
+                          await startSummarize(currentChatId!, m.content);
+                        }
                         void sendPreferenceSignal('length', { kind: 'categorical', choice: 'brief' }, { weight: 1.5 });
                         setPostSummarizeNudge(true);
                       } catch (e: any) {

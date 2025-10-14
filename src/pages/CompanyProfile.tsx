@@ -389,7 +389,7 @@ Coach flow requirements:
 
     try {
       let fullResponse = await streamAIResponse(systemPrompt, chatId, true);
-      fullResponse = normalizeMarkdown(fullResponse);
+      fullResponse = normalizeMarkdown(fullResponse, { enforceResearchSections: false });
 
       // Persist streamed message after completion
       const { data: savedAssistantMsg } = await supabase
@@ -455,7 +455,7 @@ Coach flow requirements:
         .single();
 
       let fullResponse = await streamAIResponse(userMessage);
-      fullResponse = normalizeMarkdown(fullResponse);
+      fullResponse = normalizeMarkdown(fullResponse, { enforceResearchSections: false });
 
       // Check if response contains profile save command
       await processSaveCommands(fullResponse);

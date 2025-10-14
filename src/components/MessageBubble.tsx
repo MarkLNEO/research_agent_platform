@@ -71,6 +71,9 @@ export function MessageBubble({
   const isCompanyResearch = agentType === 'company_research';
   const icpMeta = useMemo(() => {
     if (!isCompanyResearch || role !== 'assistant' || streaming) return null;
+    // Do not show ICP scorecard for draft email content
+    const isDraftEmail = /^\s*##\s*Draft Email\b/i.test(safeContent);
+    if (isDraftEmail) return null;
     try {
       return deriveIcpMeta(safeContent);
     } catch {
@@ -92,6 +95,8 @@ export function MessageBubble({
   })();
   const structured = useMemo(() => {
     if (!isCompanyResearch || role !== 'assistant' || streaming) return null;
+    // Skip research-specific layout for draft emails
+    if (/^\s*##\s*Draft Email\b/i.test(safeContent)) return null;
     let remaining = safeContent.trim();
     if (!remaining) return null;
 
