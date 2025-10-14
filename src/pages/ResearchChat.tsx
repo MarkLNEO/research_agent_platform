@@ -355,6 +355,9 @@ export function ResearchChat() {
   const [greetingOpeningLine, setGreetingOpeningLine] = useState<string | null>(null);
   const [greetingSpotlights, setGreetingSpotlights] = useState<Array<{ icon: string; label: string; detail: string; prompt: string; tone?: 'critical' | 'info' | 'success' }>>([]);
   const [serverSuggestions, setServerSuggestions] = useState<string[]>([]);
+  // Global compact indicator for bulk research progress
+  const [bulkProgress, setBulkProgress] = useState<{ running: boolean; pct: number; label: string } | null>(null);
+  const bulkStatusRef = useRef<HTMLDivElement>(null);
   const [accountStats, setAccountStats] = useState<AccountStats | null>(null);
   const lastSentRef = useRef<{ text: string; at: number } | null>(null);
   const [postSummarizeNudge, setPostSummarizeNudge] = useState(false);
@@ -678,6 +681,45 @@ useEffect(() => {
       }
     };
     void load();
+  }, []);
+
+  // Poll compact bulk progress in the background; decoupled from status component
+  useEffect(() => {
+    let timer: any;
+    const poll = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+        const { data, error } = await supabase
+          .from('bulk_research_jobs')
+          .select('status, completed_count, total_count')
+          .eq('user_id', session.user.id)
+          .in('status', ['pending','running'] as any)
+          .order('created_at', { ascending: false });
+        if (error) return;
+        const jobs = data || [];
+        if (jobs.length === 0) {
+          setBulkProgress(null);
+          return;
+        }
+        const totals = jobs.reduce((acc, j: any) => {
+          acc.completed += Number(j.completed_count || 0);
+          acc.total += Number(j.total_count || 0);
+          return acc;
+        }, { completed: 0, total: 0 });
+        const pct = totals.total > 0 ? Math.min(100, Math.round((totals.completed / totals.total) * 100)) : 0;
+        setBulkProgress({ running: true, pct, label: `${pct}%` });
+      } catch {}
+    };
+    const start = () => {
+      void poll();
+      timer = setInterval(poll, 5000);
+    };
+    const stop = () => { if (timer) clearInterval(timer); timer = null; };
+    start();
+    const onStarted = () => { void poll(); };
+    window.addEventListener('bulk-research:job-started', onStarted as any);
+    return () => { stop(); window.removeEventListener('bulk-research:job-started', onStarted as any); };
   }, []);
 
   useEffect(() => {
@@ -2168,6 +2210,16 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
               </button>
             </div>
             <div className="flex items-center gap-3">
+              {bulkProgress?.running && (
+                <button
+                  onClick={() => { try { bulkStatusRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {} }}
+                  className="hidden md:flex items-center gap-2 text-sm px-3 py-1.5 rounded-full border border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100"
+                  title="Bulk research in progress"
+                >
+                  <span className="inline-flex w-2 h-2 bg-blue-600 rounded-full animate-pulse" />
+                  <span>Bulk Research {bulkProgress.label}</span>
+                </button>
+              )}
               <button
                 onClick={() => persistFastMode(!fastMode)}
                 className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${fastMode ? 'bg-yellow-50 border-yellow-200 text-yellow-800 hover:bg-yellow-100' : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100'}`}
@@ -2406,6 +2458,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
               </div>
               
               {/* Bulk Research Status */}
+              <div ref={bulkStatusRef} />
               <BulkResearchStatus />
               
               {/* Clarification panel */}
