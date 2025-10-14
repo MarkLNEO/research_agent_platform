@@ -27,7 +27,7 @@ import { useResearchEngine } from '../contexts/ResearchEngineContext';
 
 const ALL_REFINE_FACETS = ['leadership', 'funding', 'tech stack', 'news', 'competitors', 'hiring'] as const;
 
-type ResearchAction = 'new' | 'continue' | 'refine';
+type ResearchAction = 'new' | 'continue' | 'email' | 'refine';
 
 type Suggestion = {
   icon: string;
@@ -298,7 +298,7 @@ export function ResearchChat() {
   const [accountStats, setAccountStats] = useState<AccountStats | null>(null);
   const lastSentRef = useRef<{ text: string; at: number } | null>(null);
   const [postSummarizeNudge, setPostSummarizeNudge] = useState(false);
-  const [clarifiersLocked, setClarifiersLocked] = useState(true);
+  const [clarifiersLocked, setClarifiersLocked] = useState(false);
   const [activeSubject, setActiveSubject] = useState<string | null>(null);
   const currentActionCompany = actionBarCompany || activeSubject;
   const displayActionCompany = currentActionCompany ? formatDisplaySubject(currentActionCompany) : null;
@@ -416,6 +416,7 @@ export function ResearchChat() {
     return -1;
   }, [messages]);
   const lastAssistantMessage = lastAssistantIndex >= 0 ? messages[lastAssistantIndex] : null;
+  const canDraftEmail = !!lastAssistantMessage && !draftEmailPending && !streamingMessage;
   const chatPaddingClass = actionBarVisible && !streamingMessage ? 'pb-32 md:pb-40' : '';
 
   useEffect(() => {
@@ -1637,13 +1638,16 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
       case 'continue':
         await handleContinueCompany();
         return;
+      case 'email':
+        await handleEmailDraftFromLast();
+        return;
       case 'refine':
         setShowRefine(true);
         return;
       default:
         return;
     }
-  }, [handleStartNewCompany, handleContinueCompany, setShowRefine]);
+  }, [handleStartNewCompany, handleContinueCompany, handleEmailDraftFromLast]);
 
   const shortcutHandlers = useMemo<Record<string, () => void>>(() => {
     const handlers: Record<string, () => void> = {};
@@ -1652,9 +1656,10 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
     }
     handlers.n = () => { void handleActionBarAction('new'); };
     handlers.c = () => { void handleActionBarAction('continue'); };
+    if (canDraftEmail) handlers.e = () => { void handleActionBarAction('email'); };
     handlers.r = () => { void handleActionBarAction('refine'); };
     return handlers;
-  }, [actionBarVisible, streamingMessage, handleActionBarAction]);
+  }, [actionBarVisible, streamingMessage, handleActionBarAction, canDraftEmail]);
 
   useKeyboardShortcuts(shortcutHandlers);
 
@@ -2208,6 +2213,8 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                       <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">N</kbd> new •{' '}
                       <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">C</kbd>{' '}
                       refresh •{' '}
+                      <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">E</kbd>{' '}
+                      email •{' '}
                       <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">R</kbd> refine
                     </div>
                   </div>
@@ -2230,6 +2237,17 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                       ↺ {refreshLabel}
                     </button>
                     <button
+                      className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 transition-colors ${
+                        canDraftEmail
+                          ? 'bg-rose-500 text-white hover:bg-rose-600 focus:ring-rose-400'
+                          : 'bg-gray-300 text-gray-600 cursor-not-allowed focus:ring-gray-300'
+                      }`}
+                      onClick={() => { void handleActionBarAction('email'); }}
+                      disabled={!canDraftEmail}
+                    >
+                      ✉️ Draft email
+                    </button>
+                    <button
                       className="inline-flex items-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-400"
                       onClick={() => { void handleActionBarAction('refine'); }}
                     >
@@ -2237,7 +2255,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     </button>
                   </div>
                   <div className="mt-3 text-xs text-gray-500 sm:hidden">
-                    Shortcuts: N new • C refresh • R refine
+                    Shortcuts: N new • C refresh • E email • R refine
                   </div>
                   <label className="mt-3 inline-flex items-center gap-2 text-xs text-gray-600">
                     <input
