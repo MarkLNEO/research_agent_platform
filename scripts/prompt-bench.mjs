@@ -46,7 +46,7 @@ Use clear headings and lists; cite sources when used.
 
 async function judgeOutput({ prompt, output, rubrics }) {
   const stream = await openai.responses.stream({
-    model: 'gpt-5',
+    model: 'gpt-5-mini',
     input: [
       { role: 'system', content: [{ type: 'input_text', text: 'You are a strict rubric-based evaluator. Respond with a single JSON object only.' }] },
       { role: 'user', content: [
@@ -76,7 +76,7 @@ async function judgeOutput({ prompt, output, rubrics }) {
 async function runScenario({ userContext, query }) {
   const sys = buildSystemPrompt(userContext)
   const stream = await openai.responses.stream({
-    model: 'gpt-5',
+    model: 'gpt-5-mini',
     input: [
       { role: 'system', content: [{ type: 'input_text', text: sys }] },
       { role: 'user', content: [{ type: 'input_text', text: query }] }

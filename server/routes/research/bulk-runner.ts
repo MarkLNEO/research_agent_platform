@@ -119,11 +119,11 @@ async function runCompanyResearch(company: string, depth: 'quick'|'deep', key: s
   const input = `Research ${company}. Focus: ${focus}. Return an executive summary first, then bullet sections.`;
 
   const body = {
-    model: depth === 'deep' ? 'gpt-5' : 'gpt-5-mini',
+    model: 'gpt-5-mini',
     instructions,
     input,
     tools: [{ type: 'web_search' }],
-    text: { format: { type: 'text' }, verbosity: depth === 'deep' ? 'medium' : 'low' },
+    text: { format: { type: 'text' }, verbosity: 'low' },
     stream: false,
     store: false,
   } as any;

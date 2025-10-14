@@ -275,7 +275,7 @@ async function* streamDescribe(filePath, promptOverride) {
   const { greetingRubric, deepResearchRubric } = loadAgentsCriteria();
   const promptText = promptOverride || defaultDescribePrompt(greetingRubric, deepResearchRubric);
   const stream = await openai.responses.stream({
-    model: 'gpt-5',
+    model: 'gpt-5-mini',
     input: [
       {
         role: 'user',
@@ -297,7 +297,7 @@ async function* streamDescribe(filePath, promptOverride) {
 async function jsonScore(filePath, greetingRubric, deepResearchRubric) {
   const b64 = fs.readFileSync(filePath).toString('base64')
   const stream = await openai.responses.stream({
-    model: 'gpt-5',
+    model: 'gpt-5-mini',
     input: [
       {
         role: 'user',
