@@ -1,13 +1,16 @@
 const CLARIFIER_PATTERNS: RegExp[] = [
-  /Do you mean the company[^?]+\?[\s\S]*?(Which do you want\?|If you want research|Also specify depth)/gi,
-  /Do you mean the company[^?]+\?[\s\S]*?Tell me which items to research[^\n]*\n?/gi,
-  /Do you mean the company[^?]+\?[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|##\s+Detailed Findings|\nDetailed Findings|Detailed Findings|Retry|Agent can make mistakes|$))/gi,
+  /Do you mean[^?]+\?[\s\S]*?(Which do you want\?|Which scope|If you want research|What exactly do you want|Do you want researched|Also specify depth)/gi,
+  /Do you mean[^?]+\?[\s\S]*?Tell me which items to research[^\n]*\n?/gi,
+  /Do you mean[^?]+\?[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|##\s+Detailed Findings|\nDetailed Findings|Detailed Findings|Retry|Agent can make mistakes|$))/gi,
   /What specifically do you want researched[—-]?[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|##\s+Detailed Findings|\nDetailed Findings|Detailed Findings|Retry|Agent can make mistakes|$))/gi,
+  /What exactly do you want researched[—-]?[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|##\s+Detailed Findings|\nDetailed Findings|Detailed Findings|Retry|Agent can make mistakes|$))/gi,
   /If you want research[^\n]*\n[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|##\s+Detailed Findings|\nDetailed Findings|Detailed Findings|Retry|Agent can make mistakes|$))/gi,
   /If you want research[^\.]*\.[\s\S]*?(Which do you want\?|Example request you can copy|Also specify depth)/gi,
   /Pick one of these and give a date range and depth[^\.]*\.[\s\S]*?(Which do you want\?|Also specify depth)/gi,
   /Tell me what you want to learn and pick scope:[\s\S]*?(Also specify depth|Which do you want\?)/gi,
-  /Do you mean the company\/product[^?]+\?[\s\S]*?(?=\n##\s+Key Findings|\nKey Findings|\nDetailed Findings|Detailed Findings|$)/gi
+  /Do you mean the company\/product[^?]+\?[\s\S]*?(?=\n##\s+Key Findings|\nKey Findings|\nDetailed Findings|Detailed Findings|$)/gi,
+  /If useful, copy[^\n]*request template[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|Detailed Findings|Retry|Agent can make mistakes|$))/gi,
+  /Which scope, time window, depth, and format do you want\?[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|Detailed Findings|Retry|Agent can make mistakes|$))/gi
 ];
 
 export function stripClarifierBlocks(raw: string): string {
@@ -15,6 +18,14 @@ export function stripClarifierBlocks(raw: string): string {
   for (const pattern of CLARIFIER_PATTERNS) {
     text = text.replace(pattern, '');
   }
+  text = text.replace(/Do you mean[\s\S]*?(?=\n##\s+|\n[A-Z][^\n]*\n|Retry|Agent can make mistakes|$)/gi, '\n');
+  text = text.replace(/If useful, copy[^\n]*request template[\s\S]*?(?=\n##\s+|\n[A-Z][^\n]*\n|Retry|Agent can make mistakes|$)/gi, '\n');
+  text = text.replace(/Which scope, time window, depth, and format do you want\?[\s\S]*?(?=\n##\s+|\n[A-Z][^\n]*\n|Retry|Agent can make mistakes|$)/gi, '\n');
+  text = text.replace(/^[ \t]*[^\n]*pick from:[^\n]*\n?/gim, '');
+  text = text.replace(/^[ \t]*"Research [^\n]+\n?/gim, '');
+  text = text.replace(/^[ \t]*Timeframe.*\n?/gim, '');
+  text = text.replace(/^[ \t]*Level of detail.*\n?/gim, '');
+  text = text.replace(/^[ \t]*Whether to perform a web search.*\n?/gim, '');
   // Normalize inline "High Level" placeholders that were streamed without headings.
   text = text.replace(/(^|\n)High Level\s+No high[- ]level summary provided yet\.?/gi, '$1## High Level\n- No high-level summary provided yet.\n');
   return text;
@@ -90,6 +101,7 @@ export function normalizeMarkdown(raw: string): string {
     { pattern: /^\s*High\s*Level:?$/gim, replacement: '## High Level' },
     { pattern: /^\s*Key facts?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Key Findings' },
     { pattern: /^\s*Key findings?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Key Findings' },
+    { pattern: /^\s*Detailed findings?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Key Findings' },
     { pattern: /^\s*Signals?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Signals' },
     { pattern: /^\s*Recommended next steps?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Recommended Next Actions' },
     { pattern: /^\s*Tech(?:\s*\/\s*footprint)?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Tech/Footprint' },
