@@ -18,6 +18,7 @@ import { fetchDashboardGreeting } from '../services/accountService';
 import { useToast } from '../components/ToastProvider';
 import { buildResearchDraft } from '../utils/researchOutput';
 import type { ResearchDraft } from '../utils/researchOutput';
+import { normalizeMarkdown, stripClarifierBlocks } from '../utils/markdown';
 import type { TrackedAccount } from '../services/accountService';
 import { useUserProfile } from '../hooks/useUserProfile';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
@@ -862,12 +863,7 @@ useEffect(() => {
         .single();
 
       let assistant = await streamAIResponse(text, chatId, { overrideDepth: runModeOverride });
-
-      // Normalize markdown for numbering and headings
-      try {
-        const { normalizeMarkdown } = await import('../utils/markdown');
-        assistant = normalizeMarkdown(assistant);
-      } catch {}
+      assistant = normalizeMarkdown(assistant);
 
       // Persist any save_profile commands returned by the agent
       await processSaveCommands(assistant);
@@ -1304,7 +1300,8 @@ useEffect(() => {
         return parts.join('\n\n').trim();
       };
       const updateStreaming = () => {
-        setStreamingMessage(composeOutput());
+        const composed = composeOutput();
+        setStreamingMessage(stripClarifierBlocks(composed));
       };
 
       if (reader) {
