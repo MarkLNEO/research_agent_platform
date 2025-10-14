@@ -84,6 +84,13 @@ const CLARIFIER_GUARDRAILS = `Clarifier Guardrails:
 - If context is missing, assume enterprise AE defaults and proceed; document any assumption under "## Risks & Gaps" instead of stalling.
 - If web results are sparse, synthesize insights from available context and identify next investigative steps—do not return empty sections.`;
 
+const DELIVERY_FORCE_GUIDANCE = `Delivery Guardrails:
+- Produce an Executive Summary that states a headline insight, ICP fit rationale, and next-step recommendation—do not leave it blank.
+- In "## Key Findings" list at least five evidence-backed bullets covering signals, risks, opportunities, decision makers, or tech footprint; if data is thin, add investigative next steps with proposed sources.
+- Populate "## Signals" and "## Recommended Next Actions" with either live intelligence or the top follow-up moves; never reply "None found" without offering a concrete investigative action.
+- If you encounter blockers (e.g., paywalled data), note them in "## Risks & Gaps" with guidance on how to unblock.
+- Cite at least three sources (URLs or publications with dates). If external search fails, cite internal/saved context and state what you will monitor next.`;
+
 function formatSection(title: string, body: string | undefined): string | null {
   if (!body || !body.trim()) return null;
   return `${title.toUpperCase()}\n${body.trim()}`;
@@ -159,6 +166,7 @@ export function buildSystemPrompt(
     extras.push('Context fallback: Assume enterprise AE defaults and explicitly offer at the end to tailor format for next time (e.g., "Want a sharper summary next briefing?").');
   }
   extras.push(CLARIFIER_GUARDRAILS);
+  extras.push(DELIVERY_FORCE_GUIDANCE);
   const followups = Array.isArray(userContext.promptConfig?.default_followup_questions)
     ? userContext.promptConfig?.default_followup_questions.filter((q: any) => typeof q === 'string' && q.trim().length > 0)
     : [];
