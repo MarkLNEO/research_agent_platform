@@ -146,9 +146,12 @@ export function buildSystemPrompt(
 
   const contextBlock = contextSections.length > 0
     ? `CONTEXT\n${contextSections.join('\n\n')}`
-    : 'CONTEXT\nNo saved profile yet. Proceed using sensible defaults and the user\'s latest request—do NOT ask clarifying questions.';
+    : 'CONTEXT\nNo stored profile yet. Assume enterprise AE defaults (15 strategic accounts, deep discovery focus). Proceed without re-asking; note any inferred preferences for future briefs.';
 
   const extras = [] as string[];
+  if (contextSections.length === 0) {
+    extras.push('Context fallback: Assume enterprise AE defaults and explicitly offer at the end to tailor format for next time (e.g., "Want a sharper summary next briefing?").');
+  }
   const followups = Array.isArray(userContext.promptConfig?.default_followup_questions)
     ? userContext.promptConfig?.default_followup_questions.filter((q: any) => typeof q === 'string' && q.trim().length > 0)
     : [];
