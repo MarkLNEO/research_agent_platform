@@ -151,8 +151,12 @@ const normalizeLinesToSentences = (text: string): string => {
     .split(/\n+/)
     .map(line => line.trim())
     .filter(Boolean)
+    // Strip common list markers
     .map(line => line.replace(/^[-*•\u2022]+\s*/, ''))
     .map(line => line.replace(/^\d+[\.)]\s*/, ''))
+    // Strip markdown heading and blockquote markers at line start so they don't leak into sentences
+    .map(line => line.replace(/^#{1,6}\s*/, ''))
+    .map(line => line.replace(/^>+\s*/, ''))
     .map(line => (/[.!?]$/.test(line) ? line : `${line}.`))
     .join(' ');
 };
