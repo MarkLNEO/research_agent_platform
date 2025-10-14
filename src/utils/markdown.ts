@@ -34,6 +34,24 @@ export function stripClarifierBlocks(raw: string): string {
 export function normalizeMarkdown(raw: string): string {
   let text = stripClarifierBlocks(raw || '');
 
+  // Convert plain-text bullets (• or –) to markdown dashes when used as list items
+  // Skip code fences
+  (() => {
+    const lines = text.split('\n');
+    let inCode = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (/^```/.test(line.trim())) {
+        inCode = !inCode; continue;
+      }
+      if (inCode) continue;
+      if (/^\s*[•\u2022\-\u2013]\s+/.test(line)) {
+        lines[i] = line.replace(/^\s*[•\u2022\-\u2013]\s+/, '- ');
+      }
+    }
+    text = lines.join('\n');
+  })();
+
   // Renumber ordered lists correctly without clobbering existing numbering.
   // - Works across multiple lists
   // - Preserves indentation and delimiter ("." or ")")

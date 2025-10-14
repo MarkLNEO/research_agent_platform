@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { Sidebar } from '../components/Sidebar';
 import { useToast } from '../components/ToastProvider';
 import { MessageBubble } from '../components/MessageBubble';
+import { normalizeMarkdown } from '../utils/markdown';
 import { MessageInput } from '../components/MessageInput';
 import { ProfileCompleteness } from '../components/ProfileCompleteness';
 import { ThinkingIndicator } from '../components/ThinkingIndicator';
@@ -387,7 +388,8 @@ Coach flow requirements:
     }
 
     try {
-      const fullResponse = await streamAIResponse(systemPrompt, chatId, true);
+      let fullResponse = await streamAIResponse(systemPrompt, chatId, true);
+      fullResponse = normalizeMarkdown(fullResponse);
 
       // Persist streamed message after completion
       const { data: savedAssistantMsg } = await supabase
@@ -452,7 +454,8 @@ Coach flow requirements:
         .select()
         .single();
 
-      const fullResponse = await streamAIResponse(userMessage);
+      let fullResponse = await streamAIResponse(userMessage);
+      fullResponse = normalizeMarkdown(fullResponse);
 
       // Check if response contains profile save command
       await processSaveCommands(fullResponse);
