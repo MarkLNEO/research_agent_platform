@@ -102,6 +102,7 @@ export function CSVUploadDialog({ isOpen, onClose, onSuccess }: CSVUploadDialogP
       // Kick off refresh for newly added accounts and alert when completed
       try {
         addToast({ type: 'info', title: 'Starting research', description: 'Refreshing newly added accounts…' });
+        try { window.dispatchEvent(new CustomEvent('bulk-research:job-started')); } catch {}
         const { data: { session } } = await supabase.auth.getSession();
         const authHeader = session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {} as any;
         const refreshRes = await fetch(`/api/accounts/refresh`, {

@@ -2622,7 +2622,8 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                       <button className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded-lg" onClick={async () => {
                         setShowRefine(false);
                         const target = activeSubject ? `Research ${activeSubject}` : 'Continue research';
-                        const cmd = `${target}. Focus on ${refineFacets.join(', ') || 'top facets'} within ${refineTimeframe}.`;
+                        const facets = refineFacets.join(', ') || 'leadership, funding, tech stack, news, competitors, hiring';
+                        const cmd = `${target}. Focus on ${facets} within ${refineTimeframe}. Use web_search for recency. Do not return placeholders or 'None found' — if data is thin, synthesize from available context and add investigative next steps with at least 3 sources. Keep sections and provide an Executive Summary upfront.`;
                         if (!currentChatId) {
                           const id = await createNewChat();
                           if (id) await handleSendMessageWithChat(id, cmd);
@@ -2761,7 +2762,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
             onChange={setInputValue}
             onSend={handleSendMessage}
             disabled={loading}
-            isStreaming={Boolean(streamingMessage)}
+            isStreaming={loading}
             onStop={handleStopStreaming}
             onAttach={() => setCSVUploadOpen(true)}
             // Use a single clear CTA above for bulk research; keep Settings action to open dialog if needed
