@@ -479,11 +479,23 @@ export function ResearchChat() {
   const canDraftEmail = !!lastAssistantMessage && !draftEmailPending && !streamingMessage;
   const chatPaddingClass = actionBarVisible && !streamingMessage ? 'pb-32 md:pb-40' : '';
 
+  // Find the most recent assistant message that looks like research (not a draft email)
+  const findLatestResearchAssistant = useCallback((): { index: number; message: Message } | null => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m?.role !== 'assistant') continue;
+      const text = (m.content || '').trim();
+      if (/^##\s*Draft Email\b/i.test(text)) continue; // skip email drafts
+      return { index: i, message: m };
+    }
+    return null;
+  }, [messages]);
+
   const buildDraftFromLastAssistant = useCallback((): ResearchDraft | null => {
-    if (lastAssistantIndex < 0) return null;
-    const assistantMsg = messages[lastAssistantIndex];
-    if (!assistantMsg) return null;
-    const userMessage = [...messages].slice(0, lastAssistantIndex).reverse().find(msg => msg.role === 'user')?.content;
+    const latest = findLatestResearchAssistant();
+    if (!latest) return null;
+    const assistantMsg = latest.message;
+    const userMessage = [...messages].slice(0, latest.index).reverse().find(msg => msg.role === 'user')?.content;
     const sources = thinkingEvents
       .filter(ev => ev.type === 'web_search' && ev.query && ev.sources)
       .map(ev => ({ query: ev.query, sources: ev.sources })) as any[];
@@ -508,7 +520,7 @@ export function ResearchChat() {
     })();
 
     return normalizedDraft;
-  }, [lastAssistantIndex, messages, thinkingEvents, chats, currentChatId, activeSubject]);
+  }, [findLatestResearchAssistant, messages, thinkingEvents, chats, currentChatId, activeSubject]);
 
   useEffect(() => {
     if (user) void loadChats();
@@ -2426,41 +2438,63 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     onTrackAccount={handleTrackAccount}
                     agentType="company_research"
                     onPromote={isLastAssistant ? () => {
-                      // Find the user message that triggered this response
-                      const userMessage = [...messages].slice(0, idx).reverse().find(msg => msg.role === 'user')?.content;
-
-                      // Get any web search events from the thinking stream
-                      const sources = thinkingEvents
-                        .filter(ev => ev.type === 'web_search' && ev.query && ev.sources)
-                        .map(ev => ({ query: ev.query, sources: ev.sources })) as any[];
-
-                      const draft = buildResearchDraft({
-                        assistantMessage: m.content,
-                        userMessage,
-                        chatTitle: chats.find(c => c.id === currentChatId)?.title,
-                        agentType: 'company_research',
-                        sources,
-                        activeSubject,
-                      });
-
-                      const normalizedDraft = (() => {
-                        const active = activeSubject?.trim();
-                        if (!active) return draft;
-                        const current = (draft.subject || '').trim();
-                        if (current && current.toLowerCase() === active.toLowerCase()) {
+                      // Build draft using the latest research message (skip any later email drafts)
+                      const research = (() => {
+                        for (let j = messages.length - 1; j >= 0; j--) {
+                          const mm = messages[j];
+                          if (mm?.role !== 'assistant') continue;
+                          const text = (mm.content || '').trim();
+                          if (/^##\s*Draft Email\b/i.test(text)) continue;
+                          const userMsg = [...messages].slice(0, j).reverse().find(msg => msg.role === 'user')?.content;
+                          const sources = thinkingEvents
+                            .filter(ev => ev.type === 'web_search' && ev.query && ev.sources)
+                            .map(ev => ({ query: ev.query, sources: ev.sources })) as any[];
+                          const draft = buildResearchDraft({
+                            assistantMessage: mm.content,
+                            userMessage: userMsg,
+                            chatTitle: chats.find(c => c.id === currentChatId)?.title,
+                            agentType: 'company_research',
+                            sources,
+                            activeSubject,
+                          });
                           return draft;
                         }
-                        return { ...draft, subject: active };
+                        return null;
                       })();
 
-                      setSaveDraft(normalizedDraft);
-                      setSaveOpen(true);
+                      const normalizedDraft = (() => {
+                        if (!research) return null;
+                        const active = activeSubject?.trim();
+                        if (!active) return research;
+                        const current = (research.subject || '').trim();
+                        if (current && current.toLowerCase() === active.toLowerCase()) {
+                          return research;
+                        }
+                        return { ...research, subject: active };
+                      })();
+
+                      if (normalizedDraft) {
+                        setSaveDraft(normalizedDraft);
+                        setSaveOpen(true);
+                      } else {
+                        addToast({ type: 'error', title: 'Nothing to save', description: 'No recent research found to save.' });
+                      }
                     } : undefined}
                     onSummarize={isLastAssistant ? async () => {
                       setPostSummarizeNudge(false);
                       try {
-                        const cached = summaryCache[m.id];
-                        if (cached) {
+                        // Summarize the latest research message (not a draft email)
+                        let targetMsg: Message | null = null;
+                        for (let j = messages.length - 1; j >= 0; j--) {
+                          const mm = messages[j];
+                          if (mm?.role !== 'assistant') continue;
+                          const text = (mm.content || '').trim();
+                          if (/^##\s*Draft Email\b/i.test(text)) continue;
+                          targetMsg = mm; break;
+                        }
+                        const targetId = targetMsg?.id || m.id;
+                        const cached = summaryCache[targetId];
+                        if (cached && currentChatId) {
                           // Insert cached summary instantly
                           let savedAssistant: Message | null = null;
                           if (currentChatId) {
@@ -2478,7 +2512,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                           }
                           setMessages(prev => [...prev, savedAssistant!]);
                         } else {
-                          await startSummarize(currentChatId!, m.content);
+                          await startSummarize(currentChatId!, (targetMsg?.content || m.content));
                         }
                         void sendPreferenceSignal('length', { kind: 'categorical', choice: 'brief' }, { weight: 1.5 });
                         setPostSummarizeNudge(true);
