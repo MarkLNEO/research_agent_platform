@@ -618,7 +618,7 @@ export default async function handler(req: any, res: any) {
 
       let planPromise: Promise<void> | null = null;
       if (shouldPlanStream && lastUserMessage?.content) {
-        const planInstructions = `You are the fast planning cortex for a research assistant.\n- Start with a single standalone acknowledgement sentence that confirms you are beginning now, states the research mode (deep/quick/specific/auto), mentions the **research subject** from the input, and gives a realistic ETA (deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈1-2 min).\n- Immediately follow with 2-3 markdown bullet steps (prefix each with "- ") describing the investigative actions you will take.\n- Keep bullets under 12 words, action-oriented, and reference saved preferences when they change sequencing.\n- When referencing the company you are researching, always use the "Research subject" field from the input (never the profile context labels).\n- Do not ask the user questions or request clarifications; assume sensible defaults.\n- Do not add closing statements or extra blank lines.`;
+        const planInstructions = `You are the fast planning cortex for a research assistant.\n- Start with a single standalone acknowledgement sentence that confirms you are beginning now, states the research mode (deep/quick/specific/auto), mentions the **research subject** from the input, and gives a realistic ETA (deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈2 min).\n- Immediately follow with 2-3 markdown bullet steps (prefix each with "- ") describing the investigative actions you will take.\n- Keep bullets under 12 words, action-oriented, and reference saved preferences when they change sequencing.\n- When referencing the company you are researching, always use the "Research subject" field from the input (never the profile context labels).\n- Do not ask the user questions or request clarifications; assume sensible defaults.\n- Do not add closing statements or extra blank lines.`;
         const contextSummary = summarizeContextForPlan(userContext).slice(0, 600);
         const detectedCompanyRaw = extractCompanyName(lastUserMessage.content);
         const fallbackCompany = typeof activeContextCompany === 'string' ? activeContextCompany.trim() : '';
@@ -634,7 +634,7 @@ export default async function handler(req: any, res: any) {
           : isLikelySubject(fallbackCompany)
             ? fallbackCompany
             : '';
-        const planInput = `Research mode: ${research_type || (isResearchQuery ? 'auto' : 'general')}\nResearch subject: ${detectedCompany || 'Not specified'}\nUser request: ${effectiveRequest}\nETA guide: deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈90 sec.\nSaved profile context (do not confuse with research subject):\n${contextSummary || 'No saved profile context yet.'}`;
+        const planInput = `Research mode: ${research_type || (isResearchQuery ? 'auto' : 'general')}\nResearch subject: ${detectedCompany || 'Not specified'}\nUser request: ${effectiveRequest}\nETA guide: deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈2 min.\nSaved profile context (do not confuse with research subject):\n${contextSummary || 'No saved profile context yet.'}`;
 
         planPromise = (async () => {
           try {

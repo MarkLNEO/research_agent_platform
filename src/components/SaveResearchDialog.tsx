@@ -70,11 +70,7 @@ export function SaveResearchDialog({
       nextErrors.subject = 'Subject should be at least 3 characters.';
     }
 
-    if (!candidate.executive_summary?.trim()) {
-      nextErrors.executive_summary = 'Provide a short executive summary.';
-    } else if (candidate.executive_summary.trim().length < 40) {
-      nextErrors.executive_summary = 'Summaries under 40 characters rarely capture the insight—add more detail.';
-    }
+    // Executive summary is optional in this view
 
     const markdown = candidate.markdown_report?.trim() || '';
     if (!markdown) {
@@ -374,19 +370,7 @@ export function SaveResearchDialog({
               </div>
             )}
 
-            <p className="text-xs text-gray-600">This summary is what teammates will skim first—highlight the why and next step.</p>
-
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Executive Summary</label>
-              <textarea
-                value={draft.executive_summary}
-                onChange={(event) => updateField('executive_summary', event.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px]"
-              />
-              {validationErrors.executive_summary && (
-                <p className="text-xs text-red-600">{validationErrors.executive_summary}</p>
-              )}
-            </div>
+            {/* Executive summary intentionally omitted in this save flow */}
 
             <div className="border border-gray-200 rounded-xl overflow-hidden">
               <button

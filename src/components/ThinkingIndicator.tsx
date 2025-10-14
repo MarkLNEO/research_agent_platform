@@ -39,7 +39,7 @@ const truncateLine = (text: string, max = 90) => {
 function PlanningIndicator({ content }: { content?: string }) {
   const [elapsed, setElapsed] = useState(0);
   // Conservative ETA for deep/auto; quick usually completes before 30s.
-  const ESTIMATE_SECONDS = 90;
+  const ESTIMATE_SECONDS = 120;
 
   useEffect(() => {
     const id = setInterval(() => setElapsed((e) => e + 1), 1000);
