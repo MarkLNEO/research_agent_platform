@@ -31,7 +31,7 @@ function formatSourceTitle(url: string): string {
   return parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
 }
 
-function ReasoningProgressIndicator({ content }: { content?: string }) {
+function PlanningIndicator({ content }: { content?: string }) {
   const [elapsed, setElapsed] = useState(0);
   // Conservative ETA for deep/auto; quick usually completes before 30s.
   const ESTIMATE_SECONDS = 90;
@@ -47,10 +47,15 @@ function ReasoningProgressIndicator({ content }: { content?: string }) {
   return (
     <div className="flex gap-3 items-start mb-4 animate-fadeIn">
       <div className="px-4 py-3 bg-gradient-to-r from-purple-50 to-purple-100 border border-purple-200 rounded-xl text-sm shadow-sm min-w-[260px]">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 text-purple-900 text-xs font-semibold uppercase tracking-wide">
           <Loader2 className="w-4 h-4 text-purple-600 animate-spin" />
-          <span className="text-purple-900 text-xs font-medium truncate">{content || 'Thinking...'}</span>
+          <span>Planning</span>
         </div>
+        {content && (
+          <p className="mt-2 text-purple-800 text-xs leading-relaxed line-clamp-3">
+            {content}
+          </p>
+        )}
         <div className="mt-2">
           <div className="flex items-center justify-between text-[10px] text-purple-800 mb-1">
             <span>⏱ {format(elapsed)} / ~{format(ESTIMATE_SECONDS)}</span>
@@ -66,7 +71,7 @@ function ReasoningProgressIndicator({ content }: { content?: string }) {
 }
 
 export function ThinkingIndicator({ type, content, query, sources, url, count, companies, company: previewCompany, icp, critical, important }: ThinkingIndicatorProps) {
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
   const toggle = () => { setIsExpanded(v => !v); };
 
   if (type === 'context_preview') {
@@ -111,19 +116,12 @@ export function ThinkingIndicator({ type, content, query, sources, url, count, c
   }
 
   if (type === 'reasoning') {
-    // Coerce plain reasoning lines into bullets if not already formatted
-    let display = content || '';
-    if (display) {
-      const lines = display.split(/\n+/).map(l => l.trim()).filter(Boolean);
-      if (lines.length > 1) {
-        const needsBullets = lines.every(line => !line.startsWith('- '));
-        if (needsBullets) {
-          display = lines.map(l => `- ${l}`).join('\n');
-        } else {
-          display = lines.join('\n');
-        }
-      }
-    }
+    const rawLines = (content || '').split(/\n+/).map(line => line.trim()).filter(Boolean);
+    const cleanedLines = rawLines.map(line => (line.startsWith('- ') ? line.slice(2) : line));
+    const latest = cleanedLines[cleanedLines.length - 1] || '';
+    const hasMultiple = cleanedLines.length > 1;
+    const normalizedChecklist = rawLines.length ? rawLines.map(line => (line.startsWith('- ') ? line : `- ${line}`)).join('\n') : '';
+
     return (
       <div className="flex gap-3 items-start mb-4 animate-fadeIn">
         <div className="flex flex-col gap-2 px-4 py-3 bg-gradient-to-br from-indigo-50 via-blue-50 to-purple-50 border border-blue-200/50 rounded-2xl text-sm shadow-lg shadow-blue-100/20 backdrop-blur-sm max-w-full">
@@ -141,20 +139,25 @@ export function ThinkingIndicator({ type, content, query, sources, url, count, c
                 </div>
               </div>
             </div>
-            {content && (
+            {hasMultiple && (
               <button
                 onClick={toggle}
                 className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 text-xs font-medium transition-colors px-2 py-1 rounded-lg hover:bg-white/50"
               >
                 {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                {isExpanded ? 'Hide' : 'View'} reasoning
+                {isExpanded ? 'Hide full reasoning' : 'View full reasoning'}
               </button>
             )}
           </div>
-          {display && isExpanded && (
+          {!isExpanded && latest && (
+            <div className="pl-8 pr-2 text-xs text-indigo-900 leading-relaxed">
+              • {latest}
+            </div>
+          )}
+          {isExpanded && normalizedChecklist && (
             <div className="pl-8 pr-2">
               <Streamdown className="text-gray-700 text-xs leading-relaxed bg-white/60 p-3 rounded-xl border border-gray-100/50 prose prose-sm max-w-none">
-                {display}
+                {normalizedChecklist}
               </Streamdown>
             </div>
           )}
@@ -169,7 +172,7 @@ export function ThinkingIndicator({ type, content, query, sources, url, count, c
   }
 
   if (type === 'reasoning_progress') {
-    return <ReasoningProgressIndicator content={content} />;
+    return <PlanningIndicator content={content} />;
   }
 
   if (type === 'acknowledgment') {

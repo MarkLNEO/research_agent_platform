@@ -58,6 +58,15 @@ const QUICK_OUTPUT = `Quick Facts format (strict):
 - Do not add additional headings, tables, or filler.
 - Cite sources in parentheses when helpful (e.g., "(WSJ, Sep 2025)").`;
 
+const SPECIFIC_OUTPUT = `Specific Answer format (strict):
+- Start with the acknowledgement line, then answer the user’s question directly in ≤ 120 words.
+- Follow with exactly two sections:
+  ## Key Facts
+  - 3–5 evidence-backed bullets that justify the answer
+  ## Proactive Follow-ups
+  - 2 tailored suggestions grounded in the findings (one must offer proactive help such as drafting outreach)
+- Do not add other sections. Cite sources inline in parentheses when useful.`;
+
 const DEFAULT_CRITERIA_GUIDANCE = `Default Qualifying Criteria (assume when none supplied):
 1. Recent security or operational incidents (breach, ransomware, downtime).
 2. Leadership moves in CIO/CISO/CTO functions.
@@ -65,9 +74,16 @@ const DEFAULT_CRITERIA_GUIDANCE = `Default Qualifying Criteria (assume when none
 4. Cloud/Zero Trust adoption progress.
 Evaluate each explicitly and state status (Met / Not met / Unknown) in a "Custom Criteria" subsection or within Key Findings. Do not ask the user to confirm these defaults; infer from context.`;
 
-const IMMEDIATE_ACK_GUIDANCE = `Immediate acknowledgement:
-- As soon as you begin responding, send a warm, human acknowledgement line that confirms you are on it, states the inferred research mode (deep / quick / specific), and gives a realistic ETA (e.g., "On it — deep dive (~2 min).").
+const buildImmediateAckGuidance = (mode: ResearchMode) => {
+  const descriptor = mode === 'quick'
+    ? 'quick scan (~30 sec)'
+    : mode === 'specific'
+      ? 'specific insight (~20 sec)'
+      : 'deep dive (~2 min)';
+  return `Immediate acknowledgement:
+- As soon as you begin responding, send a warm, human acknowledgement line that confirms you are on it, states the inferred research mode (${descriptor}), and gives a realistic ETA.
 - Keep it informal but professional (think trusted teammate).`;
+};
 
 const PROACTIVE_FOLLOW_UP_GUIDANCE = `Proactive Follow-up Requirements:
 - After the "## Sources" section, include "## Proactive Follow-ups" with exactly three bullet points.
@@ -77,6 +93,11 @@ const PROACTIVE_FOLLOW_UP_GUIDANCE = `Proactive Follow-up Requirements:
 - One bullet must suggest saving a new preference for future briefings (e.g., "Want me to track supply-chain incidents by default going forward?").
 - Phrase bullets as offers starting with a verb (Draft, Monitor, Compare, Capture, etc.).
 - End the final bullet with a direct yes/no invitation (e.g., "Start a draft email to Dana Deasy?").`;
+
+const SPECIFIC_FOLLOW_UP_GUIDANCE = `Proactive Follow-up Requirements (specific mode):
+- After your concise answer, include "## Proactive Follow-ups" with exactly two bullets.
+- Keep the tone warm, collaborative, and action-oriented—each bullet should sound like a helpful teammate taking initiative.
+- At least one bullet must explicitly offer hands-on help (e.g., drafting outreach, prepping a quick brief, monitoring for updates) and end with a yes/no invitation.`;
 
 const CLARIFIER_GUARDRAILS = `Clarifier Guardrails:
 - Never ask the user to choose research scope, topics, formats, or time ranges unless they explicitly asked you to present options.
@@ -209,9 +230,11 @@ export function buildSystemPrompt(
     extras.push('The user already chose their summary length preference. Do not re-ask; just use the saved default unless they change it.');
   }
 
-  extras.push(DEFAULT_CRITERIA_GUIDANCE);
-  extras.push(IMMEDIATE_ACK_GUIDANCE);
-  extras.push(PROACTIVE_FOLLOW_UP_GUIDANCE);
+  if (resolvedMode === 'deep') {
+    extras.push(DEFAULT_CRITERIA_GUIDANCE);
+  }
+  extras.push(buildImmediateAckGuidance(resolvedMode));
+  extras.push(resolvedMode === 'specific' ? SPECIFIC_FOLLOW_UP_GUIDANCE : PROACTIVE_FOLLOW_UP_GUIDANCE);
   if (followups.length) {
     extras.push(`Saved follow-up questions:
 ${followups.map((q: string, idx: number) => `${idx + 1}. ${q}`).join('\n')}
@@ -224,7 +247,9 @@ const clarificationPolicy = `Clarification & Defaults:\n- Do not present fill-in
 
   const responseShape = resolvedMode === 'quick'
     ? `Response Shape:\n- Keep outputs concise and decision-ready; prefer bullets.\n- ${QUICK_OUTPUT}`
-    : `Response Shape:\n- Keep outputs concise and decision-ready; prefer bullets and short sections.\n- ${STRUCTURED_OUTPUT}`;
+    : resolvedMode === 'specific'
+      ? `Response Shape:\n- Keep outputs concise and answer-led.\n- ${SPECIFIC_OUTPUT}`
+      : `Response Shape:\n- Keep outputs concise and decision-ready; prefer bullets and short sections.\n- ${STRUCTURED_OUTPUT}`;
 
   return [header, behaviour, clarificationPolicy, responseShape, contextBlock, extraBlock, summaryPreferenceTag].filter(Boolean).join('\n\n');
 }

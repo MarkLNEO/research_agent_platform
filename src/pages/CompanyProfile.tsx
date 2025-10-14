@@ -194,7 +194,7 @@ export function CompanyProfile() {
         .eq('user_id', user.id),
       supabase
         .from('user_prompt_config')
-        .select('preferred_research_type, default_output_brevity, always_tldr')
+        .select('preferred_research_type, default_output_brevity, default_tone, always_tldr')
         .eq('user_id', user.id)
         .maybeSingle()
     ]);

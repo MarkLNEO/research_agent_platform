@@ -97,7 +97,7 @@ export function normalizeMarkdown(raw: string): string {
   const headingMap: Array<{ pattern: RegExp; replacement: string }> = [
     { pattern: /^\s*Executive summary(?:\s*\(.*?\))?\s*$/gim, replacement: '## Executive Summary' },
     { pattern: /^\s*Executive Summary(?:\s*\(.*?\))?\s*$/gim, replacement: '## Executive Summary' },
-    { pattern: /^\s*TL;?\s*DR\.?\s*$/gim, replacement: '## High Level' },
+    { pattern: /^\s*TL;?\s*DR\.?\s*$/gim, replacement: '## TL;DR' },
     { pattern: /^\s*High\s*Level:?$/gim, replacement: '## High Level' },
     { pattern: /^\s*Key facts?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Key Findings' },
     { pattern: /^\s*Key findings?(?:\s*\(.*?\))?\s*$/gim, replacement: '## Key Findings' },
@@ -116,6 +116,26 @@ export function normalizeMarkdown(raw: string): string {
     text = text.replace(pattern, replacement);
   }
 
+  const headingMatches = Array.from(text.matchAll(/^##\s+(.+?)\s*$/gm)).map((match) => match[1].trim());
+  const DEFAULT_SECTIONS = new Set([
+    'Executive Summary',
+    'High Level',
+    'TL;DR',
+    'Recent Signals',
+    'Key Findings',
+    'Custom Criteria',
+    'Signals',
+    'Recommended Next Actions',
+    'Tech/Footprint',
+    'Operating Footprint',
+    'Decision Makers',
+    'Risks & Gaps',
+    'Sources',
+    'Proactive Follow-ups',
+    'Saved Follow-up Answers'
+  ]);
+  const usesCustomTemplate = headingMatches.some((heading) => !DEFAULT_SECTIONS.has(heading));
+
   // Ensure a top-level headline exists; promote first Executive Summary heading to H1 if needed
   if (!/^#\s+/m.test(text)) {
     if (/^##\s+Executive Summary/m.test(text)) {
@@ -126,32 +146,35 @@ export function normalizeMarkdown(raw: string): string {
   }
 
   // Ensure High Level section exists; if missing, add placeholder after headline
-  if (!/^##\s+High Level/m.test(text)) {
+  if (!/^##\s+High Level/m.test(text) && !usesCustomTemplate) {
     text = text.replace(/^#\s.+$/m, (match) => `${match}\n\n## High Level\n- No high-level summary provided yet.\n`);
     if (!/^##\s+High Level/m.test(text)) {
       text = `${text.trim()}\n\n## High Level\n- No high-level summary provided yet.\n`;
     }
   }
 
-  // Ensure other key sections exist; append placeholders if absent
-  const requiredSections = ['Key Findings', 'Signals', 'Recommended Next Actions'];
-  for (const section of requiredSections) {
-    const heading = `## ${section}`;
-    if (!new RegExp(`^${escapeRegExp(heading)}`, 'mi').test(text)) {
-      text = `${text.trim()}\n\n${heading}\nNone found.`;
+  if (!usesCustomTemplate) {
+    // Ensure other key sections exist; append placeholders if absent
+    const requiredSections = ['Key Findings', 'Signals', 'Recommended Next Actions'];
+    for (const section of requiredSections) {
+      const heading = `## ${section}`;
+      if (!new RegExp(`^${escapeRegExp(heading)}`, 'mi').test(text)) {
+        text = `${text.trim()}\n\n${heading}\nNone found.`;
+      }
     }
-  }
 
-  // Promote common section labels to proper headings if strict headings are missing
-  const ensureHeading = (label: RegExp, heading: string) => {
-    if (!new RegExp(`^#{1,3}\\s+${heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'mi').test(text)) {
-      text = text.replace(label, `\n## ${heading}\n`);
-    }
-  };
-  ensureHeading(/^\s*summary\s*\n/mi, 'Executive Summary');
-  ensureHeading(/^\s*recent\s+signals[\s:]*\n/mi, 'Recent Signals');
-  ensureHeading(/^\s*(?:next\s+actions|recommended\s+next\s+actions)[\s:]*\n/mi, 'Recommended Next Actions');
-  ensureHeading(/^\s*(?:tech\s*\/\s*footprint|tech|footprint)[\s:]*\n/mi, 'Tech/Footprint');
+    // Promote common section labels to proper headings if strict headings are missing
+    const ensureHeading = (label: RegExp, heading: string) => {
+      const escaped = escapeRegExp(heading);
+      if (!new RegExp(`^#{1,3}\\s+${escaped}`, 'mi').test(text)) {
+        text = text.replace(label, `\n## ${heading}\n`);
+      }
+    };
+    ensureHeading(/^\s*summary\s*\n/mi, 'Executive Summary');
+    ensureHeading(/^\s*recent\s+signals[\s:]*\n/mi, 'Recent Signals');
+    ensureHeading(/^\s*(?:next\s+actions|recommended\s+next\s+actions)[\s:]*\n/mi, 'Recommended Next Actions');
+    ensureHeading(/^\s*(?:tech\s*\/\s*footprint|tech|footprint)[\s:]*\n/mi, 'Tech/Footprint');
+  }
   if (!/\n##\s+Sources\n/i.test(text) && /https?:\/\//.test(text)) {
     text += `\n\n## Sources\n` + Array.from(new Set(Array.from(text.matchAll(/https?:[^\s)\]]+/g)).map(m => m[0]))).slice(0, 8).map(u => `- ${u}`).join('\n');
   }

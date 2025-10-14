@@ -22,6 +22,7 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
     hot: 0,
     warm: 0,
     stale: 0,
+    standard: 0,
     with_signals: 0,
   });
   const { addToast } = useToast();

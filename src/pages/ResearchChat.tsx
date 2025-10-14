@@ -19,7 +19,7 @@ import { useToast } from '../components/ToastProvider';
 import { buildResearchDraft } from '../utils/researchOutput';
 import type { ResearchDraft } from '../utils/researchOutput';
 import { normalizeMarkdown, stripClarifierBlocks } from '../utils/markdown';
-import type { TrackedAccount } from '../services/accountService';
+import type { TrackedAccount, AccountStats } from '../services/accountService';
 import { useUserProfile } from '../hooks/useUserProfile';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { OptimizeICPModal } from '../components/OptimizeICPModal';
@@ -203,6 +203,19 @@ const summarizeForMemory = (markdown: string): string => {
   return markdown.split('\n').slice(0, 6).join(' ').replace(/\s+/g, ' ').trim().slice(0, 400);
 };
 
+const SIMPLE_FOLLOW_UP = /^(who|what|when|where|which|how|is|are|was|were|do|does|did|show me|give me|tell me)\b/i;
+
+function inferResearchMode(prompt: string): 'deep' | 'quick' | 'specific' {
+  const trimmed = prompt.trim();
+  if (!trimmed) return 'deep';
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  const looksLikeQuestion = trimmed.endsWith('?') || SIMPLE_FOLLOW_UP.test(trimmed);
+  if (looksLikeQuestion && words.length <= 12) {
+    return 'specific';
+  }
+  return 'deep';
+}
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -278,7 +291,7 @@ export function ResearchChat() {
   const [signalsCompanyName, setSignalsCompanyName] = useState<string | undefined>(undefined);
   const [recentSignals, setRecentSignals] = useState<AccountSignalSummary[]>([]);
   const [greeting, setGreeting] = useState<{ time_of_day: string; user_name: string } | null>(null);
-  const [accountStats, setAccountStats] = useState<{ total: number; hot: number; warm: number; stale: number; with_signals: number } | null>(null);
+  const [accountStats, setAccountStats] = useState<AccountStats | null>(null);
   const lastSentRef = useRef<{ text: string; at: number } | null>(null);
   const [postSummarizeNudge, setPostSummarizeNudge] = useState(false);
   const [clarifiersLocked, setClarifiersLocked] = useState(true);
@@ -507,7 +520,7 @@ useEffect(() => {
           const data = await fetchDashboardGreeting();
           if (data?.greeting) setGreeting(data.greeting as any);
           if (Array.isArray(data?.signals)) setRecentSignals(data.signals as any);
-          if (data?.account_stats) setAccountStats(data.account_stats as any);
+          if (data?.account_stats) setAccountStats(data.account_stats);
         } catch {
           const list = await listRecentSignals(6);
           setRecentSignals(list);
@@ -1054,20 +1067,25 @@ useEffect(() => {
     const content = inputValue.trim();
     if (!content) return;
 
-    if (!preferredResearchType && isResearchPrompt(content)) {
+    const isResearch = isResearchPrompt(content);
+    const inferredMode = isResearch ? inferResearchMode(content) : undefined;
+
+    if (!preferredResearchType && isResearch && inferredMode === 'deep') {
       setPendingQuery(content);
       setShowClarify(true);
       setInputValue('');
       return;
     }
 
+    const runMode = preferredResearchType ?? inferredMode;
+
     setInputValue('');
     if (!currentChatId) {
       const id = await createNewChat();
-      if (id) await handleSendMessageWithChat(id, content, preferredResearchType || undefined);
+      if (id) await handleSendMessageWithChat(id, content, runMode || undefined);
       return;
     }
-    await handleSendMessageWithChat(currentChatId, content, preferredResearchType || undefined);
+    await handleSendMessageWithChat(currentChatId, content, runMode || undefined);
   };
 
   const persistPreference = async (type: 'deep' | 'quick' | 'specific') => {
@@ -1268,7 +1286,7 @@ useEffect(() => {
       const markFirstDelta = () => {
         if (firstDeltaAt == null) {
           firstDeltaAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-          setThinkingEvents(prev => prev.filter(e => e.type !== 'acknowledgment' && e.type !== 'reasoning_progress' && e.type !== 'context_preview'));
+          setThinkingEvents(prev => prev.filter(e => e.type !== 'acknowledgment' && e.type !== 'context_preview'));
           try {
             window.dispatchEvent(new CustomEvent('llm:first-delta', { detail: { page: 'research', ttfbMs: firstDeltaAt - startedAt } }));
             console.log('[LLM][research] first-delta', { ttfbMs: firstDeltaAt - startedAt });
@@ -2037,54 +2055,66 @@ useEffect(() => {
               })}
 
               {thinkingEvents.length > 0 && (() => {
-                const last = thinkingEvents[thinkingEvents.length - 1];
-                const pickContent = () => {
-                  if (!last) return '';
-                  if (last.type === 'reasoning' && typeof last.content === 'string') {
-                    const lines = last.content.split(/\n+/).filter(Boolean);
-                    return lines.length ? lines[lines.length - 1] : last.content;
+                const latestPlan = [...thinkingEvents].reverse().find(ev => ev.type === 'reasoning_progress');
+                const latestReasoning = [...thinkingEvents].reverse().find(ev => ev.type === 'reasoning');
+                const reasoningLine = (() => {
+                  if (!latestReasoning || typeof latestReasoning.content !== 'string') return '';
+                  const lines = latestReasoning.content.split(/\n+/).map(line => line.trim()).filter(Boolean);
+                  return lines.length ? lines[lines.length - 1] : latestReasoning.content.trim();
+                })();
+
+                const renderReasoningSummary = () => {
+                  if (!reasoningLine) return null;
+                  if (!showInlineReasoning) {
+                    return (
+                      <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 text-xs">
+                        <div className="text-blue-900">Thinking hidden</div>
+                        <div className="flex items-center gap-3">
+                          <button className="text-blue-700 hover:text-blue-900" onClick={() => persistInlineReasoning(true)}>Show thinking</button>
+                          <button className="text-blue-700 hover:text-blue-900" onClick={() => setReasoningOpen(true)}>View all</button>
+                        </div>
+                      </div>
+                    );
                   }
-                  if (last.type === 'web_search') {
-                    return last.query || 'Searching…';
-                  }
-                  return (last as any).content || '';
-                };
-                const inlineContent = pickContent().trim();
-                if (!inlineContent) return null;
-                if (!showInlineReasoning) {
                   return (
                     <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 text-xs">
-                      <div className="text-blue-900">Thinking hidden</div>
-                      <div className="flex items-center gap-3">
-                        <button className="text-blue-700 hover:text-blue-900" onClick={() => persistInlineReasoning(true)}>Show thinking</button>
-                        <button className="text-blue-700 hover:text-blue-900" onClick={() => setReasoningOpen(true)}>View all</button>
+                      <div className="text-blue-900 truncate pr-2">
+                        <span className="font-semibold">Thinking:</span> {reasoningLine}
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => persistInlineReasoning(false)}
+                          className="text-blue-700 hover:text-blue-900"
+                          aria-label="Hide reasoning"
+                        >
+                          Hide
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setReasoningOpen(true)}
+                          className="text-blue-700 hover:text-blue-900"
+                          aria-label="View full reasoning stream"
+                        >
+                          View all
+                        </button>
                       </div>
                     </div>
                   );
-                }
+                };
+
+                if (!latestPlan && !reasoningLine) return null;
+
                 return (
-                  <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 text-xs">
-                    <div className="text-blue-900 truncate pr-2">
-                      <span className="font-semibold">Thinking:</span> {inlineContent}
-                    </div>
-                    <div className="flex items-center gap-3 flex-shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => persistInlineReasoning(false)}
-                        className="text-blue-700 hover:text-blue-900"
-                        aria-label="Hide reasoning"
-                      >
-                        Hide
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setReasoningOpen(true)}
-                        className="text-blue-700 hover:text-blue-900"
-                        aria-label="View full reasoning stream"
-                      >
-                        View all
-                      </button>
-                    </div>
+                  <div className="space-y-2">
+                    {latestPlan && (
+                      <ThinkingIndicator
+                        key={latestPlan.id}
+                        type="reasoning_progress"
+                        content={latestPlan.content}
+                      />
+                    )}
+                    {renderReasoningSummary()}
                   </div>
                 );
               })()}
