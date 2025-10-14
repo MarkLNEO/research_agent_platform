@@ -126,8 +126,47 @@ const sendPreferenceSignal = async (
   }
 };
 
+const GENERIC_HELP_PROMPTS = new Set([
+  'what can you help me with',
+  'what can you help me with?',
+  'what can you help with',
+  'what can you help with?',
+  'what do you do',
+  'what do you do?',
+  'help',
+  'help me',
+  'help me?',
+  'how can you help',
+  'how can you help?',
+]);
+
+const isGenericHelpPrompt = (text: string): boolean => GENERIC_HELP_PROMPTS.has(text.trim().toLowerCase());
+
+const getGenericHelpResponse = (): string => [
+  'Happy to help — here’s what I can do right now:',
+  '',
+  '## Research & Intelligence',
+  '- Deep-dive company research in ~2 minutes (signals, tech stack, decision makers, next actions).',
+  '- Quick fact pulls when you just need headcount, funding, or leadership highlights.',
+  '- Specific answers about tools, breaches, compliance, or timing signals.',
+  '',
+  '## Meeting Prep',
+  '- Auto-generate briefing docs for upcoming calls with talking points, objections, and follow-ups.',
+  '- Capture context from past conversations so you never start cold.',
+  '',
+  '## Account Tracking & Signals',
+  '- Monitor your strategic accounts for leadership changes, breaches, funding, procurement, and more.',
+  '- Prioritize accounts with hot signals and suggest the right outreach.',
+  '',
+  '## Actions You Can Take Now',
+  '- Ask me to “Research <Company>” for a full report.',
+  '- Say “Prep me for my call with <Company> tomorrow.”',
+  '- Drop a CSV of accounts and I’ll track and update them automatically.',
+].join('\n');
+
 const isResearchPrompt = (text: string): boolean => {
   const lower = text.toLowerCase();
+  if (isGenericHelpPrompt(lower)) return false;
   return (
     lower.startsWith('research ') ||
     lower.includes(' research ') ||
@@ -936,7 +975,8 @@ useEffect(() => {
     };
     setMessages(prev => [...prev, tempUser]);
 
-    const looksLikeResearch = isResearchPrompt(normalized);
+    const isGenericHelp = isGenericHelpPrompt(normalized);
+    const looksLikeResearch = !isGenericHelp && isResearchPrompt(normalized);
     const continuationMatch = normalized.match(/^(?:continue|resume)\s+(?:research(?:\s+on)?\s+)?(.+)/i);
     const continuationTarget = continuationMatch?.[1]?.trim() || null;
 
@@ -950,6 +990,44 @@ useEffect(() => {
     }
     if ((looksLikeResearch || continuationTarget) && isLikelySubject(detectedCompany) && detectedCompany && detectedCompany !== activeSubject) {
       lastResearchSummaryRef.current = '';
+    }
+
+    if (isGenericHelp) {
+      try {
+        const { data: savedUser } = await supabase
+          .from('messages')
+          .insert({ chat_id: chatId, role: 'user', content: normalized })
+          .select()
+          .single();
+
+        const helperMessage = getGenericHelpResponse();
+        const { data: savedAssistant } = await supabase
+          .from('messages')
+          .insert({ chat_id: chatId, role: 'assistant', content: helperMessage })
+          .select()
+          .single();
+
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.id !== tempUser.id);
+          const next: Message[] = [...filtered];
+          if (savedUser) next.push(savedUser);
+          if (savedAssistant) next.push(savedAssistant);
+          return next;
+        });
+      } catch (err) {
+        console.error('Failed to handle help prompt', err);
+        addToast({
+          type: 'error',
+          title: 'Something went wrong',
+          description: 'Try again or ask about a specific company.',
+        });
+        setMessages(prev => prev.filter(m => m.id !== tempUser.id));
+      } finally {
+        setLoading(false);
+        setStreamingMessage('');
+        setThinkingEvents([]);
+      }
+      return;
     }
 
     if (looksLikeResearch && userProfile) {
@@ -1690,6 +1768,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
         return;
       }
       setDraftEmailPending(true);
+      addToast({ type: 'info', title: 'Drafting email', description: 'Generating tailored outreach copy…' });
       const { data: { session } } = await supabase.auth.getSession();
       const auth = session?.access_token;
       const resp = await fetch('/api/outreach/draft', {
@@ -1704,13 +1783,51 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
       if (!resp.ok) throw new Error(json?.error || 'Draft failed');
       const email = typeof json?.email === 'string' ? json.email : '';
       if (email) {
+        const formattedEmail = [
+          '## Draft Email',
+          '',
+          '```text',
+          email,
+          '```',
+        ].join('\n');
+
         if (navigator?.clipboard?.writeText) {
-          await navigator.clipboard.writeText(email);
-          addToast({ type: 'success', title: 'Draft email copied' });
+          try {
+            await navigator.clipboard.writeText(email);
+            addToast({ type: 'success', title: 'Draft email copied' });
+          } catch {
+            addToast({ type: 'info', title: 'Clipboard unavailable', description: 'Showing the draft below.' });
+          }
         } else {
-          addToast({ type: 'success', title: 'Draft email ready', description: 'Clipboard unavailable. The draft is in the console.' });
-          console.info('[email-draft]', email);
+          addToast({ type: 'success', title: 'Draft email ready', description: 'Showing the draft below.' });
         }
+
+        let savedAssistant: Message | null = null;
+        if (currentChatId) {
+          try {
+            const { data } = await supabase
+              .from('messages')
+              .insert({ chat_id: currentChatId, role: 'assistant', content: formattedEmail })
+              .select()
+              .single();
+            if (data) {
+              savedAssistant = data;
+            }
+          } catch (insertErr) {
+            console.error('Failed to persist draft email message', insertErr);
+          }
+        }
+
+        if (!savedAssistant) {
+          savedAssistant = {
+            id: `draft-email-${Date.now()}`,
+            role: 'assistant',
+            content: formattedEmail,
+            created_at: new Date().toISOString(),
+          } as Message;
+        }
+
+        setMessages(prev => [...prev, savedAssistant!]);
       } else {
         addToast({ type: 'error', title: 'No email generated', description: 'The drafting service returned an empty response.' });
       }
@@ -1719,7 +1836,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
     } finally {
       setDraftEmailPending(false);
     }
-  }, [draftEmailPending, lastAssistantMessage, supabase, activeSubject, addToast]);
+  }, [draftEmailPending, lastAssistantMessage, supabase, activeSubject, addToast, currentChatId, setMessages]);
 
   const handleNextAction = async (action: string) => {
     if (!currentChatId) return;
@@ -2210,8 +2327,6 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                       setSaveDraft(normalizedDraft);
                       setSaveOpen(true);
                     } : undefined}
-                    onDraftEmail={isLastAssistant ? (markdown, company) => { void handleEmailDraftFromLast(markdown, company); } : undefined}
-                    draftEmailPending={isLastAssistant ? draftEmailPending : false}
                     onSummarize={isLastAssistant ? async () => {
                       setPostSummarizeNudge(false);
                       try {
@@ -2340,14 +2455,26 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     </button>
                     <button
                       className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 transition-colors ${
-                        canDraftEmail
-                          ? 'bg-rose-500 text-white hover:bg-rose-600 focus:ring-rose-400'
-                          : 'bg-gray-300 text-gray-600 cursor-not-allowed focus:ring-gray-300'
+                        draftEmailPending
+                          ? 'bg-rose-500 text-white focus:ring-rose-400 cursor-wait'
+                          : canDraftEmail
+                            ? 'bg-rose-500 text-white hover:bg-rose-600 focus:ring-rose-400'
+                            : 'bg-gray-300 text-gray-600 cursor-not-allowed focus:ring-gray-300'
                       }`}
                       onClick={() => { void handleActionBarAction('email'); }}
-                      disabled={!canDraftEmail}
+                      disabled={!canDraftEmail || draftEmailPending}
+                      aria-busy={draftEmailPending}
                     >
-                      ✉️ Draft email
+                      {draftEmailPending ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Generating…
+                        </>
+                      ) : (
+                        <>
+                          ✉️ Draft email
+                        </>
+                      )}
                     </button>
                     <button
                       className="inline-flex items-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-400"

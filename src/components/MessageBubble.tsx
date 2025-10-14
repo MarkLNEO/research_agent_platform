@@ -1,4 +1,4 @@
-import { ThumbsUp, ThumbsDown, Copy, RotateCcw, Coins, Building2, Mail } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, Copy, RotateCcw, Coins, Building2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Streamdown } from 'streamdown';
 import { useToast } from './ToastProvider';
@@ -14,8 +14,6 @@ interface MessageBubbleProps {
   disablePromote?: boolean;
   onRetry?: () => void;
   onTrackAccount?: (company: string) => void;
-  onDraftEmail?: (markdown: string, company?: string | null) => void;
-  draftEmailPending?: boolean;
   metadata?: Record<string, unknown>;
   usage?: { tokens: number; credits: number };
   onSummarize?: () => void | Promise<void>;
@@ -56,8 +54,6 @@ export function MessageBubble({
   disablePromote,
   onRetry,
   onTrackAccount,
-  onDraftEmail,
-  draftEmailPending = false,
   usage,
   onSummarize,
   onNextAction,
@@ -251,18 +247,6 @@ export function MessageBubble({
   };
   const extracted = role === 'assistant' && showActions ? sanitizeCompanyName(extractCompanyName()) : null;
   const companyName = looksLikeCompany(extracted) ? extracted : null;
-  const draftEmail = async () => {
-    if (draftEmailPending) {
-      addToast({ type: 'info', title: 'Draft in progress', description: 'I’m already drafting an email for you.' });
-      return;
-    }
-    if (onDraftEmail) {
-      onDraftEmail(safeContent, companyName);
-      return;
-    }
-    addToast({ type: 'error', title: 'Draft unavailable', description: 'Email drafting is not enabled in this view.' });
-  };
-
   if (role === 'user') {
     return (
       <div className="flex gap-3 items-start" data-testid="message-user">
@@ -512,14 +496,6 @@ export function MessageBubble({
               Summarize
             </button>
           )}
-         <button
-           onClick={draftEmail}
-           disabled={draftEmailPending}
-           className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 inline-flex items-center gap-1 disabled:text-gray-400 disabled:cursor-not-allowed"
-           aria-label="Draft Email"
-          >
-            <Mail className="w-3.5 h-3.5" /> {draftEmailPending ? 'Drafting…' : 'Draft Email'}
-          </button>
           {onTrackAccount && companyName && (
             <button
               onClick={() => onTrackAccount(companyName)}
