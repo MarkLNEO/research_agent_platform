@@ -292,6 +292,9 @@ export function ResearchChat() {
   const [signalsCompanyName, setSignalsCompanyName] = useState<string | undefined>(undefined);
   const [recentSignals, setRecentSignals] = useState<AccountSignalSummary[]>([]);
   const [greeting, setGreeting] = useState<{ time_of_day: string; user_name: string } | null>(null);
+  const [greetingOpeningLine, setGreetingOpeningLine] = useState<string | null>(null);
+  const [greetingSpotlights, setGreetingSpotlights] = useState<Array<{ icon: string; label: string; detail: string; prompt: string; tone?: 'critical' | 'info' | 'success' }>>([]);
+  const [serverSuggestions, setServerSuggestions] = useState<string[]>([]);
   const [accountStats, setAccountStats] = useState<AccountStats | null>(null);
   const lastSentRef = useRef<{ text: string; at: number } | null>(null);
   const [postSummarizeNudge, setPostSummarizeNudge] = useState(false);
@@ -378,6 +381,26 @@ export function ResearchChat() {
       return true;
     }).slice(0, 4);
   }, [userProfile, customCriteria, signalPreferences, accountStats]);
+
+  const combinedSuggestions = useMemo(() => {
+    const base = suggestions.slice(0, 4);
+    const extras = serverSuggestions
+      .filter((prompt) => typeof prompt === 'string' && prompt.trim().length > 0)
+      .map((prompt) => ({
+        icon: '✨',
+        title: prompt.length > 42 ? `${prompt.slice(0, 39)}…` : prompt,
+        description: 'Quick suggestion from your dashboard activity.',
+        prompt
+      }));
+    const merged = [...base, ...extras];
+    const seen = new Set<string>();
+    return merged.filter((item) => {
+      const key = item.prompt.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 6);
+  }, [suggestions, serverSuggestions]);
   const dismissContextTooltip = () => {
     setShowContextTooltip(false);
     if (typeof window !== 'undefined') {
@@ -526,6 +549,9 @@ useEffect(() => {
           if (data?.greeting) setGreeting(data.greeting as any);
           if (Array.isArray(data?.signals)) setRecentSignals(data.signals as any);
           if (data?.account_stats) setAccountStats(data.account_stats);
+          setGreetingOpeningLine(data?.opening_line ?? null);
+          setGreetingSpotlights(Array.isArray(data?.spotlights) ? data.spotlights : []);
+          setServerSuggestions(Array.isArray(data?.suggestions) ? data.suggestions : []);
         } catch {
           const list = await listRecentSignals(6);
           setRecentSignals(list);
@@ -1542,7 +1568,16 @@ useEffect(() => {
     const chatId = await ensureActiveChat();
     if (!chatId) return;
     if (subject) {
-      await handleSendMessageWithChat(chatId, `Update research on ${subject}`);
+      const refreshPrompt = `Refresh research on ${subject}. Focus purely on what changed since the last report.
+Format exactly:
+## What's New
+- ...
+## Opportunities
+- ...
+## Risks
+- ...
+Limit to 5 bullets total, cite sources inline, and end with one proactive next step.`;
+      await handleSendMessageWithChat(chatId, refreshPrompt);
     } else {
       setInputValue('Research ');
       setFocusComposerTick(t => t + 1);
@@ -1816,6 +1851,38 @@ useEffect(() => {
                       {greeting ? `👋 Good ${greeting.time_of_day}, ${greeting.user_name}!` : '👋 Welcome back!'}
                     </h2>
                   </div>
+                  {greetingOpeningLine && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 shadow-sm">
+                      <div className="flex items-start gap-2 text-sm text-blue-900 leading-relaxed">
+                        <span className="text-lg">💬</span>
+                        <span>{greetingOpeningLine}</span>
+                      </div>
+                    </div>
+                  )}
+                  {greetingSpotlights.length > 0 && (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {greetingSpotlights.slice(0, 4).map((item, idx) => (
+                        <button
+                          key={`${item.label}-${idx}`}
+                          onClick={() => startSuggestion(item.prompt)}
+                          className={`text-left rounded-xl border px-4 py-3 transition-all hover:shadow-md ${
+                            item.tone === 'critical'
+                              ? 'border-red-200 bg-red-50/70 hover:border-red-300'
+                              : 'border-blue-100 bg-blue-50/60 hover:border-blue-200'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <span className="text-xl">{item.icon}</span>
+                            <div>
+                              <div className="text-sm font-semibold text-gray-900">{item.label}</div>
+                              <p className="text-xs text-gray-700 mt-1 leading-relaxed">{item.detail}</p>
+                              <p className="text-xs text-blue-700 mt-2 font-medium">Tap to act →</p>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {userProfile && (
                     <div className="border border-blue-200 rounded-2xl p-4 bg-white shadow-sm">
                       <div className="flex flex-col gap-4">
@@ -1867,9 +1934,9 @@ useEffect(() => {
                             ))}
                           </div>
                         )}
-                        {suggestions.length > 0 && (
+                        {combinedSuggestions.length > 0 && (
                           <div className="grid gap-3 md:grid-cols-2">
-                            {suggestions.map((suggestion, index) => (
+                            {combinedSuggestions.map((suggestion, index) => (
                               <button
                                 key={`${suggestion.title}-${index}`}
                                 onClick={() => startSuggestion(suggestion.prompt)}
@@ -1910,6 +1977,11 @@ useEffect(() => {
                             <div className="text-sm font-semibold text-gray-900 truncate">{s.company_name}</div>
                             <div className="text-xs text-gray-600 truncate">{s.signal_type.replace(/_/g, ' ')} • {new Date(s.signal_date).toLocaleDateString()}</div>
                             <div className="text-sm text-gray-900 mt-1 line-clamp-2">{s.description}</div>
+                            {s.impact && (
+                              <div className="text-xs text-gray-600 mt-2 leading-relaxed">
+                                <span className="font-semibold text-gray-800">Why it matters: </span>{s.impact}
+                              </div>
+                            )}
                             <div className="mt-2 flex items-center gap-2">
                               <button className="text-xs text-blue-600 hover:text-blue-700" onClick={() => { setSignalsAccountId(s.account_id); setSignalsCompanyName(s.company_name); setSignalsDrawerOpen(true); }}>Review</button>
                               <button
@@ -1918,6 +1990,14 @@ useEffect(() => {
                               >
                                 Research
                               </button>
+                              {s.recommended_action && (
+                                <button
+                                  className="text-xs text-blue-700 hover:text-blue-900"
+                                  onClick={() => startSuggestion(s.recommended_action!)}
+                                >
+                                  Do it for me
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}

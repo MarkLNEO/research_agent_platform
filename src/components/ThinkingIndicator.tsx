@@ -31,6 +31,11 @@ function formatSourceTitle(url: string): string {
   return parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
 }
 
+const truncateLine = (text: string, max = 90) => {
+  if (!text) return '';
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+};
+
 function PlanningIndicator({ content }: { content?: string }) {
   const [elapsed, setElapsed] = useState(0);
   // Conservative ETA for deep/auto; quick usually completes before 30s.
@@ -117,10 +122,11 @@ export function ThinkingIndicator({ type, content, query, sources, url, count, c
 
   if (type === 'reasoning') {
     const rawLines = (content || '').split(/\n+/).map(line => line.trim()).filter(Boolean);
-    const cleanedLines = rawLines.map(line => (line.startsWith('- ') ? line.slice(2) : line));
+    const limitedRawLines = rawLines.slice(-6);
+    const cleanedLines = limitedRawLines.map(line => (line.startsWith('- ') ? line.slice(2) : line));
     const latest = cleanedLines[cleanedLines.length - 1] || '';
     const hasMultiple = cleanedLines.length > 1;
-    const normalizedChecklist = rawLines.length ? rawLines.map(line => (line.startsWith('- ') ? line : `- ${line}`)).join('\n') : '';
+    const normalizedChecklist = limitedRawLines.length ? limitedRawLines.map(line => (line.startsWith('- ') ? line : `- ${line}`)).join('\n') : '';
 
     return (
       <div className="flex gap-3 items-start mb-4 animate-fadeIn">
@@ -151,7 +157,7 @@ export function ThinkingIndicator({ type, content, query, sources, url, count, c
           </div>
           {!isExpanded && latest && (
             <div className="pl-8 pr-2 text-xs text-indigo-900 leading-relaxed">
-              • {latest}
+              • {truncateLine(latest)}
             </div>
           )}
           {isExpanded && normalizedChecklist && (

@@ -88,13 +88,15 @@ export interface AccountSignalSummary {
   source_url?: string;
   score: number;
   detected_at?: string;
+  impact?: string;
+  recommended_action?: string;
 }
 
 export async function listRecentSignals(limit = 10): Promise<AccountSignalSummary[]> {
   const { data, error } = await supabase
     .from('account_signals')
     .select(
-      `id, account_id, signal_type, severity, description, signal_date, source_url, score,
+      `id, account_id, signal_type, severity, description, signal_date, source_url, score, metadata, detected_at,
        tracked_accounts:tracked_accounts!account_signals_account_id_fkey ( company_name )`
     )
     .order('signal_date', { ascending: false })
@@ -112,5 +114,7 @@ export async function listRecentSignals(limit = 10): Promise<AccountSignalSummar
     source_url: row.source_url,
     score: row.score,
     detected_at: row.detected_at,
+    impact: row.metadata?.impact,
+    recommended_action: row.metadata?.recommended_action,
   }));
 }

@@ -86,9 +86,19 @@ export interface DashboardGreeting {
     days_ago: number;
     source_url?: string;
     score: number;
+    impact?: string;
+    recommended_action?: string;
   }>;
   account_stats: AccountStats;
   suggestions: string[];
+  opening_line?: string;
+  spotlights?: Array<{
+    icon: string;
+    label: string;
+    detail: string;
+    prompt: string;
+    tone?: 'critical' | 'info' | 'success';
+  }>;
   user_context: {
     first_name: string;
     role?: string;

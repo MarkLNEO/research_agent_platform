@@ -13,6 +13,8 @@ interface Signal {
   days_ago: number;
   source_url?: string;
   score: number;
+  impact?: string;
+  recommended_action?: string;
 }
 
 interface AccountStats {
@@ -31,6 +33,14 @@ interface DashboardData {
   signals: Signal[];
   account_stats: AccountStats;
   suggestions: string[];
+  opening_line?: string;
+  spotlights?: Array<{
+    icon: string;
+    label: string;
+    detail: string;
+    prompt: string;
+    tone?: 'critical' | 'info' | 'success';
+  }>;
   user_context: {
     first_name: string;
     role?: string;
@@ -142,6 +152,42 @@ export function DashboardGreeting({ onSuggestionClick, onSignalClick, onViewAcco
         {getGreeting()}
       </div>
 
+      {data.opening_line && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 shadow-sm" role="status" aria-live="polite">
+          <div className="flex items-start gap-3">
+            <span className="text-lg">💬</span>
+            <div className="flex-1 text-sm text-blue-900 leading-relaxed">
+              {data.opening_line}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {Array.isArray(data.spotlights) && data.spotlights.length > 0 && (
+        <div className="grid gap-3 md:grid-cols-2">
+          {data.spotlights.slice(0, 4).map((spotlight, idx) => (
+            <button
+              key={`${spotlight.label}-${idx}`}
+              onClick={() => onSuggestionClick(spotlight.prompt)}
+              className={`text-left rounded-xl border px-4 py-3 transition-all hover:shadow-md ${
+                spotlight.tone === 'critical'
+                  ? 'border-red-200 bg-red-50/70 hover:border-red-300'
+                  : 'border-blue-100 bg-blue-50/60 hover:border-blue-200'
+              }`}
+            >
+              <div className="flex items-start gap-3">
+                <span className="text-xl">{spotlight.icon}</span>
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">{spotlight.label}</div>
+                  <p className="text-xs text-gray-700 mt-1 leading-relaxed">{spotlight.detail}</p>
+                  <p className="text-xs text-blue-700 mt-2 font-medium">Tap to act →</p>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Signal Alerts - Most Prominent */}
       {hasSignals ? (
         <div className="bg-gradient-to-r from-red-50 via-orange-50 to-yellow-50 border-2 border-orange-200 rounded-xl p-6 shadow-lg" aria-live="polite">
@@ -167,6 +213,23 @@ export function DashboardGreeting({ onSuggestionClick, onSignalClick, onViewAcco
                       <span className="text-sm text-gray-500">• {signal.days_ago === 0 ? 'Today' : `${signal.days_ago} day${signal.days_ago > 1 ? 's' : ''} ago`}</span>
                     </div>
                     <p className="text-sm text-gray-700">{signal.description}</p>
+                    {signal.impact && (
+                      <p className="mt-2 text-xs text-gray-600 leading-relaxed">
+                        <span className="font-semibold text-gray-800">Why it matters: </span>{signal.impact}
+                      </p>
+                    )}
+                    {signal.recommended_action && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSuggestionClick(signal.recommended_action!);
+                        }}
+                        className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:text-blue-800"
+                      >
+                        Take action →
+                      </button>
+                    )}
                   </div>
                   <ChevronRight className="w-5 h-5 text-gray-400 mt-1" />
                 </div>

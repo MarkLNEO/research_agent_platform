@@ -187,7 +187,7 @@ export function MessageBubble({
 
   const nextActions = useMemo(() => {
     const source = safeContent || '';
-    const sectionMatch = source.match(/##\s+(Next Actions?|Next Steps?)[\s\S]*?(?=\n##\s+|$)/i);
+    const sectionMatch = source.match(/##\s+(Next Actions?|Next Steps?|Proactive Follow-ups)[\s\S]*?(?=\n##\s+|$)/i);
     if (!sectionMatch) return [] as string[];
     const lines = sectionMatch[0].split(/\n+/).slice(1); // skip heading
     const actions = lines

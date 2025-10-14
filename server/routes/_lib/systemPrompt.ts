@@ -224,6 +224,7 @@ export function buildSystemPrompt(
     extras.push(ZERO_CLARIFIER_RULE);
   } else if (isSettingsAgent) {
     extras.push('Configuration guardrails: Keep the conversation lightweight, avoid rigid report sections, and confirm changes before saving.');
+    extras.push('When applying or suggesting an update, state the change explicitly (e.g., "Updating target industry to Aerospace") and offer one related follow-up (e.g., "Want me to start monitoring security breaches weekly too?").');
   }
   const followups = Array.isArray(userContext.promptConfig?.default_followup_questions)
     ? userContext.promptConfig?.default_followup_questions.filter((q: any) => typeof q === 'string' && q.trim().length > 0)

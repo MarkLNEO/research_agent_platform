@@ -50,7 +50,12 @@ export default async function handler(req: any, res: any) {
           score: s.score,
           importance: s.importance,
           detection_source: 'api_trigger',
-          metadata: { confidence: s.confidence, detected_at: new Date().toISOString() }
+          metadata: {
+            confidence: s.confidence,
+            detected_at: new Date().toISOString(),
+            impact: s.impact,
+            recommended_action: s.recommended_action
+          }
         })));
       }
     }
@@ -75,8 +80,7 @@ async function detectForAccount(account: any, prefs: Pref[], openaiKey: string) 
     `You are part of a SignalMonitor service. Today is ${today}.`,
     `Task: Find recent news/events about "${account.company_name}" between ${startDate} and ${today}.`,
     `Focus on: ${hints.focus}. Use the web_search tool; prefer news sources (Reuters, Bloomberg, CNBC, official press releases).`,
-    `Return JSON in code fences (\`\`\`json...\`\`\`) with an array of items:`,
-    `[{ signal_type, description, signal_date (YYYY-MM-DD), source_url (https), confidence (high|medium|low) }]`,
+    `Return JSON in code fences (\`\`\`json...\`\`\`) with an array. Each item must include:\n- signal_type\n- description (1 sentence summary of the event)\n- signal_date (YYYY-MM-DD)\n- source_url (https)\n- confidence (high|medium|low)\n- impact (why this matters for the account in ≤25 words)\n- recommended_action (start with a verb, ≤18 words, tailored to an Account Executive)\nDo not add extra fields.`,
   ].join('\n\n');
 
   const body = {
@@ -142,5 +146,18 @@ function normalizeSignal(raw: any, prefs: Pref[]) {
   const base = confidence === 'high' ? 80 : confidence === 'medium' ? 60 : 40;
   const score = base + (pref.importance === 'critical' ? 15 : pref.importance === 'important' ? 8 : 0);
   const severity: 'critical'|'high'|'medium'|'low' = score >= 90 ? 'critical' : score >= 75 ? 'high' : score >= 55 ? 'medium' : 'low';
-  return { signal_type, description, signal_date, source_url, confidence, score, severity, importance: pref.importance };
+  const impact = typeof raw.impact === 'string' ? raw.impact.trim() : '';
+  const recommended = typeof raw.recommended_action === 'string' ? raw.recommended_action.trim() : '';
+  return {
+    signal_type,
+    description,
+    signal_date,
+    source_url,
+    confidence,
+    score,
+    severity,
+    importance: pref.importance,
+    impact: impact || undefined,
+    recommended_action: recommended || undefined
+  };
 }
