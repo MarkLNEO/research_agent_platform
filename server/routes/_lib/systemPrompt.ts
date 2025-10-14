@@ -146,7 +146,7 @@ export function buildSystemPrompt(
 
   const contextBlock = contextSections.length > 0
     ? `CONTEXT\n${contextSections.join('\n\n')}`
-    : 'CONTEXT\nNone provided. Ask clarifying questions if data feels insufficient.';
+    : 'CONTEXT\nNo saved profile yet. Proceed using sensible defaults and the user\'s latest request—do NOT ask clarifying questions.';
 
   const extras = [] as string[];
   const followups = Array.isArray(userContext.promptConfig?.default_followup_questions)

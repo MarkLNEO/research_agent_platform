@@ -61,6 +61,14 @@ export function normalizeMarkdown(raw: string): string {
     text = text.replace(pattern, '');
   }
 
+  // If a High Level section still contains clarifier-style prompts, replace with default placeholder.
+  text = text.replace(/(^##\s+High Level[\s\S]*?)(?=^##\s+|\Z)/gim, (section) => {
+    if (/do you mean/i.test(section) || /what do you want/i.test(section)) {
+      return '## High Level\n- No high-level summary provided yet.\n';
+    }
+    return section;
+  });
+
   const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   // Normalize common plain-text headers into markdown headings
