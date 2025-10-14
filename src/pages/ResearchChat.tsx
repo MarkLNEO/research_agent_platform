@@ -16,7 +16,7 @@ import { AccountSignalsDrawer } from '../components/AccountSignalsDrawer';
 import { listRecentSignals, type AccountSignalSummary } from '../services/signalService';
 import { fetchDashboardGreeting } from '../services/accountService';
 import { useToast } from '../components/ToastProvider';
-import { buildResearchDraft } from '../utils/researchOutput';
+import { buildResearchDraft, approximateTokenCount } from '../utils/researchOutput';
 import type { ResearchDraft } from '../utils/researchOutput';
 import { normalizeMarkdown, stripClarifierBlocks } from '../utils/markdown';
 import type { TrackedAccount, AccountStats } from '../services/accountService';
@@ -493,6 +493,13 @@ export function ResearchChat() {
     if (user) void loadChats();
   }, [user]);
 
+  // Allow any child component to open the ICP optimizer
+  useEffect(() => {
+    const open = () => setOptimizeOpen(true);
+    window.addEventListener('optimize-icp:open', open);
+    return () => window.removeEventListener('optimize-icp:open', open);
+  }, []);
+
   useEffect(() => {
     if (!lastAssistantMessage) {
       setActionBarVisible(false);
@@ -744,10 +751,31 @@ useEffect(() => {
   // Save dialog opens via onPromote in MessageBubble (last assistant message)
 
   const persistResearchDraft = useCallback(async (draft: ResearchDraft) => {
+    const dataPayload = {
+      subject: draft.subject,
+      executive_summary: draft.executive_summary,
+      markdown_report: draft.markdown_report,
+      icp_fit_score: draft.icp_fit_score,
+      signal_score: draft.signal_score,
+      composite_score: draft.composite_score,
+      priority_level: draft.priority_level,
+      confidence_level: draft.confidence_level,
+      company_data: draft.company_data || {},
+      leadership_team: draft.leadership_team || [],
+      buying_signals: draft.buying_signals || [],
+      custom_criteria_assessment: draft.custom_criteria_assessment || [],
+      personalization_points: draft.personalization_points || [],
+      recommended_actions: draft.recommended_actions || {},
+      sources: draft.sources || [],
+    };
+    const tokens = approximateTokenCount(`${draft.executive_summary}\n\n${draft.markdown_report}`);
     const { data: inserted, error } = await supabase.from('research_outputs').insert({
       user_id: user?.id,
       subject: draft.subject,
       research_type: draft.research_type,
+      data: dataPayload,
+      tokens_used: tokens,
+      // Also store structured columns for easy querying
       executive_summary: draft.executive_summary,
       markdown_report: draft.markdown_report,
       icp_fit_score: draft.icp_fit_score,
@@ -1858,7 +1886,6 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
         await handleContinueCompany();
         return;
       case 'email':
-        addToast({ type: 'info', title: 'Drafting email', description: 'Generating tailored outreach…' });
         await handleEmailDraftFromLast();
         return;
       case 'refine':

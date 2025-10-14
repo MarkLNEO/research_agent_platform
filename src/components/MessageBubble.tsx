@@ -241,6 +241,7 @@ export function MessageBubble({
   const looksLikeCompany = (name: string | null) => {
     if (!name) return false;
     const s = name.trim();
+    if (/^draft email$/i.test(s)) return false;
     if (s.length < 2 || s.length > 80) return false;
     if (/^if you want/i.test(s)) return false;
     if (/\s{2,}/.test(s)) return false;
@@ -289,6 +290,15 @@ export function MessageBubble({
           {icpMeta.rationale && (
             <div className="mt-2 text-[11px] text-emerald-800">{icpMeta.rationale}</div>
           )}
+          <div className="mt-2">
+            <button
+              type="button"
+              onClick={() => { try { window.dispatchEvent(new CustomEvent('optimize-icp:open')); } catch {} }}
+              className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 underline"
+            >
+              Tweak scoring model
+            </button>
+          </div>
         </div>
       </div>
     </div>
