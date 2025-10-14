@@ -502,8 +502,12 @@ export default async function handler(req: any, res: any) {
         return 'gpt-5-mini';
       })();
       const selectedModel = userConfig.model || defaultModel;
-      const reasoningEffort = fastMode ? 'low' : (research_type === 'deep' ? 'medium' : 'low');
-      const isQuick = fastMode ? true : (research_type === 'quick');
+      // Auto-detect mode for short follow-ups when active subject exists
+      const shortQ = /^(who|what|when|where|which|how|do|does|did|is|are|was|were)\b/i.test((lastUserMessage?.content || '').trim()) && ((lastUserMessage?.content || '').trim().length <= 120);
+      const autoMode = (activeContextCompany && shortQ) ? 'specific' : undefined;
+      const effectiveMode = (autoMode || research_type) as 'quick'|'deep'|'specific'|undefined;
+      const reasoningEffort = fastMode ? 'low' : (effectiveMode === 'deep' ? 'medium' : 'low');
+      const isQuick = fastMode ? true : (effectiveMode === 'quick');
 
       // Summarization mode: if the client passed summarize_source, bypass research flow
       const summarizeSource = (userConfig as any)?.summarize_source as string | undefined;
@@ -627,6 +631,8 @@ export default async function handler(req: any, res: any) {
           const trimmed = value.trim();
           if (!trimmed) return false;
           if (trimmed.length > 80) return false;
+          if (/^(who|what|when|where|which|why|how)\b/i.test(trimmed)) return false;
+          if (/\?\s*$/.test(trimmed)) return false;
           return !/^(summarize|continue|resume|draft|write|compose|email|refine|help me|start|begin|generate|rerun|retry)/i.test(trimmed);
         };
         const detectedCompany = isLikelySubject(detectedCompanyRaw)
