@@ -1846,21 +1846,29 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
   const handleActionBarAction = useCallback(async (action: ResearchAction) => {
     switch (action) {
       case 'new':
+        addToast({ type: 'info', title: 'Starting new research', description: 'Opening a fresh thread…' });
         await handleStartNewCompany();
         return;
       case 'continue':
+        if (currentActionCompany) {
+          addToast({ type: 'info', title: `Refreshing ${currentActionCompany}`, description: 'Focusing on what changed…' });
+        } else {
+          addToast({ type: 'info', title: 'Refresh research', description: 'Send a company name to continue.' });
+        }
         await handleContinueCompany();
         return;
       case 'email':
+        addToast({ type: 'info', title: 'Drafting email', description: 'Generating tailored outreach…' });
         await handleEmailDraftFromLast();
         return;
       case 'refine':
+        addToast({ type: 'info', title: 'Refine scope', description: 'Adjust focus areas for the next run.' });
         setShowRefine(true);
         return;
       default:
         return;
     }
-  }, [handleStartNewCompany, handleContinueCompany, handleEmailDraftFromLast]);
+  }, [handleStartNewCompany, handleContinueCompany, handleEmailDraftFromLast, currentActionCompany, addToast]);
 
   const shortcutHandlers = useMemo<Record<string, () => void>>(() => {
     const handlers: Record<string, () => void> = {};
