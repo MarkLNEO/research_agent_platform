@@ -2504,6 +2504,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     content={m.content}
                     userName={getUserInitial()}
                     showActions={isLastAssistant}
+                    mode={isLastAssistant ? (lastRunMode || null) : null}
                     collapseEnabled={isLastAssistant && lastRunMode === 'quick'}
                     collapseThresholdWords={150}
                     onTrackAccount={handleTrackAccount}
@@ -2672,6 +2673,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     userName={getUserInitial()}
                     showActions={false}
                     streaming
+                    mode={lastRunMode || null}
                     agentType="company_research"
                   />
               )}

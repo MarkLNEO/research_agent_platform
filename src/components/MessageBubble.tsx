@@ -10,6 +10,7 @@ interface MessageBubbleProps {
   userName?: string;
   showActions?: boolean;
   streaming?: boolean;
+  mode?: 'deep' | 'quick' | 'specific' | 'auto' | null;
   onPromote?: () => void;
   disablePromote?: boolean;
   onRetry?: () => void;
@@ -55,6 +56,7 @@ export function MessageBubble({
   userName = 'Y',
   showActions = false,
   streaming = false,
+  mode = null,
   onPromote,
   disablePromote,
   onRetry,
@@ -315,6 +317,13 @@ export function MessageBubble({
 
   return (
     <div className="space-y-3" data-testid="message-assistant">
+      {mode && (
+        <div className="flex justify-end">
+          <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full border border-gray-200 bg-gray-50 text-gray-600">
+            Mode: {String(mode).charAt(0).toUpperCase() + String(mode).slice(1)}
+          </span>
+        </div>
+      )}
       {structured ? (
         <div className="space-y-3">
           {ackLine && (
