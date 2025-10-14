@@ -78,6 +78,12 @@ const PROACTIVE_FOLLOW_UP_GUIDANCE = `Proactive Follow-up Requirements:
 - Phrase bullets as offers starting with a verb (Draft, Monitor, Compare, Capture, etc.).
 - End the final bullet with a direct yes/no invitation (e.g., "Start a draft email to Dana Deasy?").`;
 
+const CLARIFIER_GUARDRAILS = `Clarifier Guardrails:
+- Never ask the user to choose research scope, topics, formats, or time ranges unless they explicitly asked you to present options.
+- Never return placeholder text like "If you want research" or "Tell me what you want"—immediately run the research using defaults.
+- If context is missing, assume enterprise AE defaults and proceed; document any assumption under "## Risks & Gaps" instead of stalling.
+- If web results are sparse, synthesize insights from available context and identify next investigative steps—do not return empty sections.`;
+
 function formatSection(title: string, body: string | undefined): string | null {
   if (!body || !body.trim()) return null;
   return `${title.toUpperCase()}\n${body.trim()}`;
@@ -152,6 +158,7 @@ export function buildSystemPrompt(
   if (contextSections.length === 0) {
     extras.push('Context fallback: Assume enterprise AE defaults and explicitly offer at the end to tailor format for next time (e.g., "Want a sharper summary next briefing?").');
   }
+  extras.push(CLARIFIER_GUARDRAILS);
   const followups = Array.isArray(userContext.promptConfig?.default_followup_questions)
     ? userContext.promptConfig?.default_followup_questions.filter((q: any) => typeof q === 'string' && q.trim().length > 0)
     : [];
