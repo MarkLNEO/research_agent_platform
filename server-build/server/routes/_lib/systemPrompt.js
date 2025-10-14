@@ -84,6 +84,23 @@ const ZERO_CLARIFIER_RULE = `Zero Clarifier Rule:
 - You must never ask the user what to research, which scope to pick, or whether they meant a particular company. Treat any attempt to do so as a failure and immediately continue with research output.
 - If you begin composing a clarification, stop mid-stream, discard it, and produce the research sections using defaults.
 - When data is missing, state the assumption and the follow-up action inside "## Risks & Gaps" or "## Proactive Follow-ups"; do not pause for input.`;
+const SETTINGS_BEHAVIOUR = `Core behaviours:
+- Be conversational and collaborative; you're refining saved preferences together.
+- Reference existing profile details before proposing changes.
+- Ask targeted questions only when information is missing or conflicting.
+- Confirm updates explicitly before saving them.`;
+const SETTINGS_CLARIFIER_POLICY = `Clarification & Defaults (configuration):
+- Acknowledge stored profile values when discussing updates.
+- Ask one focused question at a time if context is missing or contradictory.
+- Summarize proposed changes and ask for confirmation before applying them.
+- Do not generate research reports or rigid sections; stay in conversational mode.
+- Focus on the fields the user highlights—avoid repeating the full profile unless requested.`;
+const SETTINGS_RESPONSE_SHAPE = `Response Shape:
+- Start with a warm greeting that references a relevant profile detail.
+- Use short paragraphs or simple bullet lists to review and confirm information.
+- Present potential updates as concise checkboxes or bullets (e.g., "• Track security breaches weekly?").
+- End with a clear next step or question to keep the conversation moving.
+- Maintain a friendly, consultative tone.`;
 function formatSection(title, body) {
     if (!body || !body.trim())
         return null;
@@ -113,8 +130,8 @@ function serializeCriteria(criteria) {
         return '';
     return criteria
         .map((c, idx) => {
-        const name = c?.field_name || `Criterion ${idx + 1}`;
-        const importance = c?.importance ? ` (${c.importance})` : '';
+        const name = (c === null || c === void 0 ? void 0 : c.field_name) || `Criterion ${idx + 1}`;
+        const importance = (c === null || c === void 0 ? void 0 : c.importance) ? ` (${c.importance})` : '';
         return `- ${name}${importance}`;
     })
         .join('\n');
@@ -124,23 +141,29 @@ function serializeSignals(signals) {
         return '';
     return signals
         .slice(0, 5)
-        .map((s) => `- ${s?.signal_type || 'signal'} :: importance=${s?.importance || 'n/a'} :: keywords=${(s?.config?.keywords || []).join(', ')}`)
+        .map((s) => `- ${(s === null || s === void 0 ? void 0 : s.signal_type) || 'signal'} :: importance=${(s === null || s === void 0 ? void 0 : s.importance) || 'n/a'} :: keywords=${((s === null || s === void 0 ? void 0 : s.config)?.keywords || []).join(', ')}`)
         .join('\n');
 }
 function serializeDisqualifiers(disqualifiers) {
     if (!Array.isArray(disqualifiers) || disqualifiers.length === 0)
         return '';
     return disqualifiers
-        .map((d, idx) => `- ${d?.criterion || `Disqualifier ${idx + 1}`}`)
+        .map((d, idx) => `- ${(d === null || d === void 0 ? void 0 : d.criterion) || `Disqualifier ${idx + 1}`}`)
         .join('\n');
 }
 export function buildSystemPrompt(userContext, agentType = 'company_research', researchMode = undefined) {
+    const isResearchAgent = agentType === 'company_research';
+    const isSettingsAgent = agentType === 'settings_agent';
     const role = AGENT_ROLE[agentType] || AGENT_ROLE.company_research;
     const header = `You are RebarHQ's ${role}. Deliver truthful, decision-ready intelligence for enterprise Account Executives.`;
-    const behaviour = `Core behaviours:\n- Be proactive: anticipate follow-up questions and highlight risks/opportunities.\n- Be concise but complete: use bullet hierarchies, tables, and mini-sections when helpful.\n- Cite evidence inline (e.g. "[Source: Bloomberg, Jan 2025]").\n- Flag uncertainty explicitly.\n- ${STREAMING_BEHAVIOUR}`;
-    const preferredMode = userContext.promptConfig?.preferred_research_type || undefined;
-    const resolvedMode = (researchMode || preferredMode || 'deep');
-    const modeHint = resolvedMode ? MODE_HINT[resolvedMode] : null;
+    const behaviour = isSettingsAgent
+        ? SETTINGS_BEHAVIOUR
+        : `Core behaviours:\n- Be proactive: anticipate follow-up questions and highlight risks/opportunities.\n- Be concise but complete: use bullet hierarchies, tables, and mini-sections when helpful.\n- Cite evidence inline (e.g. "[Source: Bloomberg, Jan 2025]").\n- Flag uncertainty explicitly.\n- ${STREAMING_BEHAVIOUR}`;
+    const preferredMode = isResearchAgent
+        ? (userContext.promptConfig?.preferred_research_type || userContext.prompt_config?.preferred_research_type || undefined)
+        : undefined;
+    const resolvedMode = isResearchAgent ? (researchMode || preferredMode || 'deep') : 'deep';
+    const modeHint = isResearchAgent ? MODE_HINT[resolvedMode] : null;
     const contextSections = [
         formatSection('Profile', serializeProfile(userContext.profile)),
         formatSection('Custom Criteria', serializeCriteria(userContext.customCriteria)),
@@ -151,31 +174,41 @@ export function buildSystemPrompt(userContext, agentType = 'company_research', r
         ? `CONTEXT\n${contextSections.join('\n\n')}`
         : 'CONTEXT\nNo stored profile yet. Assume enterprise AE defaults (15 strategic accounts, deep discovery focus). Proceed without re-asking; note any inferred preferences for future briefs.';
     const extras = [];
-    if (contextSections.length === 0) {
+    if (contextSections.length === 0 && isResearchAgent) {
         extras.push('Context fallback: Assume enterprise AE defaults and explicitly offer at the end to tailor format for next time (e.g., "Want a sharper summary next briefing?").');
     }
-    extras.push(CLARIFIER_GUARDRAILS);
-    extras.push(DELIVERY_FORCE_GUIDANCE);
-    extras.push(ZERO_CLARIFIER_RULE);
+    else if (contextSections.length === 0 && isSettingsAgent) {
+        extras.push('Context fallback: No profile stored yet. Guide the user through defining ICP, key signals, and disqualifiers step by step.');
+    }
+    if (isResearchAgent) {
+        extras.push(CLARIFIER_GUARDRAILS);
+        extras.push(DELIVERY_FORCE_GUIDANCE);
+        extras.push(ZERO_CLARIFIER_RULE);
+    }
+    else if (isSettingsAgent) {
+        extras.push('Configuration guardrails: Keep the conversation lightweight, avoid rigid report sections, and confirm changes before saving.');
+    }
     const followups = Array.isArray(userContext.promptConfig?.default_followup_questions)
         ? userContext.promptConfig?.default_followup_questions.filter((q) => typeof q === 'string' && q.trim().length > 0)
         : [];
     if (modeHint)
         extras.push(`Mode guidance: ${modeHint}`);
-    if (userContext.promptConfig?.guardrail_profile) {
+    if (isResearchAgent && userContext.promptConfig?.guardrail_profile) {
         extras.push(`Guardrail profile: ${userContext.promptConfig.guardrail_profile}`);
     }
-    const summaryPref = userContext.promptConfig?.default_output_brevity;
+    const summaryPref = isResearchAgent
+        ? (userContext.prompt_config?.default_output_brevity ?? userContext.promptConfig?.default_output_brevity)
+        : undefined;
     let summaryPreferenceTag = '';
-    if (summaryPref === 'short') {
+    if (isResearchAgent && summaryPref === 'short') {
         extras.push('Summary preference: Deliver a crisp executive summary and High Level summary (<=3 bullets) that highlights the sharpest signals only.');
         summaryPreferenceTag = '<summary_preference level="short">Executive summary ≤2 sentences. High Level summary must have ≤3 ultra-concise bullets using action verbs.</summary_preference>';
     }
-    else if (summaryPref === 'long') {
+    else if (isResearchAgent && summaryPref === 'long') {
         extras.push('Summary preference: Provide a richer executive summary and High Level summary (7–10 bullets) with added context for timing, risks, and next steps.');
         summaryPreferenceTag = '<summary_preference level="long">Executive summary 3–4 sentences with context. High Level summary must have 7–10 detailed bullets with qualifiers and evidence.</summary_preference>';
     }
-    else if (summaryPref === 'standard') {
+    else if (isResearchAgent && summaryPref === 'standard') {
         extras.push('Summary preference: Use the standard-length High Level summary (5–6 bullets) with balanced context.');
         summaryPreferenceTag = '<summary_preference level="standard">Executive summary 2–3 sentences. High Level summary must have 5–6 balanced bullets covering value, signals, and next steps.</summary_preference>';
     }
@@ -189,31 +222,46 @@ export function buildSystemPrompt(userContext, agentType = 'company_research', r
     else {
         extras.push('Tone preference: Maintain a balanced, consultative tone blending warmth with clear guidance.');
     }
-    if (userContext.promptConfig?.always_tldr === false) {
+    if (isResearchAgent && userContext.promptConfig?.always_tldr === false) {
         extras.push('The user may toggle the High Level summary off; only omit it if they explicitly say so in the latest request.');
     }
-    else {
+    else if (isResearchAgent) {
         extras.push('Always include the High Level summary unless the user explicitly opts out during this conversation.');
     }
-    if (userContext.promptConfig?.summary_preference_set) {
+    if (isResearchAgent && userContext.promptConfig?.summary_preference_set) {
         extras.push('The user already chose their summary length preference. Do not re-ask; just use the saved default unless they change it.');
     }
-    if (resolvedMode === 'deep') {
+    if (isResearchAgent && resolvedMode === 'deep') {
         extras.push(DEFAULT_CRITERIA_GUIDANCE);
     }
-    extras.push(buildImmediateAckGuidance(resolvedMode));
-    extras.push(resolvedMode === 'specific' ? SPECIFIC_FOLLOW_UP_GUIDANCE : PROACTIVE_FOLLOW_UP_GUIDANCE);
-    if (followups.length) {
+    if (isResearchAgent) {
+        extras.push(buildImmediateAckGuidance(resolvedMode));
+        extras.push(resolvedMode === 'specific' ? SPECIFIC_FOLLOW_UP_GUIDANCE : PROACTIVE_FOLLOW_UP_GUIDANCE);
+    }
+    if (isResearchAgent && followups.length) {
         extras.push(`Saved follow-up questions:
 ${followups.map((q, idx) => `${idx + 1}. ${q}`).join('\n')}
 Always answer them after the main sections inside "Saved Follow-up Answers".`);
     }
     const extraBlock = extras.length ? extras.join('\n') : '';
-    const clarificationPolicy = `Clarification & Defaults:\n- Do not present fill-in templates or long forms.\n- Ask at most one short clarifying question only when essential; otherwise proceed using saved profile and sensible defaults.\n- When the user supplies a company name, ticker, domain, or follow-up question, assume they are referring to that entity—do NOT ask whether they meant something else.\n- If the user writes "all of the above" (or similar), interpret it as comprehensive coverage of the standard sections and proceed.\n- If a company is identified and a website/domain can be inferred or is present in the profile, do NOT ask for the domain; derive it yourself.\n- Default research depth: ${resolvedMode} unless the user specifies otherwise.\n- If profile context exists or an active subject is provided, do not re-ask "what would you like researched?" — assume defaults from the profile and mode.\n- Never include clarification templates about scope, depth, format, timeframe, or channels in the final answer unless the user explicitly requested a menu.\n- If context is empty, do NOT ask broad follow-ups; treat saved defaults as sufficient and start researching.`;
-    const responseShape = resolvedMode === 'quick'
-        ? `Response Shape:\n- Keep outputs concise and decision-ready; prefer bullets.\n- ${QUICK_OUTPUT}`
-        : resolvedMode === 'specific'
-            ? `Response Shape:\n- Keep outputs concise and answer-led.\n- ${SPECIFIC_OUTPUT}`
-            : `Response Shape:\n- Keep outputs concise and decision-ready; prefer bullets and short sections.\n- ${STRUCTURED_OUTPUT}`;
+    const clarificationPolicy = isResearchAgent
+        ? `Clarification & Defaults:\n- Do not present fill-in templates or long forms.\n- Ask at most one short clarifying question only when essential; otherwise proceed using saved profile and sensible defaults.\n- When the user supplies a company name, ticker, domain, or follow-up question, assume they are referring to that entity—do NOT ask whether they meant something else.\n- If the user writes "all of the above" (or similar), interpret it as comprehensive coverage of the standard sections and proceed.\n- If a company is identified and a website/domain can be inferred or is present in the profile, do NOT ask for the domain; derive it yourself.\n- Default research depth: ${resolvedMode} unless the user specifies otherwise.\n- If profile context exists or an active subject is provided, do not re-ask "what would you like researched?" — assume defaults from the profile and mode.\n- Never include clarification templates about scope, depth, format, timeframe, or channels in the final answer unless the user explicitly requested a menu.\n- If context is empty, do NOT ask broad follow-ups; treat saved defaults as sufficient and start researching.`
+        : isSettingsAgent
+            ? SETTINGS_CLARIFIER_POLICY
+            : `Clarification & Defaults:\n- Confirm the user’s goal in one sentence before proceeding.\n- Ask at most one clarifying question at a time.\n- Surface assumptions and invite the user to correct them.\n- Keep momentum; if context is thin, propose the next logical question.`;
+    let responseShape;
+    if (isResearchAgent) {
+        responseShape = resolvedMode === 'quick'
+            ? `Response Shape:\n- Keep outputs concise and decision-ready; prefer bullets.\n- ${QUICK_OUTPUT}`
+            : resolvedMode === 'specific'
+                ? `Response Shape:\n- Keep outputs concise and answer-led.\n- ${SPECIFIC_OUTPUT}`
+                : `Response Shape:\n- Keep outputs concise and decision-ready; prefer bullets and short sections.\n- ${STRUCTURED_OUTPUT}`;
+    }
+    else if (isSettingsAgent) {
+        responseShape = SETTINGS_RESPONSE_SHAPE;
+    }
+    else {
+        responseShape = `Response Shape:\n- Keep outputs structured and insight-led.\n- ${STRUCTURED_OUTPUT}`;
+    }
     return [header, behaviour, clarificationPolicy, responseShape, contextBlock, extraBlock, summaryPreferenceTag].filter(Boolean).join('\n\n');
 }
