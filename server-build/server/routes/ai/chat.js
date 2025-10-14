@@ -1,27 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import { buildSystemPrompt } from '../_lib/systemPrompt.js';
+import { buildMemoryBlock } from '../_lib/memory.js';
 import { assertEmailAllowed } from '../_lib/access.js';
 const NON_RESEARCH_TERMS = new Set([
-    'hi',
-    'hello',
-    'hey',
-    'thanks',
-    'thank you',
-    'agenda',
-    'notes',
-    'help',
-    'update',
-    'updates',
-    'plan',
-    'planning',
-    'what',
-    'who',
-    'why',
-    'how',
-    'where',
-    'when',
-    'test'
+    'hi', 'hello', 'hey', 'thanks', 'thank you', 'agenda', 'notes', 'help', 'update', 'updates',
+    'plan', 'planning', 'what', 'who', 'why', 'how', 'where', 'when', 'test'
 ]);
 // Helper function to estimate tokens
 function estimateTokens(text = '') {
@@ -42,18 +26,20 @@ async function checkUserCredits(supabase, userId) {
             id: userId,
             credits_remaining: INITIAL_CREDITS,
             credits_total_used: 0,
-            approval_status: 'pending'
+            // Default to approved to avoid first-run block; admins can adjust later
+            approval_status: 'approved'
         })
             .select('id, credits_remaining, credits_total_used, approval_status')
             .single();
         userRow = inserted;
     }
+    // Allow pending users to proceed in self-serve flows
     if (userRow?.approval_status === 'pending') {
         return {
-            hasCredits: false,
-            remaining: userRow?.credits_remaining || 0,
-            needsApproval: true,
-            message: 'Your account is pending approval. Please check your email or contact support'
+            hasCredits: true,
+            remaining: userRow?.credits_remaining || INITIAL_CREDITS,
+            needsApproval: false,
+            message: null,
         };
     }
     if (userRow?.approval_status === 'rejected') {
@@ -147,7 +133,7 @@ function summarizeContextForPlan(userContext) {
     const bits = [];
     const profile = userContext.profile || {};
     if (profile.company_name)
-        bits.push(`Company: ${profile.company_name}`);
+        bits.push(`Your org: ${profile.company_name}`);
     if (profile.industry)
         bits.push(`Industry: ${profile.industry}`);
     if (Array.isArray(profile.target_titles) && profile.target_titles.length) {
@@ -246,12 +232,12 @@ export default async function handler(req, res) {
         const token = authHeader.replace('Bearer ', '').trim();
         let user = null;
         if (SUPABASE_SERVICE_ROLE_KEY && token === SUPABASE_SERVICE_ROLE_KEY) {
-            const impersonateId = (body === null || body === void 0 ? void 0 : body.impersonate_user_id) || (body === null || body === void 0 ? void 0 : body.user_id) || (body === null || body === void 0 ? void 0 : body.bulk_user_id);
+            const impersonateId = body?.impersonate_user_id || body?.user_id || body?.bulk_user_id;
             if (!impersonateId || typeof impersonateId !== 'string') {
                 return res.status(400).json({ error: 'impersonate_user_id is required when using a service role token' });
             }
             const { data: impersonated, error: adminErr } = await supabase.auth.admin.getUserById(impersonateId);
-            if (adminErr || !(impersonated === null || impersonated === void 0 ? void 0 : impersonated.user)) {
+            if (adminErr || !impersonated?.user) {
                 console.error('Impersonation lookup failed:', adminErr);
                 return res.status(401).json({ error: 'Unable to impersonate user for service request' });
             }
@@ -259,7 +245,7 @@ export default async function handler(req, res) {
         }
         else {
             const { data, error: authError } = await supabase.auth.getUser(token);
-            if (authError || !(data === null || data === void 0 ? void 0 : data.user)) {
+            if (authError || !data?.user) {
                 return res.status(401).json({ error: 'Invalid authentication token' });
             }
             user = data.user;
@@ -281,12 +267,57 @@ export default async function handler(req, res) {
         }
         const authAndCreditMs = Date.now() - processStart;
         // Parse request body
-        const { messages, systemPrompt, chatId, agentType = 'company_research', config: userConfig = {}, research_type } = body;
+        const { messages, systemPrompt, chatId, chat_id, agentType = 'company_research', config: userConfig = {}, research_type, active_subject } = body;
+        const activeContextCompany = typeof active_subject === 'string' ? active_subject.trim() : '';
         const contextFetchStart = Date.now();
         const userContext = await fetchUserContext(supabase, user.id);
         const contextFetchMs = Date.now() - contextFetchStart;
+        // Subject recall: tiny snapshot of last saved research for active_subject
+        let subjectSnapshot = '';
+        try {
+            if (active_subject && typeof active_subject === 'string' && active_subject.trim().length >= 2) {
+                const { data: ro } = await supabase
+                    .from('research_outputs')
+                    .select('subject, executive_summary')
+                    .eq('user_id', user.id)
+                    .ilike('subject', `%${active_subject}%`)
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+                if (ro && ro.length) {
+                    const exec = (ro[0].executive_summary || '').slice(0, 400);
+                    subjectSnapshot = `\n\n## SUBJECT CONTEXT\nUse only if relevant; prefer fresh research.\n### ${ro[0].subject}\n${exec}`;
+                }
+            }
+        }
+        catch { }
         // Build system prompt if not provided; pass research_type to bias depth
         let instructions = systemPrompt || buildSystemPrompt(userContext, agentType, body.research_type);
+        try {
+            const memoryBlock = await buildMemoryBlock(user.id, agentType);
+            if (memoryBlock) {
+                instructions = `${memoryBlock}\n\n${instructions}`;
+            }
+        }
+        catch (memoryError) {
+            console.error('[memory] failed to load memory block', memoryError);
+        }
+        if (!instructions.startsWith('Formatting re-enabled')) {
+            instructions = `Formatting re-enabled\n\n${instructions}`;
+        }
+        if (subjectSnapshot)
+            instructions += subjectSnapshot;
+        // Apply clarifier lock and facet budget hints
+        // Lock clarifiers when an explicit research_type is provided or when the client requests it.
+        const lockClarifiers = Boolean(userConfig?.clarifiers_locked || research_type);
+        if (lockClarifiers) {
+            instructions += `\n\n<clarifiers_policy>Clarifiers are locked for this request. Do not ask setup questions or present checklists. Proceed with standard coverage using sensible defaults.</clarifiers_policy>`;
+        }
+        if (typeof userConfig?.facet_budget === 'number') {
+            instructions += `\n\n<facet_budget>${userConfig.facet_budget}</facet_budget>`;
+        }
+        if (typeof userConfig?.summary_brevity === 'string') {
+            instructions += `\n\n<summary_brevity>${userConfig.summary_brevity}</summary_brevity>`;
+        }
         // Append guardrail hint if present in prompt config
         try {
             const guard = userContext.promptConfig?.guardrail_profile;
@@ -294,12 +325,20 @@ export default async function handler(req, res) {
                 instructions += `\n\n<guardrails>Use guardrail profile: ${guard}. Respect source allowlists and safety constraints.</guardrails>`;
         }
         catch { }
-        if (typeof (userConfig === null || userConfig === void 0 ? void 0 : userConfig.summary_brevity) === 'string') {
-            instructions += `\n\n<summary_brevity>${userConfig.summary_brevity}</summary_brevity>`;
+        // If a client-selected template is provided, request the exact section order
+        try {
+            const tpl = userConfig?.template;
+            if (tpl && Array.isArray(tpl.sections) && tpl.sections.length > 0) {
+                const sectionList = tpl.sections.map((s) => `## ${s.label || s.id}`).join(`\n`);
+                const tplBlock = `\n\n<output_sections>Use the following sections in this exact order. Do not add placeholders and do not invent extra headings.\n${sectionList}\n</output_sections>`;
+                instructions += tplBlock;
+            }
         }
-        instructions += `\n\n<streaming_guidance>Stream your thinking immediately in short bullet updates. Narrate progress while research tasks run. Keep each update concise.</streaming_guidance>`;
+        catch { }
+        // Avoid encouraging verbose internal narration; let the model decide when brief progress helps.
         let input;
         let lastUserMessage = null;
+        let effectiveRequest = '';
         // If we have messages array, convert it to the Responses API format
         if (messages && messages.length > 0) {
             // For Responses API, we need to convert messages to a string format
@@ -312,24 +351,40 @@ export default async function handler(req, res) {
                 // Intent classification: decide whether to perform research or just reply briefly
                 const _text = String(lastUserMessage.content || '').trim();
                 let _isResearchQuery = classifyResearchIntent(_text);
-                if (!_isResearchQuery && research_type) {
+                if (!_isResearchQuery && (research_type || activeContextCompany)) {
                     _isResearchQuery = true;
                 }
                 console.log('[DEBUG] Research classification', {
                     raw: _text,
                     classified: _isResearchQuery,
-                    research_type
+                    research_type,
+                    activeContextCompany
                 });
                 req.__isResearchQuery = _isResearchQuery;
+                effectiveRequest = lastUserMessage.content || '';
+                if (_isResearchQuery && activeContextCompany) {
+                    const extractedCompanyName = extractCompanyName(lastUserMessage.content);
+                    const pronounMatch = /\b(their|they|them|it|its)\b/i.test(lastUserMessage.content);
+                    const followUpMatch = /\b(ceo|cto|cfo|founder|leadership|headquarters|hq|revenue|funding|employees|valuation|security|stack|product|roadmap)\b/i.test(lastUserMessage.content);
+                    if (!extractedCompanyName && (pronounMatch || followUpMatch)) {
+                        effectiveRequest = `${lastUserMessage.content}\n\nContext: The company in focus is ${activeContextCompany}.`;
+                    }
+                }
+                else if (_isResearchQuery && !activeContextCompany) {
+                    // Fallback: extract a subject from the request and pass it as explicit context
+                    const dc = extractCompanyName(lastUserMessage.content);
+                    if (dc) {
+                        effectiveRequest = `${lastUserMessage.content}\n\nContext: The company in focus is ${dc}.`;
+                    }
+                }
                 if (_isResearchQuery || research_type) {
-                    // Build explicit research task input
-                    // Include brief recent context (last 4 messages) so we don't lose company URL or scope already provided
-                    const recent = (messages || []).slice(-4).map(m => {
+                    // Build explicit research task input and include brief recent context
+                    const recent = (messages || []).slice(-4).map((m) => {
                         const role = m.role === 'user' ? 'User' : (m.role === 'assistant' ? 'Assistant' : 'System');
                         const text = String(m.content || '').replace(/\s+/g, ' ').trim();
                         return `${role}: ${text}`;
                     }).join('\n');
-                    input = `Task: Perform company research as specified in the instructions.\n\nRecent context (last turns):\n${recent}\n\nRequest: ${lastUserMessage.content}\n\nPlease use the web_search tool to research this company and provide a concise, well-formatted analysis following the output structure defined in the instructions.`;
+                    input = `Task: Perform company research as specified in the instructions.\n\nRecent context (last turns):\n${recent}\n\nRequest: ${effectiveRequest}\n\nPlease use the web_search tool to research this company and provide a concise, well-formatted analysis following the output structure defined in the instructions.`;
                 }
                 else {
                     // Generic small talk / non-research: short helpful reply only (no web_search)
@@ -363,6 +418,7 @@ export default async function handler(req, res) {
         // Initialize OpenAI
         const openai = new OpenAI({
             apiKey: OPENAI_API_KEY,
+            project: process.env.OPENAI_PROJECT,
         });
         // Set up streaming response headers
         res.writeHead(200, {
@@ -407,34 +463,95 @@ export default async function handler(req, res) {
             console.log('[DEBUG] Input full text:\n', input);
             console.log('[DEBUG] ENABLE_PROMPT_DEBUG resolved to:', process.env.ENABLE_PROMPT_DEBUG);
             const requestText = lastUserMessage?.content || '';
+            const normalizedRequest = requestText.toLowerCase();
             const isResearchQuery = research_type ? true : !!req.__isResearchQuery;
             const defaultModel = (() => {
-                if (research_type === 'deep')
-                    return 'gpt-5';
-                if (research_type === 'quick')
-                    return 'gpt-5-mini';
+                // Default all research modes to gpt-5-mini for cost efficiency
                 return 'gpt-5-mini';
             })();
             const selectedModel = userConfig.model || defaultModel;
             const reasoningEffort = research_type === 'deep' ? 'medium' : 'low';
-            const wantsFreshIntel = /recent|latest|today|yesterday|this week|signals?|news|breach|breaches|leadership|funding|acquisition|hiring|layoff|changed|update|report/i.test(requestText.toLowerCase());
-            let useTools = research_type === 'deep' || (!research_type && isResearchQuery);
-            if (research_type === 'specific' && !wantsFreshIntel) {
-                useTools = false;
+            const isQuick = research_type === 'quick';
+            // Summarization mode: if the client passed summarize_source, bypass research flow
+            const summarizeSource = userConfig?.summarize_source;
+            if (summarizeSource && typeof summarizeSource === 'string' && summarizeSource.trim().length > 0) {
+                const sumInstructions = [
+                    'You write crisp executive summaries for sales research.',
+                    `Output format strictly:
+## Executive Summary
+<2 short sentences with headline>
+
+## Key Takeaways
+- 5–8 bullets, each ≤18 words, decision-focused, grounded in the source`,
+                    'Do not add extra sections. Do not use web_search. No boilerplate.',
+                ].join('\n');
+                const sumInput = `SOURCE\n---\n${summarizeSource}\n---\nSummarize for an Account Executive.`;
+                const stream = await openai.responses.stream({
+                    model: 'gpt-5-mini',
+                    instructions: sumInstructions,
+                    input: sumInput,
+                    text: { format: { type: 'text' }, verbosity: 'low' },
+                    store: false,
+                    metadata: {
+                        agent: 'company_research',
+                        stage: 'user_summarize',
+                        chat_id: chatId || null,
+                        user_id: user.id,
+                    },
+                });
+                for await (const chunk of stream) {
+                    if (responseClosed)
+                        break;
+                    if (chunk.type === 'response.output_text.delta' && chunk.delta) {
+                        safeWrite(`data: ${JSON.stringify({ type: 'content', content: chunk.delta })}\n\n`);
+                    }
+                }
+                try {
+                    await stream.finalResponse();
+                }
+                catch { }
+                safeWrite('data: [DONE]\n\n');
+                responseClosed = true;
+                return;
             }
-            if (research_type === 'quick') {
-                useTools = false;
+            const wantsFreshIntel = /recent|latest|today|yesterday|this week|signals?|news|breach|breaches|leadership|funding|acquisition|hiring|layoff|changed|update|report/i.test(normalizedRequest);
+            const mentionsTimeframe = /\b(last|past)\s+\d+\s+(day|days|week|weeks|month|months|year|years)\b/i.test(requestText);
+            const explicitlyRequestsSearch = /\bweb[_\s-]?search\b/.test(normalizedRequest) || /\b(search online|look up|google|check the web)\b/.test(normalizedRequest);
+            const needsFreshLookup = wantsFreshIntel || mentionsTimeframe || explicitlyRequestsSearch;
+            let useTools = isResearchQuery || explicitlyRequestsSearch;
+            if (research_type === 'deep' || research_type === 'quick') {
+                useTools = true;
+            }
+            if (research_type === 'specific' && !useTools) {
+                useTools = true;
             }
             if (!useTools) {
-                instructions += '\n\n<tool_policy>Do not call web_search unless a user explicitly asks for fresh external data. Prioritize saved profile context and internal knowledge.</tool_policy>';
+                instructions += '\n\n<tool_policy>Call web_search only when the user explicitly asks for fresh external data or provides a recent timeframe. Otherwise prioritise saved profile context and internal knowledge.</tool_policy>';
+            }
+            else {
+                instructions += '\n\n<tool_policy>Use web_search when the user explicitly asks for it or references recent timeframes (e.g., last 12 months). Avoid unnecessary calls when profile context already answers the question.</tool_policy>';
             }
             if (isResearchQuery) {
                 const contextSummary = summarizeContextForPlan(userContext).replace(/\s+/g, ' ').trim();
-                const preview = contextSummary ? `Planning next steps using: ${contextSummary.slice(0, 160)}${contextSummary.length > 160 ? '…' : ''}` : 'Planning next steps using your saved preferences…';
+                const detectedCompany = extractCompanyName(lastUserMessage?.content);
+                let preview = '';
+                if (detectedCompany) {
+                    preview = `Researching ${detectedCompany} using your saved profile and qualifying criteria…`;
+                }
+                else if (activeContextCompany) {
+                    preview = `Researching ${activeContextCompany} using your saved profile and qualifying criteria…`;
+                }
+                else if (contextSummary) {
+                    preview = `Researching using your saved profile: ${contextSummary.slice(0, 160)}${contextSummary.length > 160 ? '…' : ''}`;
+                }
+                else {
+                    preview = 'Researching using your saved profile and preferences…';
+                }
                 safeWrite(`data: ${JSON.stringify({ type: 'reasoning_progress', content: preview })}\n\n`);
             }
-            const storeRun = userConfig?.debug_store ?? true;
+            const storeRun = true;
             const shouldPlanStream = isResearchQuery && !userConfig?.disable_fast_plan;
+            // Emit a hard-coded acknowledgment only if the fast plan stream is disabled
             if (!shouldPlanStream) {
                 try {
                     const lastUser = Array.isArray(messages) ? messages.filter(m => m.role === 'user').pop() : null;
@@ -474,9 +591,26 @@ export default async function handler(req, res) {
             });
             let planPromise = null;
             if (shouldPlanStream && lastUserMessage?.content) {
-                const planInstructions = `You are the fast planning cortex for a research assistant.\n- Start with a single standalone acknowledgement sentence that confirms you are beginning now, states the research mode (deep/quick/specific/auto), and gives a realistic ETA (deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈1-2 min).\n- Immediately follow with 2-3 markdown bullet steps (prefix each with "- ") describing the investigative actions you will take.\n- Keep bullets under 12 words, action-oriented, and reference saved preferences when they change sequencing.\n- Do not ask the user questions or request clarifications; assume sensible defaults.\n- Do not add closing statements or extra blank lines.`;
+                const planInstructions = `You are the fast planning cortex for a research assistant.\n- Start with a single standalone acknowledgement sentence that confirms you are beginning now, states the research mode (deep/quick/specific/auto), mentions the **research subject** from the input, and gives a realistic ETA (deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈1-2 min).\n- Immediately follow with 2-3 markdown bullet steps (prefix each with "- ") describing the investigative actions you will take.\n- Keep bullets under 12 words, action-oriented, and reference saved preferences when they change sequencing.\n- When referencing the company you are researching, always use the "Research subject" field from the input (never the profile context labels).\n- Do not ask the user questions or request clarifications; assume sensible defaults.\n- Do not add closing statements or extra blank lines.`;
                 const contextSummary = summarizeContextForPlan(userContext).slice(0, 600);
-                const planInput = `Research mode: ${research_type || (isResearchQuery ? 'auto' : 'general')}\nUser request: ${lastUserMessage.content}\nETA guide: deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈90 sec.\nRelevant context:\n${contextSummary || 'No saved profile context yet.'}`;
+                const detectedCompanyRaw = extractCompanyName(lastUserMessage.content);
+                const fallbackCompany = typeof activeContextCompany === 'string' ? activeContextCompany.trim() : '';
+                const isLikelySubject = (value) => {
+                    if (!value)
+                        return false;
+                    const trimmed = value.trim();
+                    if (!trimmed)
+                        return false;
+                    if (trimmed.length > 80)
+                        return false;
+                    return !/^(summarize|continue|resume|draft|write|compose|email|refine|help me|start|begin|generate|rerun|retry)/i.test(trimmed);
+                };
+                const detectedCompany = isLikelySubject(detectedCompanyRaw)
+                    ? detectedCompanyRaw
+                    : isLikelySubject(fallbackCompany)
+                        ? fallbackCompany
+                        : '';
+                const planInput = `Research mode: ${research_type || (isResearchQuery ? 'auto' : 'general')}\nResearch subject: ${detectedCompany || 'Not specified'}\nUser request: ${effectiveRequest}\nETA guide: deep ≈2 min, quick ≈30 sec, specific ≈1 min, auto ≈90 sec.\nSaved profile context (do not confuse with research subject):\n${contextSummary || 'No saved profile context yet.'}`;
                 planPromise = (async () => {
                     try {
                         const fastStream = await openai.responses.stream({
@@ -527,10 +661,13 @@ export default async function handler(req, res) {
                 model: selectedModel,
                 instructions,
                 input,
-                text: { format: { type: 'text' }, verbosity: 'low' },
+                text: { format: { type: 'text' }, verbosity: isQuick ? 'low' : 'medium' },
                 reasoning: { effort: reasoningEffort },
                 tools: useTools ? [{ type: 'web_search' }] : [],
+                include: ['reasoning.encrypted_content', 'web_search_call.results'],
                 parallel_tool_calls: useTools,
+                temperature: isQuick ? 0.2 : undefined,
+                max_output_tokens: isQuick ? 450 : undefined,
                 store: storeRun,
                 metadata: {
                     agent: 'company_research',
@@ -548,6 +685,9 @@ export default async function handler(req, res) {
                     model: selectedModel,
                     route: 'vercel/api/ai/chat',
                     runtime: 'nodejs',
+                    project_masked: (process.env.OPENAI_PROJECT || '').slice(0, 8) || null,
+                    project_set: Boolean(process.env.OPENAI_PROJECT),
+                    store: storeRun,
                     timings: {
                         auth_ms: authAndCreditMs,
                         context_ms: contextFetchMs,
@@ -559,13 +699,13 @@ export default async function handler(req, res) {
             catch (metaErr) {
                 console.error('Failed to emit meta event', metaErr);
             }
-    let accumulatedContent = '';
-    let chunkCount = 0;
-    let metaSent = false;
-    let firstContentSent = false;
-    let firstContentAt = null;
-    let reasoningStartedAt = null;
-    let contentLatencyEmitted = false;
+            let accumulatedContent = '';
+            let chunkCount = 0;
+            let metaSent = false;
+            let firstContentSent = false;
+            let firstContentAt = null;
+            let reasoningStartedAt = null;
+            let contentLatencyEmitted = false;
             let keepAliveDelay = 2000;
             const scheduleKeepAlive = () => {
                 keepAlive = setTimeout(() => {
@@ -592,6 +732,11 @@ export default async function handler(req, res) {
                     console.warn('Failed to emit prompt debug event', debugErr);
                 }
             }
+            // Configure reasoning streaming behaviour
+            // We keep reasoning visible in all modes. For quick mode, we throttle/compact updates.
+            const forwardReasoning = true;
+            let quickReasoningBuffer = '';
+            let quickReasoningLastEmit = 0;
             // Process the stream
             for await (const chunk of stream) {
                 chunkCount++;
@@ -604,38 +749,57 @@ export default async function handler(req, res) {
                     safeWrite(`data: ${JSON.stringify({ type: 'meta', response_id: chunk.response.id, model: selectedModel })}\n\n`);
                     metaSent = true;
                 }
-        if (chunk.type === 'response.reasoning_summary_text.delta' || chunk.type === 'response.reasoning.delta') {
-            const delta = chunk.delta || '';
-            if (delta) {
-                if (reasoningStartedAt == null) {
-                    reasoningStartedAt = Date.now();
-                    safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'reasoning_start', ms_since_request: reasoningStartedAt - processStart })}\n\n`);
-                }
-                safeWrite(`data: ${JSON.stringify({ type: 'reasoning', content: delta })}\n\n`);
-            }
-        }
-        else if (chunk.type === 'response.output_text.delta') {
-            if (chunk.delta) {
-                accumulatedContent += chunk.delta;
-                safeWrite(`data: ${JSON.stringify({
-                    type: 'content',
-                    content: chunk.delta
-                })}\n\n`);
-                if (!firstContentSent) {
-                    firstContentSent = true;
-                    firstContentAt = Date.now();
-                    safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'primary', event: 'first_delta', ttfb_ms: firstContentAt - processStart })}\n\n`);
-                    if (!contentLatencyEmitted && reasoningStartedAt != null) {
-                        contentLatencyEmitted = true;
-                        safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'content_latency', reasoning_to_content_ms: firstContentAt - reasoningStartedAt })}\n\n`);
-                    }
-                    if (keepAlive) {
-                        clearTimeout(keepAlive);
-                        keepAlive = null;
+                if ((chunk.type === 'response.reasoning_summary_text.delta' || chunk.type === 'response.reasoning.delta')) {
+                    const delta = chunk.delta || '';
+                    if (delta && forwardReasoning) {
+                        if (reasoningStartedAt == null) {
+                            reasoningStartedAt = Date.now();
+                            safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'reasoning_start', ms_since_request: reasoningStartedAt - processStart })}\n\n`);
+                        }
+                        if (isQuick) {
+                            // Throttle and compact reasoning updates for quick mode
+                            quickReasoningBuffer += delta;
+                            const now = Date.now();
+                            if (now - quickReasoningLastEmit >= 800) {
+                                const lines = quickReasoningBuffer.split(/\n+/).filter(Boolean);
+                                const lastLine = lines.length ? lines[lines.length - 1] : quickReasoningBuffer;
+                                const compact = (lastLine || quickReasoningBuffer).trim().slice(-200);
+                                if (compact) {
+                                    safeWrite(`data: ${JSON.stringify({ type: 'reasoning', content: compact })}\n\n`);
+                                    quickReasoningLastEmit = now;
+                                    quickReasoningBuffer = '';
+                                }
+                            }
+                        }
+                        else {
+                            // Deep/specific: stream as-is
+                            safeWrite(`data: ${JSON.stringify({ type: 'reasoning', content: delta })}\n\n`);
+                        }
                     }
                 }
-            }
-        }
+                else if (chunk.type === 'response.output_text.delta') {
+                    // This is a text delta event - send the content
+                    if (chunk.delta) {
+                        accumulatedContent += chunk.delta;
+                        safeWrite(`data: ${JSON.stringify({
+                            type: 'content',
+                            content: chunk.delta
+                        })}\n\n`);
+                        if (!firstContentSent) {
+                            firstContentSent = true;
+                            firstContentAt = Date.now();
+                            safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'primary', event: 'first_delta', ttfb_ms: firstContentAt - processStart })}\n\n`);
+                            if (!contentLatencyEmitted && reasoningStartedAt != null) {
+                                contentLatencyEmitted = true;
+                                safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'content_latency', reasoning_to_content_ms: firstContentAt - reasoningStartedAt })}\n\n`);
+                            }
+                            if (keepAlive) {
+                                clearTimeout(keepAlive);
+                                keepAlive = null;
+                            }
+                        }
+                    }
+                }
                 else if (chunk.type?.includes('tool') ||
                     chunk.type === 'response.function_call.arguments.delta' ||
                     chunk.type === 'response.function_call.done') {
@@ -657,6 +821,16 @@ export default async function handler(req, res) {
                     }
                 }
                 else if (chunk.type === 'response.completed') {
+                    // Flush any remaining compacted quick-mode reasoning
+                    if (quickReasoningBuffer.trim()) {
+                        const lines = quickReasoningBuffer.split(/\n+/).filter(Boolean);
+                        const lastLine = lines.length ? lines[lines.length - 1] : quickReasoningBuffer;
+                        const compact = (lastLine || quickReasoningBuffer).trim().slice(-200);
+                        if (compact) {
+                            safeWrite(`data: ${JSON.stringify({ type: 'reasoning', content: compact })}\n\n`);
+                        }
+                        quickReasoningBuffer = '';
+                    }
                     // Response is complete
                     safeWrite(`data: ${JSON.stringify({
                         type: 'done',
@@ -676,8 +850,88 @@ export default async function handler(req, res) {
             catch (finalErr) {
                 console.error('Stream finalization error:', finalErr);
             }
+            if (storeRun && finalResponseData?.id) {
+                const id = finalResponseData.id;
+                const delays = [200, 400, 800, 1500, 2500];
+                let verified = null;
+                for (const d of delays) {
+                    try {
+                        verified = await openai.responses.retrieve(id);
+                        break;
+                    }
+                    catch (e) {
+                        await new Promise(r => setTimeout(r, d));
+                    }
+                }
+                if (verified?.status) {
+                    console.log('[OPENAI] Stored response status:', verified.status);
+                }
+                else {
+                    console.warn('[OPENAI] Response not yet visible for id:', id);
+                }
+            }
+            try {
+                if (finalResponseData?.id) {
+                    safeWrite(`data: ${JSON.stringify({
+                        type: 'meta',
+                        stage: 'primary',
+                        event: 'finalized',
+                        response_id_authoritative: finalResponseData.id
+                    })}\n\n`);
+                }
+            }
+            catch (finalMetaErr) {
+                console.error('Failed to emit final meta event', finalMetaErr);
+            }
             console.log('[DEBUG] Stream processing complete. Total chunks:', chunkCount);
             console.log('[DEBUG] Total content length:', accumulatedContent.length);
+            const shouldGenerateTldr = isResearchQuery && estimateTokens(accumulatedContent) > 350;
+            if (shouldGenerateTldr) {
+                try {
+                    safeWrite(`data: ${JSON.stringify({ type: 'tldr_status', content: 'Generating executive TL;DR…' })}\n\n`);
+                    const trimmedForSummary = accumulatedContent.length > 24000
+                        ? accumulatedContent.slice(0, 24000)
+                        : accumulatedContent;
+                    const summaryStream = await openai.responses.stream({
+                        model: 'gpt-5-mini',
+                        instructions: 'You craft concise executive TL;DRs for sales research. Output format:\n## TL;DR\n**Headline:** <<=140 char headline>\n- Bullet 1\n- Bullet 2\n(5-8 bullets, each ≤18 words, action-focused, referencing concrete facts.)\nDo not add extra sections.',
+                        input: [
+                            {
+                                role: 'user',
+                                content: [{
+                                        type: 'input_text',
+                                        text: `Create an executive TL;DR for the following research. Do not repeat the full report, focus on headline insight and 5-8 decision-ready bullets.\n\n${trimmedForSummary}`
+                                    }]
+                            },
+                        ],
+                        text: { format: { type: 'text' }, verbosity: 'low' },
+                        store: false,
+                        metadata: {
+                            agent: 'company_research',
+                            stage: 'auto_tldr',
+                            chat_id: chatId || null,
+                            user_id: user.id
+                        }
+                    });
+                    for await (const summaryChunk of summaryStream) {
+                        if (responseClosed)
+                            break;
+                        if (summaryChunk.type === 'response.output_text.delta' && summaryChunk.delta) {
+                            safeWrite(`data: ${JSON.stringify({ type: 'tldr', content: summaryChunk.delta })}\n\n`);
+                        }
+                    }
+                    try {
+                        await summaryStream.finalResponse();
+                    }
+                    catch (summaryFinalizeErr) {
+                        console.error('TL;DR finalization error:', summaryFinalizeErr);
+                    }
+                }
+                catch (summaryErr) {
+                    console.error('Auto TL;DR generation failed:', summaryErr);
+                    safeWrite(`data: ${JSON.stringify({ type: 'tldr_error', message: 'TL;DR unavailable' })}\n\n`);
+                }
+            }
             if (planPromise) {
                 try {
                     await planPromise;
@@ -705,6 +959,36 @@ export default async function handler(req, res) {
                 final_response_id: finalResponseData?.id || finalResponseData?.response?.id || null
             });
             await deductCredits(supabase, user.id, totalEstimatedTokens);
+            // Background: rolling summary
+            ;
+            (async () => {
+                try {
+                    const cid = chat_id || chatId || null;
+                    if (!cid)
+                        return;
+                    const summaryInput = `Summarize in 1–2 sentences (main subject + intent).\n\n${(input || '').slice(0, 3500)}`;
+                    const openai = new OpenAI({ apiKey: OPENAI_API_KEY, project: process.env.OPENAI_PROJECT });
+                    const sum = await openai.responses.create({
+                        model: 'gpt-5-mini',
+                        input: [
+                            { role: 'system', content: [{ type: 'input_text', text: 'Summarize in 1–2 sentences with the main subject and intent.' }] },
+                            { role: 'user', content: [{ type: 'input_text', text: summaryInput }] },
+                        ],
+                        text: { format: { type: 'text' }, verbosity: 'low' },
+                        store: false,
+                    });
+                    const chatSummary = sum?.output_text || '';
+                    if (chatSummary) {
+                        await supabase
+                            .from('chats')
+                            .update({ summary: chatSummary, message_count_at_summary: Array.isArray(messages) ? messages.length : null })
+                            .eq('id', cid);
+                    }
+                }
+                catch (e) {
+                    console.warn('Rolling summary (vercel) failed', e);
+                }
+            })();
         }
         catch (streamError) {
             console.error('Streaming error:', streamError);

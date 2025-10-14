@@ -52,7 +52,7 @@ export default async function handler(req, res) {
             importance: c.importance,
             hints: c.hints || [],
         }));
-        const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+        const openai = new OpenAI({ apiKey: OPENAI_API_KEY, project: process.env.OPENAI_PROJECT });
         const instructions = `You are a precise evaluator. Given the user's research markdown and their custom qualifying criteria, evaluate each criterion and return strict JSON.
 Return an array of objects with keys: id, name, status (met|not_met|unknown), value, confidence (low|medium|high), explanation, source (URL if available).
 Use only information from the research content; if missing, set status=unknown. Infer values conservatively and include a short explanation.`;
