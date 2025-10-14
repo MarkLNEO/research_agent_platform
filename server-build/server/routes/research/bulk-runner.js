@@ -112,11 +112,11 @@ async function runCompanyResearch(company, depth, key) {
     const instructions = `You are an elite B2B research agent. Output a concise, well-structured markdown report for sales meeting prep.`;
     const input = `Research ${company}. Focus: ${focus}. Return an executive summary first, then bullet sections.`;
     const body = {
-        model: depth === 'deep' ? 'gpt-5' : 'gpt-5-mini',
+        model: 'gpt-5-mini',
         instructions,
         input,
         tools: [{ type: 'web_search' }],
-        text: { format: { type: 'text' }, verbosity: depth === 'deep' ? 'medium' : 'low' },
+        text: { format: { type: 'text' }, verbosity: 'low' },
         stream: false,
         store: false,
     };

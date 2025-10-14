@@ -32,7 +32,7 @@ export default async function handler(req, res) {
             supabase.from('user_signal_preferences').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
             supabase
                 .from('tracked_accounts')
-                .select(`*, recent_signals:account_signals!account_signals_account_id_fkey(id, signal_type, severity, description, signal_date, source_url, score, viewed)`)
+                .select(`*, recent_signals:account_signals!account_signals_account_id_fkey(id, signal_type, severity, description, signal_date, source_url, score, viewed, metadata)`)
                 .eq('user_id', user.id)
                 .gte('account_signals.signal_date', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
                 .order('priority', { ascending: false })
@@ -70,6 +70,8 @@ export default async function handler(req, res) {
                 days_ago: Math.floor((Date.now() - new Date(s.signal_date).getTime()) / (1000 * 60 * 60 * 24)),
                 source_url: s.source_url,
                 score: s.score,
+                impact: typeof s.metadata?.impact === 'string' ? s.metadata.impact : undefined,
+                recommended_action: typeof s.metadata?.recommended_action === 'string' ? s.metadata.recommended_action : undefined
             }));
             if (unviewed.length)
                 accountStats.with_signals++;
@@ -80,12 +82,58 @@ export default async function handler(req, res) {
         const topSignals = allSignals.slice(0, 5);
         // Suggestions
         const suggestions = [];
+        const spotlights = [];
+        let openingLine = '';
         if (topSignals.length) {
+            const first = topSignals[0];
+            const severityBadge = first.severity === 'critical' ? 'critical signal' : first.severity === 'high' ? 'high-priority signal' : 'signal';
+            openingLine = `${first.company_name} triggered a ${severityBadge} ${first.days_ago === 0 ? 'today' : `${first.days_ago} day${first.days_ago === 1 ? '' : 's'} ago`}. Want me to dig in?`;
+            const impact = typeof first.impact === 'string' && first.impact.trim().length > 0
+                ? first.impact.trim()
+                : 'This is a timely buying signal worth reviewing.';
+            const actionPrompt = typeof first.recommended_action === 'string' && first.recommended_action.trim().length > 0
+                ? first.recommended_action.trim()
+                : `Research ${first.company_name} and show the implications of this ${first.signal_type.replace(/_/g, ' ')}.`;
+            spotlights.push({
+                icon: first.severity === 'critical' ? '🚨' : '⚡',
+                label: `${first.company_name} · ${first.signal_type.replace(/_/g, ' ')}`,
+                detail: impact,
+                prompt: actionPrompt,
+                tone: first.severity === 'critical' ? 'critical' : 'info'
+            });
+            suggestions.push(`Research ${first.company_name} and summarise what's changed since the last report`);
             suggestions.push('Which of my accounts had changes this week?');
-            suggestions.push(`Research ${topSignals[0].company_name} and show me what changed`);
         }
-        if (accountStats.stale > 0)
+        if (!openingLine) {
+            if (accountStats.hot > 0) {
+                openingLine = `${accountStats.hot} of your tracked accounts are hot right now. Want a quick briefing?`;
+            }
+            else if (accountStats.total > 0) {
+                openingLine = `You're tracking ${accountStats.total} accounts. Want me to highlight the most active ones?`;
+            }
+            else {
+                openingLine = 'Ready when you are—just name a company and I’ll prep the intel.';
+            }
+        }
+        if (accountStats.stale > 0) {
+            spotlights.push({
+                icon: '⏳',
+                label: `${accountStats.stale} accounts need a refresh`,
+                detail: 'It’s been 14+ days since the last research run—perfect time for an update.',
+                prompt: 'Refresh the accounts that have not been researched in the last 2 weeks',
+                tone: 'info'
+            });
             suggestions.push("Which accounts haven't been updated in 2+ weeks?");
+        }
+        if (signalPrefsCount === 0) {
+            spotlights.push({
+                icon: '📡',
+                label: 'No automatic signal monitoring yet',
+                detail: 'Tell me the triggers that matter (leadership changes, breaches, funding) and I’ll watch them for you.',
+                prompt: 'Help me configure signal monitoring for my target accounts',
+                tone: 'info'
+            });
+        }
         if (accountStats.total >= 5)
             suggestions.push('Research my top 5 accounts and summarize findings');
         if (suggestions.length < 3) {
@@ -93,6 +141,7 @@ export default async function handler(req, res) {
                 suggestions.push('Tell me about my account portfolio');
             suggestions.push('What can you help me with?');
         }
+        const uniqueSuggestions = Array.from(new Set(suggestions)).slice(0, 4);
         const hour = new Date().getHours();
         const timeOfDay = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
         const firstName = user.user_metadata?.name?.split(' ')[0] || (user.email?.split('@')[0] ?? 'there');
@@ -111,9 +160,15 @@ export default async function handler(req, res) {
             profileHealth += 10;
         const body = {
             greeting: { time_of_day: timeOfDay, user_name: firstName },
-            signals: topSignals,
+            signals: topSignals.map((signal) => ({
+                ...signal,
+                impact: typeof signal.impact === 'string' ? signal.impact : undefined,
+                recommended_action: typeof signal.recommended_action === 'string' ? signal.recommended_action : undefined
+            })),
             account_stats: accountStats,
-            suggestions: suggestions.slice(0, 3),
+            suggestions: uniqueSuggestions,
+            opening_line: openingLine,
+            spotlights,
             user_context: {
                 first_name: firstName,
                 role: profile?.user_role,

@@ -74,8 +74,10 @@ export function MessageBubble({
   const icpMeta = useMemo(() => {
     if (!isCompanyResearch || role !== 'assistant' || streaming) return null;
     // Do not show ICP scorecard for draft email content
-    const isDraftEmail = /^\s*##\s*Draft Email\b/i.test(safeContent);
-    if (isDraftEmail) return null;
+    if (/^\s*##\s*Draft Email\b/i.test(safeContent)) return null;
+    // Only show ICP card for full research outputs that include a real Executive Summary section.
+    const hasExecSummary = /^##\s+Executive Summary\b/im.test(safeContent);
+    if (!hasExecSummary) return null;
     try {
       return deriveIcpMeta(safeContent);
     } catch {

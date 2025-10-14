@@ -1528,7 +1528,10 @@ useEffect(() => {
       } catch {}
       // Build config to influence model depth based on user preference/clarifier
       const overrideDepth = options?.overrideDepth;
-      const depth = overrideDepth || preferredResearchType || 'deep';
+      // Auto-detect short follow-up questions and force 'specific' when an active subject exists
+      const shortFollowUp = /^(who|what|when|where|which|how|do|does|did|is|are|was|were)\b/i.test(userMessage.trim()) && userMessage.trim().length <= 120 && Boolean(activeSubject);
+      const inferredDepth: 'deep' | 'quick' | 'specific' | undefined = shortFollowUp ? 'specific' : undefined;
+      const depth = overrideDepth || inferredDepth || preferredResearchType || 'deep';
       setLastRunMode((depth as any) || 'auto');
       const cfg: any = { ...(options?.config || {}) };
       if (depth === 'deep') cfg.model = 'gpt-5-mini';

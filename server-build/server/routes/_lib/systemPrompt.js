@@ -51,8 +51,12 @@ const DEFAULT_CRITERIA_GUIDANCE = `Default Qualifying Criteria (assume when none
 3. Supply chain resilience and regulatory pressure (FAA, DoD, CMMC).
 4. Cloud/Zero Trust adoption progress.
 Evaluate each explicitly and state status (Met / Not met / Unknown) in a "Custom Criteria" subsection or within Key Findings. Do not ask the user to confirm these defaults; infer from context.`;
-const buildImmediateAckGuidance = (mode)=>{
-    const descriptor = mode === 'quick' ? 'quick scan (~30 sec)' : mode === 'specific' ? 'specific insight (~20 sec)' : 'deep dive (~2 min)';
+const buildImmediateAckGuidance = (mode) => {
+    const descriptor = mode === 'quick'
+        ? 'quick scan (~30 sec)'
+        : mode === 'specific'
+            ? 'specific insight (~20 sec)'
+            : 'deep dive (~2 min)';
     return `Immediate acknowledgement:
 - As soon as you begin responding, send a warm, human acknowledgement line that confirms you are on it, states the inferred research mode (${descriptor}), and gives a realistic ETA.
 - Keep it informal but professional (think trusted teammate).`;
@@ -130,8 +134,8 @@ function serializeCriteria(criteria) {
         return '';
     return criteria
         .map((c, idx) => {
-        const name = (c === null || c === void 0 ? void 0 : c.field_name) || `Criterion ${idx + 1}`;
-        const importance = (c === null || c === void 0 ? void 0 : c.importance) ? ` (${c.importance})` : '';
+        const name = c?.field_name || `Criterion ${idx + 1}`;
+        const importance = c?.importance ? ` (${c.importance})` : '';
         return `- ${name}${importance}`;
     })
         .join('\n');
@@ -141,28 +145,27 @@ function serializeSignals(signals) {
         return '';
     return signals
         .slice(0, 5)
-        .map((s) => `- ${(s === null || s === void 0 ? void 0 : s.signal_type) || 'signal'} :: importance=${(s === null || s === void 0 ? void 0 : s.importance) || 'n/a'} :: keywords=${((s === null || s === void 0 ? void 0 : s.config)?.keywords || []).join(', ')}`)
+        .map((s) => `- ${s?.signal_type || 'signal'} :: importance=${s?.importance || 'n/a'} :: keywords=${(s?.config?.keywords || []).join(', ')}`)
         .join('\n');
 }
 function serializeDisqualifiers(disqualifiers) {
     if (!Array.isArray(disqualifiers) || disqualifiers.length === 0)
         return '';
     return disqualifiers
-        .map((d, idx) => `- ${(d === null || d === void 0 ? void 0 : d.criterion) || `Disqualifier ${idx + 1}`}`)
+        .map((d, idx) => `- ${d?.criterion || `Disqualifier ${idx + 1}`}`)
         .join('\n');
 }
 export function buildSystemPrompt(userContext, agentType = 'company_research', researchMode = undefined) {
     const isResearchAgent = agentType === 'company_research';
     const isSettingsAgent = agentType === 'settings_agent';
+    const isProfilerAgent = agentType === 'company_profiler';
     const role = AGENT_ROLE[agentType] || AGENT_ROLE.company_research;
     const header = `You are RebarHQ's ${role}. Deliver truthful, decision-ready intelligence for enterprise Account Executives.`;
     const behaviour = isSettingsAgent
         ? SETTINGS_BEHAVIOUR
         : `Core behaviours:\n- Be proactive: anticipate follow-up questions and highlight risks/opportunities.\n- Be concise but complete: use bullet hierarchies, tables, and mini-sections when helpful.\n- Cite evidence inline (e.g. "[Source: Bloomberg, Jan 2025]").\n- Flag uncertainty explicitly.\n- ${STREAMING_BEHAVIOUR}`;
-    const preferredMode = isResearchAgent
-        ? (userContext.promptConfig?.preferred_research_type || userContext.prompt_config?.preferred_research_type || undefined)
-        : undefined;
-    const resolvedMode = isResearchAgent ? (researchMode || preferredMode || 'deep') : 'deep';
+    const preferredMode = isResearchAgent ? userContext.promptConfig?.preferred_research_type || undefined : undefined;
+    const resolvedMode = (isResearchAgent ? (researchMode || preferredMode || 'deep') : 'deep');
     const modeHint = isResearchAgent ? MODE_HINT[resolvedMode] : null;
     const contextSections = [
         formatSection('Profile', serializeProfile(userContext.profile)),
@@ -197,9 +200,7 @@ export function buildSystemPrompt(userContext, agentType = 'company_research', r
     if (isResearchAgent && userContext.promptConfig?.guardrail_profile) {
         extras.push(`Guardrail profile: ${userContext.promptConfig.guardrail_profile}`);
     }
-    const summaryPref = isResearchAgent
-        ? (userContext.prompt_config?.default_output_brevity ?? userContext.promptConfig?.default_output_brevity)
-        : undefined;
+    const summaryPref = isResearchAgent ? userContext.promptConfig?.default_output_brevity : undefined;
     let summaryPreferenceTag = '';
     if (isResearchAgent && summaryPref === 'short') {
         extras.push('Summary preference: Deliver a crisp executive summary and High Level summary (<=3 bullets) that highlights the sharpest signals only.');

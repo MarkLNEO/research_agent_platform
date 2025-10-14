@@ -198,7 +198,10 @@ function extractCompanyName(raw) {
 }
 export const config = {
     runtime: 'nodejs',
-    maxDuration: 30, // 30 seconds for streaming
+    // Allow up to 300s hard cap on Vercel; we still self-abort earlier.
+    maxDuration: 300,
+    // Pin close to users/OpenAI for lower latency. Adjust if your users are elsewhere.
+    regions: ['sfo1'],
 };
 export default async function handler(req, res) {
     // Handle CORS
@@ -227,6 +230,21 @@ export default async function handler(req, res) {
         return res.status(401).json({ error: 'Missing authorization header' });
     }
     let keepAlive = null;
+    // Global abort controller to ensure we never exceed platform limits
+    const abortController = new AbortController();
+    const overallTimeoutMs = (() => {
+        const fromEnv = Number(process.env.STREAMING_DEADLINE_MS);
+        if (!isNaN(fromEnv) && fromEnv > 0)
+            return Math.min(fromEnv, 295000);
+        // Default: end slightly before Vercel's 300s cap
+        return 280000;
+    })();
+    const overallTimeout = setTimeout(() => {
+        try {
+            abortController.abort();
+        }
+        catch { }
+    }, overallTimeoutMs);
     try {
         const processStart = Date.now();
         const token = authHeader.replace('Bearer ', '').trim();
@@ -268,6 +286,7 @@ export default async function handler(req, res) {
         const authAndCreditMs = Date.now() - processStart;
         // Parse request body
         const { messages, systemPrompt, chatId, chat_id, agentType = 'company_research', config: userConfig = {}, research_type, active_subject } = body;
+        const fastMode = Boolean(userConfig?.fast_mode);
         const activeContextCompany = typeof active_subject === 'string' ? active_subject.trim() : '';
         const contextFetchStart = Date.now();
         const userContext = await fetchUserContext(supabase, user.id);
@@ -317,6 +336,15 @@ export default async function handler(req, res) {
         }
         if (typeof userConfig?.summary_brevity === 'string') {
             instructions += `\n\n<summary_brevity>${userConfig.summary_brevity}</summary_brevity>`;
+        }
+        if (fastMode) {
+            instructions += `\n\n<fast_mode>On</fast_mode>\n` +
+                `Do not include an acknowledgement line or progress updates. ` +
+                `Be terse and action-focused. Prefer bullets. Avoid filler. ` +
+                `Only output the final answer in the required sections.`;
+            if (!userConfig?.summary_brevity) {
+                instructions += `\n<summary_brevity>short</summary_brevity>`;
+            }
         }
         // Append guardrail hint if present in prompt config
         try {
@@ -379,7 +407,8 @@ export default async function handler(req, res) {
                 }
                 if (_isResearchQuery || research_type) {
                     // Build explicit research task input and include brief recent context
-                    const recent = (messages || []).slice(-4).map((m) => {
+                    const recentWindow = fastMode ? 2 : 4;
+                    const recent = (messages || []).slice(-recentWindow).map((m) => {
                         const role = m.role === 'user' ? 'User' : (m.role === 'assistant' ? 'Assistant' : 'System');
                         const text = String(m.content || '').replace(/\s+/g, ' ').trim();
                         return `${role}: ${text}`;
@@ -455,6 +484,15 @@ export default async function handler(req, res) {
                 clearTimeout(keepAlive);
                 keepAlive = null;
             }
+            // Ensure upstream OpenAI stream cancels if client disconnects
+            try {
+                abortController.abort();
+            }
+            catch { }
+            try {
+                clearTimeout(overallTimeout);
+            }
+            catch { }
         });
         try {
             // Add more detailed debugging
@@ -470,8 +508,12 @@ export default async function handler(req, res) {
                 return 'gpt-5-mini';
             })();
             const selectedModel = userConfig.model || defaultModel;
-            const reasoningEffort = research_type === 'deep' ? 'medium' : 'low';
-            const isQuick = research_type === 'quick';
+            // Auto-detect mode for short follow-ups when active subject exists
+            const shortQ = /^(who|what|when|where|which|how|do|does|did|is|are|was|were)\b/i.test((lastUserMessage?.content || '').trim()) && ((lastUserMessage?.content || '').trim().length <= 120);
+            const autoMode = (activeContextCompany && shortQ) ? 'specific' : undefined;
+            const effectiveMode = (autoMode || research_type);
+            const reasoningEffort = fastMode ? 'low' : (effectiveMode === 'deep' ? 'medium' : 'low');
+            const isQuick = fastMode ? true : (effectiveMode === 'quick');
             // Summarization mode: if the client passed summarize_source, bypass research flow
             const summarizeSource = userConfig?.summarize_source;
             if (summarizeSource && typeof summarizeSource === 'string' && summarizeSource.trim().length > 0) {
@@ -498,7 +540,7 @@ export default async function handler(req, res) {
                         chat_id: chatId || null,
                         user_id: user.id,
                     },
-                });
+                }, { signal: abortController.signal });
                 for await (const chunk of stream) {
                     if (responseClosed)
                         break;
@@ -509,7 +551,11 @@ export default async function handler(req, res) {
                 try {
                     await stream.finalResponse();
                 }
-                catch { }
+                catch (e) {
+                    if (e?.name === 'AbortError') {
+                        safeWrite(`data: ${JSON.stringify({ type: 'timeout', message: 'Stream aborted (deadline).' })}\n\n`);
+                    }
+                }
                 safeWrite('data: [DONE]\n\n');
                 responseClosed = true;
                 return;
@@ -550,7 +596,7 @@ export default async function handler(req, res) {
                 safeWrite(`data: ${JSON.stringify({ type: 'reasoning_progress', content: preview })}\n\n`);
             }
             const storeRun = true;
-            const shouldPlanStream = isResearchQuery && !userConfig?.disable_fast_plan;
+            const shouldPlanStream = isResearchQuery && !userConfig?.disable_fast_plan && !fastMode;
             // Emit a hard-coded acknowledgment only if the fast plan stream is disabled
             if (!shouldPlanStream) {
                 try {
@@ -630,7 +676,7 @@ export default async function handler(req, res) {
                                 chat_id: chatId || null,
                                 user_id: user.id
                             }
-                        });
+                        }, { signal: abortController.signal });
                         let planFirstDeltaSent = false;
                         for await (const fastChunk of fastStream) {
                             if (responseClosed)
@@ -647,7 +693,12 @@ export default async function handler(req, res) {
                             await fastStream.finalResponse();
                         }
                         catch (fastFinalErr) {
-                            console.error('Fast plan finalization error:', fastFinalErr);
+                            if (fastFinalErr?.name === 'AbortError') {
+                                console.warn('Fast plan aborted due to deadline');
+                            }
+                            else {
+                                console.error('Fast plan finalization error:', fastFinalErr);
+                            }
                         }
                     }
                     catch (fastErr) {
@@ -665,13 +716,12 @@ export default async function handler(req, res) {
                 model: selectedModel,
                 instructions,
                 input,
-                text: { format: { type: 'text' }, verbosity: isQuick ? 'low' : 'medium' },
+                text: { format: { type: 'text' }, verbosity: 'low' },
                 reasoning: { effort: reasoningEffort },
                 tools: useTools ? [{ type: 'web_search' }] : [],
-                include: ['reasoning.encrypted_content', 'web_search_call.results'],
+                include: (fastMode ? [] : ['reasoning.encrypted_content', 'web_search_call.results']),
                 parallel_tool_calls: useTools,
-                temperature: isQuick ? 0.2 : undefined,
-                max_output_tokens: isQuick ? 450 : undefined,
+                max_output_tokens: fastMode ? (research_type === 'deep' ? 900 : 500) : (isQuick ? 450 : undefined),
                 store: storeRun,
                 metadata: {
                     agent: 'company_research',
@@ -680,7 +730,7 @@ export default async function handler(req, res) {
                     user_id: user.id
                 }
                 // Do not limit include fields; allow default event stream so we can surface reasoning + tool events
-            });
+            }, { signal: abortController.signal });
             const openAIConnectMs = Date.now() - openAIConnectStart;
             try {
                 const routeMeta = {
@@ -738,7 +788,7 @@ export default async function handler(req, res) {
             }
             // Configure reasoning streaming behaviour
             // We keep reasoning visible in all modes. For quick mode, we throttle/compact updates.
-            const forwardReasoning = true;
+            const forwardReasoning = fastMode ? false : true;
             let quickReasoningBuffer = '';
             let quickReasoningLastEmit = 0;
             // Process the stream
@@ -852,7 +902,13 @@ export default async function handler(req, res) {
                 finalResponseData = await stream.finalResponse();
             }
             catch (finalErr) {
-                console.error('Stream finalization error:', finalErr);
+                if (finalErr?.name === 'AbortError') {
+                    console.warn('Stream aborted due to deadline');
+                    safeWrite(`data: ${JSON.stringify({ type: 'timeout', message: 'Processing exceeded time limit; partial results above.' })}\n\n`);
+                }
+                else {
+                    console.error('Stream finalization error:', finalErr);
+                }
             }
             if (storeRun && finalResponseData?.id) {
                 const id = finalResponseData.id;
@@ -889,7 +945,7 @@ export default async function handler(req, res) {
             }
             console.log('[DEBUG] Stream processing complete. Total chunks:', chunkCount);
             console.log('[DEBUG] Total content length:', accumulatedContent.length);
-            const shouldGenerateTldr = false; // Disable auto TL;DR to avoid blocking main stream
+            const shouldGenerateTldr = false; // Generate summaries only on demand (no live TL;DR streaming)
             if (shouldGenerateTldr) {
                 try {
                     safeWrite(`data: ${JSON.stringify({ type: 'tldr_status', content: 'Preparing high level summary…' })}\n\n`);
@@ -916,7 +972,7 @@ export default async function handler(req, res) {
                             chat_id: chatId || null,
                             user_id: user.id
                         }
-                    });
+                    }, { signal: abortController.signal });
                     for await (const summaryChunk of summaryStream) {
                         if (responseClosed)
                             break;
@@ -928,7 +984,12 @@ export default async function handler(req, res) {
                         await summaryStream.finalResponse();
                     }
                     catch (summaryFinalizeErr) {
-                        console.error('TL;DR finalization error:', summaryFinalizeErr);
+                        if (summaryFinalizeErr?.name === 'AbortError') {
+                            console.warn('TL;DR aborted due to deadline');
+                        }
+                        else {
+                            console.error('TL;DR finalization error:', summaryFinalizeErr);
+                        }
                     }
                     safeWrite(`data: ${JSON.stringify({ type: 'tldr_done' })}\n\n`);
                 }
@@ -952,6 +1013,10 @@ export default async function handler(req, res) {
                 clearTimeout(keepAlive);
                 keepAlive = null;
             }
+            try {
+                clearTimeout(overallTimeout);
+            }
+            catch { }
             // Log usage and deduct credits
             await logUsage(supabase, user.id, 'chat_completion', totalEstimatedTokens, {
                 chat_id: chatId,
@@ -1001,11 +1066,20 @@ export default async function handler(req, res) {
                 clearTimeout(keepAlive);
                 keepAlive = null;
             }
+            try {
+                clearTimeout(overallTimeout);
+            }
+            catch { }
             // Send error through SSE
-            safeWrite(`data: ${JSON.stringify({
-                type: 'error',
-                error: streamError.message || 'Streaming failed'
-            })}\n\n`);
+            if (streamError?.name === 'AbortError') {
+                safeWrite(`data: ${JSON.stringify({ type: 'timeout', message: 'Processing exceeded time limit; partial results above.' })}\n\n`);
+            }
+            else {
+                safeWrite(`data: ${JSON.stringify({
+                    type: 'error',
+                    error: streamError.message || 'Streaming failed'
+                })}\n\n`);
+            }
             safeWrite(`data: [DONE]\n\n`);
             responseClosed = true;
             res.end();
@@ -1019,6 +1093,10 @@ export default async function handler(req, res) {
                 clearTimeout(keepAlive);
                 keepAlive = null;
             }
+        }
+        catch { }
+        try {
+            clearTimeout(overallTimeout);
         }
         catch { }
         // If headers haven't been sent yet, send JSON error

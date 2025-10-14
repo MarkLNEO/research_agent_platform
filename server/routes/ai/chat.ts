@@ -211,7 +211,10 @@ function extractCompanyName(raw: string | null | undefined) {
 
 export const config = {
   runtime: 'nodejs',
-  maxDuration: 30, // 30 seconds for streaming
+  // Allow up to 300s hard cap on Vercel; we still self-abort earlier.
+  maxDuration: 300,
+  // Pin close to users/OpenAI for lower latency. Adjust if your users are elsewhere.
+  regions: ['sfo1'],
 };
 
 export default async function handler(req: any, res: any) {
@@ -247,6 +250,17 @@ export default async function handler(req: any, res: any) {
   }
 
   let keepAlive: NodeJS.Timeout | null = null;
+  // Global abort controller to ensure we never exceed platform limits
+  const abortController = new AbortController();
+  const overallTimeoutMs = (() => {
+    const fromEnv = Number(process.env.STREAMING_DEADLINE_MS);
+    if (!isNaN(fromEnv) && fromEnv > 0) return Math.min(fromEnv, 295000);
+    // Default: end slightly before Vercel's 300s cap
+    return 280000;
+  })();
+  const overallTimeout = setTimeout(() => {
+    try { abortController.abort(); } catch {}
+  }, overallTimeoutMs);
 
   try {
     const processStart = Date.now();
@@ -485,6 +499,9 @@ export default async function handler(req: any, res: any) {
         clearTimeout(keepAlive);
         keepAlive = null;
       }
+      // Ensure upstream OpenAI stream cancels if client disconnects
+      try { abortController.abort(); } catch {}
+      try { clearTimeout(overallTimeout); } catch {}
     });
 
     try {
@@ -535,7 +552,7 @@ export default async function handler(req: any, res: any) {
             chat_id: chatId || null,
             user_id: user.id,
           },
-        });
+        }, { signal: abortController.signal });
 
         for await (const chunk of stream as any) {
           if (responseClosed) break;
@@ -543,7 +560,11 @@ export default async function handler(req: any, res: any) {
             safeWrite(`data: ${JSON.stringify({ type: 'content', content: chunk.delta })}\n\n`);
           }
         }
-        try { await stream.finalResponse(); } catch {}
+        try { await stream.finalResponse(); } catch (e: any) {
+          if (e?.name === 'AbortError') {
+            safeWrite(`data: ${JSON.stringify({ type: 'timeout', message: 'Stream aborted (deadline).' })}\n\n`);
+          }
+        }
         safeWrite('data: [DONE]\n\n');
         responseClosed = true;
         return;
@@ -657,7 +678,7 @@ export default async function handler(req: any, res: any) {
                 chat_id: chatId || null,
                 user_id: user.id
               }
-            });
+            }, { signal: abortController.signal });
 
             let planFirstDeltaSent = false;
 
@@ -674,8 +695,12 @@ export default async function handler(req: any, res: any) {
 
             try {
               await fastStream.finalResponse();
-            } catch (fastFinalErr) {
-              console.error('Fast plan finalization error:', fastFinalErr);
+            } catch (fastFinalErr: any) {
+              if (fastFinalErr?.name === 'AbortError') {
+                console.warn('Fast plan aborted due to deadline');
+              } else {
+                console.error('Fast plan finalization error:', fastFinalErr);
+              }
             }
           } catch (fastErr) {
             console.error('Fast plan stream failed:', fastErr);
@@ -697,7 +722,6 @@ export default async function handler(req: any, res: any) {
         tools: useTools ? [{ type: 'web_search' }] : [],
         include: (fastMode ? [] : (['reasoning.encrypted_content', 'web_search_call.results'] as any)),
         parallel_tool_calls: useTools,
-        temperature: 0.2,
         max_output_tokens: fastMode ? (research_type === 'deep' ? 900 : 500) : (isQuick ? 450 : undefined),
         store: storeRun,
         metadata: {
@@ -707,7 +731,7 @@ export default async function handler(req: any, res: any) {
           user_id: user.id
         }
         // Do not limit include fields; allow default event stream so we can surface reasoning + tool events
-      });
+      }, { signal: abortController.signal });
       const openAIConnectMs = Date.now() - openAIConnectStart;
 
       try {
@@ -879,8 +903,13 @@ export default async function handler(req: any, res: any) {
       let finalResponseData: any = null;
       try {
         finalResponseData = await stream.finalResponse();
-      } catch (finalErr) {
-        console.error('Stream finalization error:', finalErr);
+      } catch (finalErr: any) {
+        if (finalErr?.name === 'AbortError') {
+          console.warn('Stream aborted due to deadline');
+          safeWrite(`data: ${JSON.stringify({ type: 'timeout', message: 'Processing exceeded time limit; partial results above.' })}\n\n`);
+        } else {
+          console.error('Stream finalization error:', finalErr);
+        }
       }
 
       if (storeRun && finalResponseData?.id) {
@@ -945,7 +974,7 @@ export default async function handler(req: any, res: any) {
               chat_id: chatId || null,
               user_id: user.id
             }
-          });
+          }, { signal: abortController.signal });
 
           for await (const summaryChunk of summaryStream as any) {
             if (responseClosed) break;
@@ -956,8 +985,12 @@ export default async function handler(req: any, res: any) {
 
           try {
             await summaryStream.finalResponse();
-          } catch (summaryFinalizeErr) {
-            console.error('TL;DR finalization error:', summaryFinalizeErr);
+          } catch (summaryFinalizeErr: any) {
+            if (summaryFinalizeErr?.name === 'AbortError') {
+              console.warn('TL;DR aborted due to deadline');
+            } else {
+              console.error('TL;DR finalization error:', summaryFinalizeErr);
+            }
           }
           safeWrite(`data: ${JSON.stringify({ type: 'tldr_done' })}\n\n`);
         } catch (summaryErr) {
@@ -982,6 +1015,7 @@ export default async function handler(req: any, res: any) {
         clearTimeout(keepAlive);
         keepAlive = null;
       }
+      try { clearTimeout(overallTimeout); } catch {}
 
       // Log usage and deduct credits
       await logUsage(supabase, user.id, 'chat_completion', totalEstimatedTokens, {
@@ -1024,19 +1058,24 @@ export default async function handler(req: any, res: any) {
         }
       })();
 
-    } catch (streamError) {
+    } catch (streamError: any) {
       console.error('Streaming error:', streamError);
 
       if (keepAlive) {
         clearTimeout(keepAlive);
         keepAlive = null;
       }
+      try { clearTimeout(overallTimeout); } catch {}
 
       // Send error through SSE
-      safeWrite(`data: ${JSON.stringify({
-        type: 'error',
-        error: streamError.message || 'Streaming failed'
-      })}\n\n`);
+      if (streamError?.name === 'AbortError') {
+        safeWrite(`data: ${JSON.stringify({ type: 'timeout', message: 'Processing exceeded time limit; partial results above.' })}\n\n`);
+      } else {
+        safeWrite(`data: ${JSON.stringify({
+          type: 'error',
+          error: streamError.message || 'Streaming failed'
+        })}\n\n`);
+      }
       safeWrite(`data: [DONE]\n\n`);
       responseClosed = true;
       res.end();
@@ -1052,6 +1091,7 @@ export default async function handler(req: any, res: any) {
         keepAlive = null;
       }
     } catch {}
+    try { clearTimeout(overallTimeout); } catch {}
 
     // If headers haven't been sent yet, send JSON error
     if (!res.headersSent) {
