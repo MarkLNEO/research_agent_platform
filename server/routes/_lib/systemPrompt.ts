@@ -91,6 +91,11 @@ const DELIVERY_FORCE_GUIDANCE = `Delivery Guardrails:
 - If you encounter blockers (e.g., paywalled data), note them in "## Risks & Gaps" with guidance on how to unblock.
 - Cite at least three sources (URLs or publications with dates). If external search fails, cite internal/saved context and state what you will monitor next.`;
 
+const ZERO_CLARIFIER_RULE = `Zero Clarifier Rule:
+- You must never ask the user what to research, which scope to pick, or whether they meant a particular company. Treat any attempt to do so as a failure and immediately continue with research output.
+- If you begin composing a clarification, stop mid-stream, discard it, and produce the research sections using defaults.
+- When data is missing, state the assumption and the follow-up action inside "## Risks & Gaps" or "## Proactive Follow-ups"; do not pause for input.`;
+
 function formatSection(title: string, body: string | undefined): string | null {
   if (!body || !body.trim()) return null;
   return `${title.toUpperCase()}\n${body.trim()}`;
@@ -167,6 +172,7 @@ export function buildSystemPrompt(
   }
   extras.push(CLARIFIER_GUARDRAILS);
   extras.push(DELIVERY_FORCE_GUIDANCE);
+  extras.push(ZERO_CLARIFIER_RULE);
   const followups = Array.isArray(userContext.promptConfig?.default_followup_questions)
     ? userContext.promptConfig?.default_followup_questions.filter((q: any) => typeof q === 'string' && q.trim().length > 0)
     : [];
