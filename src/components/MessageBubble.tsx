@@ -315,6 +315,7 @@ export function MessageBubble({
     </div>
   ) : null;
 
+  const isDraftEmail = /^\s*##\s*Draft Email\b/i.test(safeContent);
   return (
     <div className="space-y-3" data-testid="message-assistant">
       {mode && (
@@ -525,7 +526,7 @@ export function MessageBubble({
             </button>
           )}
 
-          {onPromote && (
+          {onPromote && !isDraftEmail && (
             <button
               onClick={onPromote}
               disabled={disablePromote}
@@ -535,7 +536,7 @@ export function MessageBubble({
               Save to Research
             </button>
           )}
-          {onSummarize && (
+          {onSummarize && !isDraftEmail && (
             <button
               onClick={onSummarize}
               className="text-xs font-semibold text-gray-600 hover:text-gray-900"

@@ -479,7 +479,18 @@ export function ResearchChat() {
     return -1;
   }, [messages]);
   const lastAssistantMessage = lastAssistantIndex >= 0 ? messages[lastAssistantIndex] : null;
-  const canDraftEmail = !!lastAssistantMessage && !draftEmailPending && !streamingMessage;
+  const canDraftEmail = !draftEmailPending && !streamingMessage && Boolean((() => {
+    const latest = (() => {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        if (m?.role !== 'assistant') continue;
+        if (/^##\s*Draft Email\b/i.test((m.content || '').trim())) continue;
+        return m;
+      }
+      return null;
+    })();
+    return latest;
+  })());
   const lastIsDraftEmail = useMemo(() => {
     const text = (lastAssistantMessage?.content || '').trim();
     return /^##\s*Draft Email\b/i.test(text);
@@ -2501,6 +2512,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                   const rid = getLatestResearchMessageId();
                   return !!(rid && summaryCache[rid]);
                 })();
+                const thisIsDraft = /^##\s*Draft Email\b/i.test((m.content || '').trim());
                 return (
                   <MessageBubble
                     key={m.id}
@@ -2513,8 +2525,8 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     collapseThresholdWords={150}
                     onTrackAccount={handleTrackAccount}
                     agentType="company_research"
-                    summarizeReady={isLastAssistant ? summarizeReady : false}
-                    onPromote={isLastAssistant ? () => {
+                    summarizeReady={isLastAssistant && !thisIsDraft ? summarizeReady : false}
+                    onPromote={isLastAssistant && !thisIsDraft ? () => {
                       // Build draft using the latest research message (skip any later email drafts)
                       const research = (() => {
                         for (let j = messages.length - 1; j >= 0; j--) {
@@ -2557,7 +2569,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                         addToast({ type: 'error', title: 'Nothing to save', description: 'No recent research found to save.' });
                       }
                     } : undefined}
-                    onSummarize={isLastAssistant ? async () => {
+                    onSummarize={isLastAssistant && !thisIsDraft ? async () => {
                       setPostSummarizeNudge(false);
                       try {
                         // Summarize the latest research message (not a draft email)
