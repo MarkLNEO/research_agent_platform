@@ -352,7 +352,8 @@ export default async function handler(req: any, res: any) {
     if (typeof userConfig?.summary_brevity === 'string') {
       instructions += `\n\n<summary_brevity>${userConfig.summary_brevity}</summary_brevity>`;
     }
-    if (fastMode) {
+    // Only apply fast_mode hint for non-deep requests
+    if (fastMode && body.research_type !== 'deep') {
       instructions += `\n\n<fast_mode>On</fast_mode>\n` +
         `Do not include an acknowledgement line or progress updates. ` +
         `Be terse and action-focused. Prefer bullets. Avoid filler. ` +
@@ -523,7 +524,8 @@ export default async function handler(req: any, res: any) {
       const shortQ = /^(who|what|when|where|which|how|do|does|did|is|are|was|were)\b/i.test((lastUserMessage?.content || '').trim()) && ((lastUserMessage?.content || '').trim().length <= 120);
       const autoMode = (activeContextCompany && shortQ) ? 'specific' : undefined;
       const effectiveMode = (autoMode || research_type) as 'quick'|'deep'|'specific'|undefined;
-      const reasoningEffort = fastMode ? 'low' : (effectiveMode === 'deep' ? 'medium' : 'low');
+      // Deep should keep richer reasoning even if fast_mode is toggled
+      const reasoningEffort = (effectiveMode === 'deep') ? 'medium' : (fastMode ? 'low' : 'low');
       const isQuick = fastMode ? true : (effectiveMode === 'quick');
 
       // Summarization mode: if the client passed summarize_source, bypass research flow
@@ -722,7 +724,10 @@ export default async function handler(req: any, res: any) {
         tools: useTools ? [{ type: 'web_search' }] : [],
         include: (fastMode ? [] : (['reasoning.encrypted_content', 'web_search_call.results'] as any)),
         parallel_tool_calls: useTools,
-        max_output_tokens: fastMode ? (research_type === 'deep' ? 900 : 500) : (isQuick ? 450 : undefined),
+        // Allow full-depth for deep mode; keep light caps for quick/specific to improve latency
+        max_output_tokens: (effectiveMode === 'deep')
+          ? undefined
+          : (fastMode ? 500 : (isQuick ? 450 : undefined)),
         store: storeRun,
         metadata: {
           agent: 'company_research',
