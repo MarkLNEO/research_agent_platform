@@ -571,6 +571,63 @@ export default async function handler(req: any, res: any) {
         return;
       }
 
+      // Disambiguation mode: when company name is short/ambiguous, propose candidates and ask user to choose
+      const requestedText = (lastUserMessage?.content || '').trim();
+      const strippedLeading = requestedText.replace(/^(research|tell me about|what can you tell me about|who is|analy[sz]e|find)\s+/i, '').trim();
+      const looksLikeBareName = (() => {
+        if (!strippedLeading) return false;
+        if (/https?:\/\//i.test(strippedLeading)) return false;
+        if (/\./.test(strippedLeading)) return false; // likely domain
+        if (/(inc\.|corp\.|ltd\.|llc|company|co\b|group|holdings|technologies|systems)/i.test(strippedLeading)) return false;
+        const words = strippedLeading.split(/\s+/).filter(Boolean);
+        if (words.length === 0) return false;
+        return words.length <= 2; // very short, likely ambiguous
+      })();
+      const forceDisambiguate = Boolean((userConfig as any)?.disambiguate_subject === true);
+      if (looksLikeBareName || forceDisambiguate) {
+        try {
+          const term = strippedLeading || extractCompanyName(requestedText) || 'the company';
+          const preface = `Searching for information about various ${term} companies`;
+          safeWrite(`data: ${JSON.stringify({ type: 'reasoning_progress', content: preface })}\n\n`);
+
+          const clarifierInstructions = [
+            'You are a research assistant that disambiguates company names before deep research.',
+            `User provided a potentially ambiguous company term. Your job: list the 3–6 most likely companies matching the name, each with industry and 1–2 sentence descriptor.`,
+            '- Be neutral and avoid overconfident claims. If uncertain, say so.',
+            '- Do NOT proceed with full research. End by asking the user to pick one option (1,2,3…) or provide a website.',
+            '- Output format strictly:
+Based on my search, there are several companies named "<TERM>". Here are the main ones:\n\n### <Company 1> (Industry)\n<1–2 sentence descriptor>\n<Optional: Website or LinkedIn if obvious>\n\n### <Company 2> (Industry)\n...\n\nReply with the number to proceed, or paste the exact website.',
+            '- Keep it concise; no more than ~1200 characters total.'
+          ].join('\n');
+
+          const stream = await openai.responses.stream({
+            model: 'gpt-5-mini',
+            instructions: clarifierInstructions,
+            input: `Ambiguous term: ${term}`,
+            text: { format: { type: 'text' }, verbosity: 'low' },
+            store: true,
+            metadata: { agent: 'company_research', stage: 'disambiguation', chat_id: chatId || null, user_id: user.id },
+          }, { signal: abortController.signal });
+
+          for await (const chunk of stream as any) {
+            if (responseClosed) break;
+            if (chunk.type === 'response.output_text.delta' && chunk.delta) {
+              safeWrite(`data: ${JSON.stringify({ type: 'content', content: chunk.delta })}\n\n`);
+            }
+          }
+          try { await stream.finalResponse(); } catch (e: any) {
+            if (e?.name === 'AbortError') {
+              safeWrite(`data: ${JSON.stringify({ type: 'timeout', message: 'Stream aborted (deadline).' })}\n\n`);
+            }
+          }
+          safeWrite('data: [DONE]\n\n');
+          responseClosed = true;
+          return;
+        } catch (disErr) {
+          console.error('[disambiguation] failed, falling back to normal flow', disErr);
+        }
+      }
+
       const wantsFreshIntel = /recent|latest|today|yesterday|this week|signals?|news|breach|breaches|leadership|funding|acquisition|hiring|layoff|changed|update|report/i.test(normalizedRequest);
       const mentionsTimeframe = /\b(last|past)\s+\d+\s+(day|days|week|weeks|month|months|year|years)\b/i.test(requestText);
       const explicitlyRequestsSearch = /\bweb[_\s-]?search\b/.test(normalizedRequest) || /\b(search online|look up|google|check the web)\b/.test(normalizedRequest);
