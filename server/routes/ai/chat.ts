@@ -336,9 +336,8 @@ export default async function handler(req: any, res: any) {
     } catch (memoryError) {
       console.error('[memory] failed to load memory block', memoryError);
     }
-    if (!instructions.startsWith('Formatting re-enabled')) {
-      instructions = `Formatting re-enabled\n\n${instructions}`;
-    }
+    // Remove legacy prefix that leaked into logs/UI
+    // (it provided no functional value and was confusing to users)
     if (subjectSnapshot) instructions += subjectSnapshot;
     // Apply clarifier lock and facet budget hints
     // Lock clarifiers when an explicit research_type is provided or when the client requests it.
