@@ -620,6 +620,16 @@ export default async function handler(req: any, res: any) {
           if (assumed?.name) {
             const assumedLine = `Proceeding with ${assumed.name}${assumed.industry ? ` (${assumed.industry})` : ''}${assumed.website ? ` — ${assumed.website}` : ''}.`;
             safeWrite(`data: ${JSON.stringify({ type: 'reasoning_progress', content: assumedLine })}\n\n`);
+            // Emit structured event so UI can show an "Assumed" badge like Claude
+            try {
+              safeWrite(`data: ${JSON.stringify({
+                type: 'assumed_subject',
+                name: assumed.name,
+                industry: assumed.industry || null,
+                website: assumed.website || null,
+                confidence: typeof assumed.confidence === 'number' ? assumed.confidence : null
+              })}\n\n`);
+            } catch {}
             // Bias both instructions and request with the assumption; do not ask clarifying questions
             instructions = `Assumed subject: ${assumed.name}${assumed.website ? ` (${assumed.website})` : ''}.\nDo not ask clarifying questions; proceed with research on this subject. If the user later corrects, pivot silently.\n\n` + instructions;
             effectiveRequest = `${effectiveRequest}\n\nContext: The company in focus is ${assumed.name}${assumed.website ? ` (${assumed.website})` : ''}.`;

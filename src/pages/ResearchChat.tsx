@@ -362,6 +362,7 @@ export function ResearchChat() {
   const lastSentRef = useRef<{ text: string; at: number } | null>(null);
   const [postSummarizeNudge, setPostSummarizeNudge] = useState(false);
   const [summaryPending, setSummaryPending] = useState(false);
+  const [lastAssumedSubject, setLastAssumedSubject] = useState<{ name: string; industry?: string | null; website?: string | null } | null>(null);
   const [clarifiersLocked, setClarifiersLocked] = useState(false);
   const [activeSubject, setActiveSubject] = useState<string | null>(null);
   const currentActionCompany = actionBarCompany || activeSubject;
@@ -1570,6 +1571,8 @@ useEffect(() => {
     options?: { config?: Record<string, any>; overrideDepth?: 'deep' | 'quick' | 'specific' }
   ): Promise<string> => {
     try {
+      // Reset assumption badge for this run
+      setLastAssumedSubject(null);
       const history = messages
         .filter(m => m.role === 'user' || m.role === 'assistant')
         .map(m => ({ role: m.role, content: m.content }));
@@ -1819,6 +1822,15 @@ useEffect(() => {
                     const filtered = prev.filter(e => e.type !== 'reasoning_progress');
                     return [...filtered, { id: `rp-${Date.now()}`, type: 'reasoning_progress', content: parsed.content }];
                   });
+                }
+                // Handle assumed subject event (structured)
+                else if (parsed.type === 'assumed_subject') {
+                  try {
+                    const { name, industry, website } = parsed as any;
+                    if (typeof name === 'string' && name.trim()) {
+                      setLastAssumedSubject({ name, industry, website });
+                    }
+                  } catch {}
                 }
                 // Handle web search events - UPDATE existing search indicator
                 else if (parsed.type === 'web_search') {
@@ -2590,6 +2602,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     agentType="company_research"
                     summarizeReady={isLastAssistant && !thisIsDraft ? summarizeReady : false}
                     isSummarizing={isLastAssistant && !thisIsDraft ? summaryPending : false}
+                    assumed={isLastAssistant ? lastAssumedSubject || undefined : undefined}
                     onPromote={isLastAssistant && !thisIsDraft ? () => {
                       // Build draft using the latest research message (skip any later email drafts)
                       const research = (() => {

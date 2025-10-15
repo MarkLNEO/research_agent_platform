@@ -24,6 +24,7 @@ interface MessageBubbleProps {
   collapseThresholdWords?: number;
   agentType?: string;
   summarizeReady?: boolean;
+  assumed?: { name: string; industry?: string | null; website?: string | null };
 }
 
 function MarkdownContent({ content }: { content: string }) {
@@ -70,6 +71,7 @@ export function MessageBubble({
   collapseThresholdWords = 150,
   agentType = 'company_research',
   summarizeReady = false,
+  assumed,
 }: MessageBubbleProps) {
   const { addToast } = useToast();
   const [expanded, setExpanded] = useState(false);
@@ -320,11 +322,18 @@ export function MessageBubble({
   const isDraftEmail = /^\s*##\s*Draft Email\b/i.test(safeContent);
   return (
     <div className="space-y-3" data-testid="message-assistant">
-      {mode && (
-        <div className="flex justify-end">
-          <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full border border-gray-200 bg-gray-50 text-gray-600">
-            Mode: {String(mode).charAt(0).toUpperCase() + String(mode).slice(1)}
-          </span>
+      {(mode || assumed) && (
+        <div className="flex justify-end gap-2">
+          {assumed && (
+            <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full border border-amber-200 bg-amber-50 text-amber-700">
+              Assumed: {assumed.name}{assumed.industry ? ` — ${assumed.industry}` : ''}
+            </span>
+          )}
+          {mode && (
+            <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full border border-gray-200 bg-gray-50 text-gray-600">
+              Mode: {String(mode).charAt(0).toUpperCase() + String(mode).slice(1)}
+            </span>
+          )}
         </div>
       )}
       {structured ? (
