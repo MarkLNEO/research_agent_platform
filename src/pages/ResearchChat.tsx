@@ -480,6 +480,10 @@ export function ResearchChat() {
   }, [messages]);
   const lastAssistantMessage = lastAssistantIndex >= 0 ? messages[lastAssistantIndex] : null;
   const canDraftEmail = !!lastAssistantMessage && !draftEmailPending && !streamingMessage;
+  const lastIsDraftEmail = useMemo(() => {
+    const text = (lastAssistantMessage?.content || '').trim();
+    return /^##\s*Draft Email\b/i.test(text);
+  }, [lastAssistantMessage]);
   const chatPaddingClass = actionBarVisible && !streamingMessage ? 'pb-32 md:pb-40' : '';
 
   // Find the most recent assistant message that looks like research (not a draft email)
@@ -2711,35 +2715,39 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     >
                       ↺ {refreshLabel}
                     </button>
-                    <button
-                      className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 transition-colors ${
-                        draftEmailPending
-                          ? 'bg-rose-500 text-white focus:ring-rose-400 cursor-wait'
-                          : canDraftEmail
-                            ? 'bg-rose-500 text-white hover:bg-rose-600 focus:ring-rose-400'
-                            : 'bg-gray-300 text-gray-600 cursor-not-allowed focus:ring-gray-300'
-                      }`}
-                      onClick={() => { void handleActionBarAction('email'); }}
-                      disabled={!canDraftEmail || draftEmailPending}
-                      aria-busy={draftEmailPending}
-                    >
-                      {draftEmailPending ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Generating…
-                        </>
-                      ) : (
-                        <>
-                          ✉️ Draft email
-                        </>
-                      )}
-                    </button>
-                    <button
-                      className="inline-flex items-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-400"
-                      onClick={() => { void handleActionBarAction('refine'); }}
-                    >
-                      🎯 Refine focus
-                    </button>
+                    {(!lastIsDraftEmail) && (
+                      <button
+                        className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 transition-colors ${
+                          draftEmailPending
+                            ? 'bg-rose-500 text-white focus:ring-rose-400 cursor-wait'
+                            : canDraftEmail
+                              ? 'bg-rose-500 text-white hover:bg-rose-600 focus:ring-rose-400'
+                              : 'bg-gray-300 text-gray-600 cursor-not-allowed focus:ring-gray-300'
+                        }`}
+                        onClick={() => { void handleActionBarAction('email'); }}
+                        disabled={!canDraftEmail || draftEmailPending}
+                        aria-busy={draftEmailPending}
+                      >
+                        {draftEmailPending ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Generating…
+                          </>
+                        ) : (
+                          <>
+                            ✉️ Draft email
+                          </>
+                        )}
+                      </button>
+                    )}
+                    {(!lastIsDraftEmail) && (
+                      <button
+                        className="inline-flex items-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                        onClick={() => { void handleActionBarAction('refine'); }}
+                      >
+                        🎯 Refine focus
+                      </button>
+                    )}
                   </div>
                   <div className="mt-3 text-xs text-gray-500 sm:hidden">
                     Shortcuts: N new • C refresh • E email • R refine
