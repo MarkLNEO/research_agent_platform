@@ -25,7 +25,24 @@ export default async function queryEmbeddings(req: any, res: any) {
   }
 
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-  // Use SQL function if present; otherwise fall back to inline query via RPC
+
+  if (!Array.isArray(embedding) || embedding.length !== 1536) {
+    return res.status(400).json({ error: 'embedding must be a 1536-length number[]' });
+  }
+
+  // Probe existence of function/tables for clearer 503s
+  try {
+    const { error: probe } = await admin.rpc('match_embeddings', {
+      p_user: userId,
+      p_query: embedding.slice(0, 10).concat(Array(1526).fill(0)),
+      p_object_type: object_type,
+      p_top_k: 1,
+    });
+    if (probe && /function .*match_embeddings.* does not exist/i.test(String(probe.message))) {
+      return res.status(503).json({ error: 'match_embeddings RPC missing. Apply vector brain migration.' });
+    }
+  } catch (ignore) {}
+
   try {
     const { data, error } = await admin.rpc('match_embeddings', {
       p_user: userId,
@@ -37,7 +54,6 @@ export default async function queryEmbeddings(req: any, res: any) {
     return res.status(200).json({ results: data || [] });
   } catch (e: any) {
     console.error('[search.query] failed', e);
-    return res.status(500).json({ error: 'Internal error' });
+    return res.status(500).json({ error: e?.message || 'Internal error' });
   }
 }
-

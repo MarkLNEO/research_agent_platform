@@ -1,0 +1,16 @@
+HTTP/2 401 
+date: Wed, 15 Oct 2025 20:56:37 GMT
+content-type: application/json;charset=UTF-8
+content-length: 101
+access-control-allow-origin: *
+access-control-allow-methods: GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS,TRACE,CONNECT
+access-control-max-age: 3600
+sb-project-ref: matxrspxbaqegvyliyba
+sb-request-id: 0199e9a9-1925-7ba0-89d9-b8d22ee7227e
+x-content-type-options: nosniff
+set-cookie: __cf_bm=BKInIe3nsjgerdzNHQzoY4DJOHCBjTunmsoar2m6tR4-1760561797-1.0.1.1-pPZAdI9gcfKglJaJwH5jeuNwAc.RD1u9WDYJxpMHJMdpIBhZ6NjYKLBAVa5t7KmFZwYXYE4iCB0xNoKkqR1uF_Qa0wOcEoyjh5wreyjrkNS8iY4raz22IWhwIZvHBMod; path=/; expires=Wed, 15-Oct-25 21:26:37 GMT; domain=.supabase.co; HttpOnly; Secure; SameSite=None
+strict-transport-security: max-age=31536000; includeSubDomains; preload
+server: cloudflare
+cf-ray: 98f23961cd77dd56-ORD
+alt-svc: h3=":443"; ma=86400
+

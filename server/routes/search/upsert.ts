@@ -39,6 +39,24 @@ export default async function upsertEmbedding(req: any, res: any) {
   }
 
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+  // Basic environment/migration checks
+  try {
+    const { data: tbls, error: tblErr } = await admin
+      .from('embeddings')
+      .select('id')
+      .limit(1);
+    if (tblErr && /relation .*embeddings.* does not exist/i.test(String(tblErr.message))) {
+      return res.status(503).json({ error: 'Embeddings table not found. Apply vector brain migration.' });
+    }
+  } catch (probeErr: any) {
+    // ignore
+  }
+
+  if (!Array.isArray(embedding) || embedding.length !== 1536) {
+    return res.status(400).json({ error: 'embedding must be a 1536-length number[]' });
+  }
+
   const payload: any = {
     user_id: userId,
     object_type: String(object_type),
@@ -49,8 +67,11 @@ export default async function upsertEmbedding(req: any, res: any) {
     embedding,
   };
 
-  const { error } = await admin.from('embeddings').upsert(payload, { onConflict: 'user_id,object_type,object_key,chunk_id' });
-  if (error) return res.status(500).json({ error: error.message || 'Upsert failed' });
-  return res.status(200).json({ ok: true });
+  try {
+    const { error } = await admin.from('embeddings').upsert(payload, { onConflict: 'user_id,object_type,object_key,chunk_id' });
+    if (error) return res.status(500).json({ error: error.message || 'Upsert failed' });
+    return res.status(200).json({ ok: true });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || 'Upsert failed (exception)' });
+  }
 }
-
