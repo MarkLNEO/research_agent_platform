@@ -361,6 +361,7 @@ export function ResearchChat() {
   const [accountStats, setAccountStats] = useState<AccountStats | null>(null);
   const lastSentRef = useRef<{ text: string; at: number } | null>(null);
   const [postSummarizeNudge, setPostSummarizeNudge] = useState(false);
+  const [summaryPending, setSummaryPending] = useState(false);
   const [clarifiersLocked, setClarifiersLocked] = useState(false);
   const [activeSubject, setActiveSubject] = useState<string | null>(null);
   const currentActionCompany = actionBarCompany || activeSubject;
@@ -2588,6 +2589,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     onTrackAccount={handleTrackAccount}
                     agentType="company_research"
                     summarizeReady={isLastAssistant && !thisIsDraft ? summarizeReady : false}
+                    isSummarizing={isLastAssistant && !thisIsDraft ? summaryPending : false}
                     onPromote={isLastAssistant && !thisIsDraft ? () => {
                       // Build draft using the latest research message (skip any later email drafts)
                       const research = (() => {
@@ -2663,12 +2665,39 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                           }
                           setMessages(prev => [...prev, savedAssistant!]);
                         } else {
-                          await startSummarize(currentChatId!, (targetMsg?.content || m.content));
+                          setSummaryPending(true);
+                          const raw = await streamAIResponse('Summarize the previous research for executive consumption.', currentChatId!, { config: { summarize_source: (targetMsg?.content || m.content) } });
+                          const summaryText = normalizeMarkdown(raw || '');
+                          // Persist as assistant message
+                          let savedAssistant: Message | null = null;
+                          try {
+                            const { data } = await supabase
+                              .from('messages')
+                              .insert({ chat_id: currentChatId!, role: 'assistant', content: summaryText })
+                              .select()
+                              .single();
+                            if (data) savedAssistant = data;
+                          } catch {}
+                          if (!savedAssistant) {
+                            savedAssistant = { id: `summary-${Date.now()}`, role: 'assistant', content: summaryText, created_at: new Date().toISOString() } as Message;
+                          }
+                          setMessages(prev => [...prev, savedAssistant!]);
+                          setStreamingMessage('');
+                          // Cache for instant access next time
+                          setSummaryCache(prev => ({ ...prev, [targetId]: summaryText }));
+                          // Update chat timestamp best-effort
+                          try {
+                            const updatedAt = new Date().toISOString();
+                            await supabase.from('chats').update({ updated_at: updatedAt }).eq('id', currentChatId!);
+                            setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, updated_at: updatedAt } : chat));
+                          } catch {}
+                          setSummaryPending(false);
                         }
                         void sendPreferenceSignal('length', { kind: 'categorical', choice: 'brief' }, { weight: 1.5 });
                         setPostSummarizeNudge(true);
                       } catch (e: any) {
                         addToast({ type: 'error', title: 'Summarize failed', description: e?.message || 'Please try again.' });
+                        setSummaryPending(false);
                       }
                     } : undefined}
                     onNextAction={isLastAssistant ? handleNextAction : undefined}

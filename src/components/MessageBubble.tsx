@@ -18,6 +18,7 @@ interface MessageBubbleProps {
   metadata?: Record<string, unknown>;
   usage?: { tokens: number; credits: number };
   onSummarize?: () => void | Promise<void>;
+  isSummarizing?: boolean;
   onNextAction?: (action: string) => void;
   collapseEnabled?: boolean;
   collapseThresholdWords?: number;
@@ -63,6 +64,7 @@ export function MessageBubble({
   onTrackAccount,
   usage,
   onSummarize,
+  isSummarizing = false,
   onNextAction,
   collapseEnabled = false,
   collapseThresholdWords = 150,
@@ -539,10 +541,18 @@ export function MessageBubble({
           {onSummarize && !isDraftEmail && (
             <button
               onClick={onSummarize}
-              className="text-xs font-semibold text-gray-600 hover:text-gray-900"
+              disabled={isSummarizing}
+              className="text-xs font-semibold text-gray-600 hover:text-gray-900 disabled:text-gray-400 disabled:cursor-not-allowed inline-flex items-center gap-1"
               aria-label="Summarize this response"
+              aria-busy={isSummarizing}
             >
-              Summarize
+              {isSummarizing && (
+                <svg className="animate-spin h-3 w-3 text-gray-500" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+              )}
+              {isSummarizing ? 'Summarizing…' : 'Summarize'}
             </button>
           )}
           {onSummarize && summarizeReady && (
