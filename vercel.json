@@ -23,6 +23,15 @@
       "headers": [
         { "key": "Cache-Control", "value": "no-store, must-revalidate" }
       ]
+    },
+    {
+      "source": "/((?!api).*)",
+      "has": [
+        { "type": "header", "key": "Accept", "value": ".*text/html.*" }
+      ],
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, must-revalidate" }
+      ]
     }
   ],
   "crons": [
