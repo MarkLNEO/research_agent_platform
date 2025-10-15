@@ -571,7 +571,7 @@ export default async function handler(req: any, res: any) {
         return;
       }
 
-      // Disambiguation mode: when company name is short/ambiguous, propose candidates and ask user to choose
+      // Short bare-name queries: infer the most likely company and proceed (no clarifying questions)
       const requestedText = (lastUserMessage?.content || '').trim();
       const strippedLeading = requestedText.replace(/^(research|tell me about|what can you tell me about|who is|analy[sz]e|find)\s+/i, '').trim();
       const looksLikeBareName = (() => {
@@ -587,44 +587,45 @@ export default async function handler(req: any, res: any) {
       if (looksLikeBareName || forceDisambiguate) {
         try {
           const term = strippedLeading || extractCompanyName(requestedText) || 'the company';
-          const preface = `Searching for information about various ${term} companies`;
-          safeWrite(`data: ${JSON.stringify({ type: 'reasoning_progress', content: preface })}\n\n`);
+          safeWrite(`data: ${JSON.stringify({ type: 'reasoning_progress', content: `Interpreting “${term}” as a company — selecting the most likely match…` })}\n\n`);
 
-          const clarifierInstructions = [
-            'You are a research assistant that disambiguates company names before deep research.',
-            `User provided a potentially ambiguous company term. Your job: list the 3–6 most likely companies matching the name, each with industry and 1–2 sentence descriptor.`,
-            '- Be neutral and avoid overconfident claims. If uncertain, say so.',
-            '- Do NOT proceed with full research. End by asking the user to pick one option (1,2,3…) or provide a website.',
-            '- Output format strictly:
-Based on my search, there are several companies named "<TERM>". Here are the main ones:\n\n### <Company 1> (Industry)\n<1–2 sentence descriptor>\n<Optional: Website or LinkedIn if obvious>\n\n### <Company 2> (Industry)\n...\n\nReply with the number to proceed, or paste the exact website.',
-            '- Keep it concise; no more than ~1200 characters total.'
+          const resolveInstructions = [
+            'Resolve a possibly ambiguous company term to the most likely real company.',
+            'Output ONLY compact JSON with fields: {"top":{"name":"","industry":"","website":"","confidence":0-1},"alternates":[{"name":"","industry":"","website":"","confidence":0-1}] }',
+            'Prefer the most prominent company when multiple exist. No commentary, no code fences.'
           ].join('\n');
 
-          const stream = await openai.responses.stream({
+          const rstream = await openai.responses.stream({
             model: 'gpt-5-mini',
-            instructions: clarifierInstructions,
-            input: `Ambiguous term: ${term}`,
+            instructions: resolveInstructions,
+            input: `term: ${term}`,
             text: { format: { type: 'text' }, verbosity: 'low' },
-            store: true,
-            metadata: { agent: 'company_research', stage: 'disambiguation', chat_id: chatId || null, user_id: user.id },
+            store: false,
+            metadata: { agent: 'company_research', stage: 'subject_resolution', chat_id: chatId || null, user_id: user.id },
           }, { signal: abortController.signal });
-
-          for await (const chunk of stream as any) {
-            if (responseClosed) break;
-            if (chunk.type === 'response.output_text.delta' && chunk.delta) {
-              safeWrite(`data: ${JSON.stringify({ type: 'content', content: chunk.delta })}\n\n`);
-            }
+          let buf = '';
+          for await (const ch of rstream as any) {
+            if (ch.type === 'response.output_text.delta' && ch.delta) buf += ch.delta;
           }
-          try { await stream.finalResponse(); } catch (e: any) {
-            if (e?.name === 'AbortError') {
-              safeWrite(`data: ${JSON.stringify({ type: 'timeout', message: 'Stream aborted (deadline).' })}\n\n`);
+          try { await rstream.finalResponse(); } catch {}
+          let assumed: { name?: string; industry?: string; website?: string; confidence?: number } | null = null;
+          try {
+            const s = buf.indexOf('{');
+            const e = buf.lastIndexOf('}');
+            if (s >= 0 && e > s) {
+              const parsed = JSON.parse(buf.slice(s, e + 1));
+              if (parsed?.top?.name) assumed = parsed.top;
             }
+          } catch {}
+          if (assumed?.name) {
+            const assumedLine = `Proceeding with ${assumed.name}${assumed.industry ? ` (${assumed.industry})` : ''}${assumed.website ? ` — ${assumed.website}` : ''}.`;
+            safeWrite(`data: ${JSON.stringify({ type: 'reasoning_progress', content: assumedLine })}\n\n`);
+            // Bias both instructions and request with the assumption; do not ask clarifying questions
+            instructions = `Assumed subject: ${assumed.name}${assumed.website ? ` (${assumed.website})` : ''}.\nDo not ask clarifying questions; proceed with research on this subject. If the user later corrects, pivot silently.\n\n` + instructions;
+            effectiveRequest = `${effectiveRequest}\n\nContext: The company in focus is ${assumed.name}${assumed.website ? ` (${assumed.website})` : ''}.`;
           }
-          safeWrite('data: [DONE]\n\n');
-          responseClosed = true;
-          return;
         } catch (disErr) {
-          console.error('[disambiguation] failed, falling back to normal flow', disErr);
+          console.warn('[subject_resolution] non-fatal error; continuing default flow', disErr);
         }
       }
 
