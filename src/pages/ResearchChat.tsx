@@ -888,6 +888,68 @@ useEffect(() => {
       recommended_actions: draft.recommended_actions || {},
     }).select('*').single();
     if (error) throw error;
+
+    // After saving, upsert a vector entry and fetch related notes
+    try {
+      const auth = (await supabase.auth.getSession()).data.session?.access_token;
+      if (auth && inserted?.id) {
+        // Compute deterministic embedding from content
+        const { textToDeterministicEmbedding } = await import('../utils/embeddings');
+        const content = `${draft.executive_summary || ''}\n\n${draft.markdown_report || ''}`.trim();
+        const emb = textToDeterministicEmbedding(content, 1536);
+        // Upsert embedding
+        await fetch('/api/search/upsert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth}` },
+          body: JSON.stringify({
+            object_type: 'research',
+            object_key: String(inserted.id),
+            chunk_id: 0,
+            content,
+            metadata: { subject: draft.subject || null },
+            embedding: emb,
+          })
+        }).catch(() => {});
+
+        // Query related notes (exclude self after fetch)
+        const q = await fetch('/api/search/query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth}` },
+          body: JSON.stringify({ embedding: emb, object_type: 'research', top_k: 5 })
+        });
+        if (q.ok) {
+          const json = await q.json();
+          const results = Array.isArray(json?.results) ? json.results : [];
+          const filtered = results.filter((r: any) => String(r?.id || r?.object_key) !== String(inserted.id));
+          if (filtered.length) {
+            // Compose a compact assistant note
+            const bullets = filtered.slice(0, 3).map((r: any) => {
+              const key = String(r.object_key || r.id || '').slice(0, 8);
+              const snippet = String(r.content || '').replace(/\s+/g, ' ').slice(0, 120);
+              return `- ${key}: ${snippet}${snippet.length >= 120 ? '…' : ''}`;
+            }).join('\n');
+            const body = `## Related Notes\nI found a few related items in your research history:\n\n${bullets}`;
+
+            // Persist as an assistant message so it shows in the thread
+            if (currentChatId) {
+              try {
+                const { data: msg } = await supabase
+                  .from('messages')
+                  .insert({ chat_id: currentChatId, role: 'assistant', content: body })
+                  .select()
+                  .single();
+                if (msg) setMessages(prev => [...prev, msg as any]);
+              } catch {
+                // fall back to ephemeral state-only append
+                setMessages(prev => [...prev, { id: `related-${Date.now()}`, role: 'assistant', content: body, created_at: new Date().toISOString() } as any]);
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Embedding upsert/query failed', e);
+    }
     try {
       const auth = (await supabase.auth.getSession()).data.session?.access_token;
       if (auth) {
