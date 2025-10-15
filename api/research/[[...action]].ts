@@ -41,7 +41,8 @@ async function bulkCancel(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-const handlers: Record<string, (req: VercelRequest, res: VercelResponse) => Promise<void> | void> = {
+// Handlers may return a VercelResponse or void; we don't depend on the return type.
+const handlers: Record<string, (req: VercelRequest, res: VercelResponse) => any> = {
   bulk,
   'bulk-runner': bulkRunner,
   evaluate,
