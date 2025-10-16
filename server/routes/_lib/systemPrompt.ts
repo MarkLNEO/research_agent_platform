@@ -21,7 +21,7 @@ const AGENT_ROLE: Record<AgentType, string> = {
 
 const MODE_HINT: Record<Exclude<ResearchMode, undefined>, string> = {
   quick: 'Quick Facts mode: output ONLY essential facts. Keep total length ≤ 150 words. No extra sections, no preamble, no filler. Prefer bullets over prose.',
-  deep: 'Perform thorough research. Cover executive summary, ICP fit, qualifying criteria status, decision makers with personalization, recent signals, tech stack, competitors, and recommended next steps. Use evidence-backed statements with short source references.',
+  deep: 'Deep Research mode: move beyond raw bullets. Synthesize implications through the user\'s ICP and saved criteria. Prioritize insight density over list length; include brief mini‑paragraphs where synthesis is required, and keep evidence inline.',
   specific: 'Answer the specific question directly. Pull only the supporting facts that justify the answer. If information is unavailable, say so and suggest where to investigate next.'
 };
 
@@ -49,6 +49,24 @@ const STRUCTURED_OUTPUT = `Output format (strict):
 - If a section has no content, keep the heading and state "None found" with a note on next steps.
 - Use bold call-outs within sections for clarity, but do not omit or rename the headings.
 - When saved follow-up questions exist, add "## Saved Follow-up Answers" after the core sections and answer each saved question in 1-2 concise bullets.`;
+
+// Deep-only enhanced structure: adds Why Now and Deal Strategy sections, and encourages synthesis over bullet dumps
+const DEEP_OUTPUT = `Deep Research format (strict):
+- Start with a brief, friendly acknowledgement line (e.g., "On it — deep dive (~2 min).") that states research depth and ETA, then proceed.
+- ${EXEC_SUMMARY_GUIDANCE}
+- After the Executive Summary, continue with the sections, in this order:
+  "## Why Now" (2–3 short mini-paragraphs synthesizing timing and urgency through the user\'s ICP and signal preferences),
+  "## Deal Strategy" (tailor to saved target_titles; include 3–5 moves with who to contact and why),
+  "## Key Findings" (keep to the sharpest 5–7; avoid duplicating Why Now),
+  "## Custom Criteria" (if applicable),
+  "## Signals",
+  "## Tech/Footprint" (or "## Operating Footprint"),
+  "## Decision Makers" (with personalization),
+  "## Risks & Gaps" (optional),
+  "## Sources",
+  "## Proactive Follow-ups".
+- If prior context about a previous report is provided, insert "## What Changed" with 3–5 bullets after "Why Now".
+- Use short evidence-backed statements with inline source notes. Favor 2–3 short mini‑paragraphs where synthesis adds value; avoid long bullet sprawl.`;
 
 const QUICK_OUTPUT = `Quick Facts format (strict):
 - Output exactly two sections and nothing else:
@@ -289,7 +307,7 @@ const clarificationPolicy = isResearchAgent
       ? `Response Shape:\n- Keep outputs concise and decision-ready; prefer bullets.\n- ${QUICK_OUTPUT}`
       : resolvedMode === 'specific'
         ? `Response Shape:\n- Keep outputs concise and answer-led.\n- ${SPECIFIC_OUTPUT}`
-        : `Response Shape:\n- Keep outputs concise and decision-ready; prefer bullets and short sections.\n- ${STRUCTURED_OUTPUT}`;
+        : `Response Shape:\n- Keep outputs concise and decision-ready; balance mini‑paragraph synthesis with bullets.\n- ${DEEP_OUTPUT}`;
   } else if (isSettingsAgent) {
     responseShape = SETTINGS_RESPONSE_SHAPE;
   } else {

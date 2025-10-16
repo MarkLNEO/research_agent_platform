@@ -1699,11 +1699,11 @@ useEffect(() => {
       const depth = overrideDepth || inferredDepth || preferredResearchType || 'deep';
       setLastRunMode((depth as any) || 'auto');
       const cfg: any = { ...(options?.config || {}) };
-      if (depth === 'deep') cfg.model = 'gpt-5-mini';
+      if (depth === 'deep') cfg.model = 'gpt-5';
       if (depth === 'quick') cfg.model = 'gpt-5-mini';
       if (depth === 'specific') cfg.model = 'gpt-5-mini';
       cfg.clarifiers_locked = clarifiersLocked;
-      cfg.facet_budget = depth === 'quick' ? 3 : depth === 'deep' ? 10 : 6;
+      cfg.facet_budget = depth === 'quick' ? 3 : depth === 'deep' ? 8 : 6;
       // Fast mode hints to server for lower verbosity/reasoning and shorter summaries
       if (fastMode) {
         cfg.fast_mode = true;
