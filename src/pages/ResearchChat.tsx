@@ -408,9 +408,8 @@ export function ResearchChat() {
   const currentActionCompany = actionBarCompany || activeSubject;
   const displayActionCompany = currentActionCompany ? formatDisplaySubject(currentActionCompany) : null;
   const canRefreshResearch = Boolean(currentActionCompany);
-  const refreshLabel = canRefreshResearch
-    ? `Refresh ${displayActionCompany ?? 'research'}`
-    : 'Refresh research';
+  // Keep the refresh label concise and stable to avoid accidental long subjects
+  const refreshLabel = canRefreshResearch ? 'Refresh on this' : 'Refresh';
   const [showRefine, setShowRefine] = useState(false);
   const [refineFacets, setRefineFacets] = useState<string[]>([]);
   const [refineTimeframe, setRefineTimeframe] = useState<string>('last 12 months');
@@ -2959,6 +2958,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                       }`}
                       onClick={() => { void handleActionBarAction('continue'); }}
                       disabled={!canRefreshResearch}
+                      title="Refresh this report with a short 'what changed' update and one next step."
                     >
                       ↺ {refreshLabel}
                     </button>
@@ -2991,6 +2991,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                       <button
                         className="inline-flex items-center gap-2 rounded-lg bg-purple-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-400"
                         onClick={() => { void handleActionBarAction('refine'); }}
+                        title="Adjust focus areas (leadership, funding, tech stack, news, competitors, hiring) and timeframe, then re-run."
                       >
                         🎯 Refine focus
                       </button>
