@@ -2627,6 +2627,12 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     summarizeReady={isLastAssistant && !thisIsDraft ? summarizeReady : false}
                     isSummarizing={isLastAssistant && !thisIsDraft ? summaryPending : false}
                     assumed={isLastAssistant ? (assumedForUi as any) : undefined}
+                    onAssumedChange={(a) => {
+                      // One-click switch helper: prefill composer to change company quickly
+                      const name = (a?.name || '').trim();
+                      const seed = name ? `Research ${name.replace(/\n+/g, ' ').trim()}\n` : 'Research ';
+                      startSuggestion(seed);
+                    }}
                     onPromote={isLastAssistant && !thisIsDraft ? () => {
                       // Build draft using the latest research message (skip any later email drafts)
                       const research = (() => {
@@ -2819,6 +2825,11 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     streaming
                     mode={lastRunMode || null}
                     assumed={lastAssumedSubject || undefined}
+                    onAssumedChange={(a) => {
+                      const name = (a?.name || '').trim();
+                      const seed = name ? `Research ${name.replace(/\n+/g, ' ').trim()}\n` : 'Research ';
+                      startSuggestion(seed);
+                    }}
                     agentType="company_research"
                   />
               )}

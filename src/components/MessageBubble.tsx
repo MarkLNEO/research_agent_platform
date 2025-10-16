@@ -25,6 +25,7 @@ interface MessageBubbleProps {
   agentType?: string;
   summarizeReady?: boolean;
   assumed?: { name: string; industry?: string | null; website?: string | null };
+  onAssumedChange?: (assumed: { name: string; industry?: string | null; website?: string | null }) => void;
 }
 
 function MarkdownContent({ content }: { content: string }) {
@@ -72,6 +73,7 @@ export function MessageBubble({
   agentType = 'company_research',
   summarizeReady = false,
   assumed,
+  onAssumedChange,
 }: MessageBubbleProps) {
   const { addToast } = useToast();
   const [expanded, setExpanded] = useState(false);
@@ -325,8 +327,18 @@ export function MessageBubble({
       {(mode || assumed) && (
         <div className="flex justify-end gap-2">
           {assumed && (
-            <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full border border-amber-200 bg-amber-50 text-amber-700">
-              Assumed: {assumed.name}{assumed.industry ? ` — ${assumed.industry}` : ''}
+            <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full border border-amber-200 bg-amber-50 text-amber-700 inline-flex items-center gap-1">
+              <span>Assumed: {assumed.name}{assumed.industry ? ` — ${assumed.industry}` : ''}</span>
+              {onAssumedChange && (
+                <button
+                  type="button"
+                  className="ml-1 underline text-amber-800 hover:text-amber-900"
+                  onClick={() => onAssumedChange(assumed)}
+                  aria-label="Change assumed company"
+                >
+                  change
+                </button>
+              )}
             </span>
           )}
           {mode && (
