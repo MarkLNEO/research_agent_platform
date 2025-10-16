@@ -42,15 +42,53 @@ export default async function handler(req: any, res: any) {
       : null;
 
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY, project: process.env.OPENAI_PROJECT });
+
+    // Attempt deterministic extraction of CISO name from the research markdown
+    const extractCisoName = (md: string): string | null => {
+      try {
+        const text = String(md || '');
+        if (!text) return null;
+        // Limit to Decision Makers/Key Contacts section if present
+        const sectionMatch = text.match(/##\s*(Decision\s*Makers|Key\s*Contacts)[\s\S]*?(?=\n##\s+|$)/i);
+        const scope = sectionMatch ? sectionMatch[0] : text;
+        const cleaned = scope
+          .replace(/\*\*|__|\*|_/g, '')
+          .replace(/\r/g, '');
+
+        const patterns: RegExp[] = [
+          // Bullet or dash format: - Name — CISO
+          /^[\t >\-•]*([A-Z][A-Za-z' .-]{1,60})\s*[—\-–]\s*(?:Global\s+)?(?:Chief\s+Information\s+Security\s+Officer|CISO)\b/im,
+          // Name (CISO)
+          /(^|\n)\s*([A-Z][A-Za-z' .-]{1,60})\s*\((?:Chief\s+Information\s+Security\s+Officer|CISO)\)/i,
+          // Table format: | Name | CISO |
+          /\|\s*([A-Z][A-Za-z' .-]{1,60})\s*\|\s*[^|]*\b(CISO|Chief\s+Information\s+Security\s+Officer)\b[^|]*\|/i,
+          // Comma format: Name, CISO
+          /(^|\n)\s*([A-Z][A-Za-z' .-]{1,60})\s*,\s*(?:Chief\s+Information\s+Security\s+Officer|CISO)\b/i
+        ];
+
+        for (const re of patterns) {
+          const m = re.exec(cleaned);
+          if (m) {
+            const name = (m[1] || m[2] || '').trim();
+            if (name && /[A-Za-z]/.test(name)) return name;
+          }
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    };
+    const cisoFullName = research_markdown ? extractCisoName(research_markdown) : null;
+    const cisoFirstName = cisoFullName ? cisoFullName.split(/\s+/)[0] : null;
     const instructions = `Write a concise, personalized outreach email for a sales AE.
 Use the research markdown to extract 1–2 specific hooks. Keep to ~140–180 words.
 Structure: subject line, greeting, 2 short paragraphs, 1 CTA, sign-off.
 Tone: helpful, confident, specific. Avoid fluff.
 
-Recipient name: If the research clearly identifies the ${role} by name (e.g., under Decision Makers), greet them by first name. If you aren't confident in the name, keep a bracket placeholder (e.g., "Hi [${role} Name],"). Avoid generic "Hi ${role}," if the name is unknown.
+Recipient name: If the research clearly identifies the ${role} by name (e.g., under Decision Makers), greet them by first name. If RECIPIENT_NAME_HINT is provided, use it. If you aren't confident in the name, keep a bracket placeholder (e.g., "Hi [${role} Name],"). Avoid generic "Hi ${role}," if the name is unknown.
 Signature: Prefer the provided sender name/title/company. If a custom signature template is provided, use it verbatim for the signature block. If any sender fields are missing, include bracket placeholders such as [Your Name], [Your Company], [Your Title].`;
 
-    const input = `COMPANY: ${company || 'Target Account'}\nTARGET ROLE: ${role}\nSENDER_NAME: ${senderName || ''}\nSENDER_TITLE: ${senderTitle || ''}\nSENDER_COMPANY: ${senderCompany || ''}\nSIGNATURE_TEMPLATE: ${signatureOverride || ''}\n\nRESEARCH:\n---\n${research_markdown}\n---`;
+    const input = `COMPANY: ${company || 'Target Account'}\nTARGET ROLE: ${role}\nRECIPIENT_NAME_HINT: ${cisoFirstName || ''}\nSENDER_NAME: ${senderName || ''}\nSENDER_TITLE: ${senderTitle || ''}\nSENDER_COMPANY: ${senderCompany || ''}\nSIGNATURE_TEMPLATE: ${signatureOverride || ''}\n\nRESEARCH:\n---\n${research_markdown}\n---`;
     const stream = await openai.responses.stream({
       model: 'gpt-5-mini',
       instructions,
@@ -82,6 +120,21 @@ Signature: Prefer the provided sender name/title/company. If a custom signature 
         email = '';
       }
     }
+
+    // Post-process: if we have a CISO name, replace common placeholders
+    try {
+      if (cisoFirstName && typeof email === 'string' && email) {
+        const replacements = [
+          /\[CISO Name\]/gi,
+          /\[Security Leader Name\]/gi,
+          /\[Recipient Name\]/gi,
+          /\[${role}\s*Name\]/gi
+        ];
+        for (const re of replacements) {
+          email = email.replace(re, cisoFirstName);
+        }
+      }
+    } catch {}
 
     return res.status(200).json({ email });
   } catch (error: any) {
