@@ -40,6 +40,20 @@ type Suggestion = {
 const extractCompanyNameFromQuery = (raw: string): string | null => {
   if (!raw) return null;
   let cleaned = raw.trim();
+  // Prefer explicit URLs/domains in the message
+  const urlMatch = cleaned.match(/(https?:\/\/[^\s]+|www\.[^\s]+|\b[a-z0-9-]+\.[a-z]{2,}\b)/i);
+  if (urlMatch) {
+    try {
+      const rawUrl = urlMatch[1];
+      const normalized = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
+      const u = new URL(normalized);
+      const host = u.hostname.replace(/^www\./i, '');
+      const seg = host.split('.') [0];
+      if (seg) {
+        return seg.split(/[-_]/).map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(' ').trim();
+      }
+    } catch {}
+  }
   cleaned = cleaned.replace(/^research\s+/i, '')
     .replace(/^tell me about\s+/i, '')
     .replace(/^find\s+/i, '')
@@ -1539,9 +1553,40 @@ useEffect(() => {
     if (!content) return;
 
     const isResearch = isResearchPrompt(content);
+
+    // Allow user to view a summary of onboarding/setup without invoking the LLM
+    if (/^\s*(view|show)\s+(my\s+)?(setup|setup\s+logic|profile|preferences)\b/i.test(content)) {
+      setInputValue('');
+      const p: any = userProfile || {};
+      const bullets: string[] = [];
+      bullets.push('## Your Setup');
+      if (p.company_name || p.company_url) {
+        bullets.push(`- Organization: ${p.company_name || '—'}${p.company_url ? ` (${p.company_url})` : ''}`);
+      }
+      if (p.user_role || p.use_case) {
+        bullets.push(`- Role/Use case: ${[p.user_role, p.use_case].filter(Boolean).join(' — ') || '—'}`);
+      }
+      if (p.icp_definition || p.industry) bullets.push(`- ICP: ${p.icp_definition || p.industry}`);
+      if (Array.isArray(signalPreferences) && signalPreferences.length) {
+        const sigs = signalPreferences.map((s: any) => s.signal_type?.replace(/_/g, ' ')).filter(Boolean).join(', ');
+        bullets.push(`- Signals: ${sigs}`);
+      }
+      if (Array.isArray(customCriteria) && customCriteria.length) {
+        const crit = customCriteria.map((c: any) => `${c.name} (${(c.importance || '').toLowerCase() || 'optional'})`).join('; ');
+        bullets.push(`- Custom criteria: ${crit}`);
+      }
+      if (Array.isArray(p.research_focus) && p.research_focus.length) {
+        bullets.push(`- Research focus: ${p.research_focus.map((x: string) => x.replace(/_/g, ' ')).join(', ')}`);
+      }
+      bullets.push('\nShortcuts: type "Edit setup" to reopen onboarding, or go to Settings → Profile.');
+      const msg: Message = { id: `setup-${Date.now()}`, role: 'assistant', content: bullets.join('\n'), created_at: new Date().toISOString() };
+      setMessages(prev => [...prev, msg]);
+      return;
+    }
+
     const inferredMode = isResearch ? inferResearchMode(content) : undefined;
 
-    if (!preferredResearchType && isResearch && inferredMode === 'deep') {
+    if (!preferredResearchType && isResearch) {
       setPendingQuery(content);
       setShowClarify(true);
       setInputValue('');

@@ -129,10 +129,11 @@ export function OnboardingEnhanced() {
   }, [isTyping, currentStep]);
 
   useEffect(() => {
-    if (currentStep === 9 && !welcomeMode && selectedFocus.length === 0 && recommendedFocus.length > 0) {
-      setSelectedFocus(Array.from(new Set(recommendedFocus)));
+    // At the final step, default to all focus areas selected for clarity.
+    if (currentStep === 9 && !welcomeMode && selectedFocus.length === 0) {
+      setSelectedFocus(RESEARCH_FOCUS_OPTIONS.map(opt => opt.id));
     }
-  }, [currentStep, welcomeMode, selectedFocus.length, recommendedFocus]);
+  }, [currentStep, welcomeMode, selectedFocus.length]);
 
   useEffect(() => {
     const checkExistingProfile = async () => {
@@ -180,7 +181,7 @@ export function OnboardingEnhanced() {
   const getStepMessage = (step: number): string => {
     switch (step) {
       case 1:
-        return "Hi! I'm your Welcome Agent. I'll use this setup to auto‑fill firmographics, monitor signals, and tailor every briefing for you. Besides company research, I can: run bulk research from CSV, track accounts and monitor signals, save/export reports, draft outreach, and give you a high-level summary up front.\n\nLet's start — what's your company name? You can paste the website if that's easier and I'll detect it automatically.";
+        return "Hi! I'm your Welcome Agent. I'll use this setup to tailor research, signals, and meetings for you.\n\nLet's start — what's your company name? You can paste the website if that's easier and I'll detect it automatically.";
       case 2:
         return `Great! I'll use the official domain to pull logo, news, and verified firmographics.\n\nWhat's your website address?`;
       case 3:
@@ -192,7 +193,7 @@ export function OnboardingEnhanced() {
       case 6:
         return `Now, who are your main competitors? Knowing this helps me provide comparative insights.\n\nList 2-5 competitor names separated by commas, or type "skip".`;
       case 7:
-        return `Excellent! Certain events create urgency for your solution. For example, if you sell security software, a recent data breach is a strong signal.\n\nWhat events make a company MORE likely to buy from you RIGHT NOW? I'll show you some common signals, or you can describe your own. Type "show signals" to see options, or "skip" to continue.`;
+        return `Next step: Certain events create urgency for your solution. For example, if you sell security software, a recent data breach is a strong signal.\n\nWhat events make a company more likely to buy from you right now?\n\nPossible responses: answer the question, type "show signals" to see options, or "skip" to continue.`;
       case 8:
         return `Almost done! Who do you typically sell to?\n\nPlease provide job titles (e.g., "VP Sales, CRO, Director of Sales") or type "skip".`;
       case 9:
@@ -514,7 +515,7 @@ export function OnboardingEnhanced() {
             });
             signalList += '\n';
           });
-          signalList += 'Type the signals you want to track (e.g., "security_breach, leadership_change") or "skip"';
+          signalList += 'Type the signals you want to track (e.g., "security breach, leadership change") or "skip"';
           await addAgentMessage(signalList);
           break;
         }
@@ -526,9 +527,8 @@ export function OnboardingEnhanced() {
           .filter(Boolean);
         const merged = Array.from(new Set([...selectedSignals, ...entries]));
         setSelectedSignals(merged);
-        await addAgentMessage(
-          `Added ${entries.join(', ')}. Currently tracking: ${merged.join(', ')}. Type more, or "done" to continue.`
-        );
+        const human = (list: string[]) => list.map(x => x.replace(/_/g, ' ')).map(x => x.charAt(0).toUpperCase() + x.slice(1)).join(', ');
+        await addAgentMessage(`Added signal(s): ${human(entries)}\nCurrently tracking: ${human(merged)}\n\nType more or "done" to continue.`);
         break;
       }
 
@@ -945,32 +945,7 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
                     </div>
                   </div>
 
-                  <div className="mt-4 text-sm space-y-2">
-                    <div>
-                      <button className="text-blue-600 hover:text-blue-700" onClick={() => selectPath('immediate')}>Or just start asking me questions →</button>
-                    </div>
-                    <div className="text-xs text-gray-600">Quick suggestions:</div>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        className="px-2.5 py-1.5 text-xs rounded-full bg-gray-100 hover:bg-gray-200"
-                        onClick={() => { navigate('/'); setTimeout(() => { try { window.dispatchEvent(new Event('bulk:open')); } catch {} }, 350); }}
-                      >
-                        Run Bulk Research
-                      </button>
-                      <button
-                        className="px-2.5 py-1.5 text-xs rounded-full bg-gray-100 hover:bg-gray-200"
-                        onClick={() => navigate('/signals')}
-                      >
-                        View Signals
-                      </button>
-                      <button
-                        className="px-2.5 py-1.5 text-xs rounded-full bg-gray-100 hover:bg-gray-200"
-                        onClick={() => navigate('/research')}
-                      >
-                        Research History
-                      </button>
-                    </div>
-                  </div>
+                  {/* Intentionally minimal — keep focus on the two primary paths */}
                 </div>
               </div>
             </div>
