@@ -695,9 +695,10 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
         setCurrentCriterionIndex(-1);
         setCurrentCriterionStep(null);
 
-        const criteriaList = customCriteria.concat([newCriterion]).map((c, idx) =>
-          `${idx + 1}. ${c.field_name} (${c.field_type} • ${c.importance})`
-        ).join('\n');
+        const criteriaList = customCriteria.concat([newCriterion]).map((c, idx) => {
+          const importanceLabel = (c.importance || '').charAt(0).toUpperCase() + (c.importance || '').slice(1);
+          return `${idx + 1}. ${c.field_name}${c.importance ? ` — ${importanceLabel}` : ''}`;
+        }).join('\n');
 
         await addAgentMessage(
           `Excellent! I've saved all your criteria:\n\n${criteriaList}\n\nYou can add more criteria, or type "done" to continue. You can refine these later in Settings if needed.`
