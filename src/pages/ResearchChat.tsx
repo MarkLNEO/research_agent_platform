@@ -8,6 +8,7 @@ import { MessageBubble } from '../components/MessageBubble';
 import { MessageInput } from '../components/MessageInput';
 import { ThinkingIndicator } from '../components/ThinkingIndicator';
 import { SaveResearchDialog } from '../components/SaveResearchDialog';
+import { SaveSignatureDialog } from '../components/SaveSignatureDialog';
 import { CSVUploadDialog } from '../components/CSVUploadDialog';
 import { BulkResearchDialog } from '../components/BulkResearchDialog';
 import { BulkResearchStatus } from '../components/BulkResearchStatus';
@@ -376,6 +377,8 @@ export function ResearchChat() {
   const [saveDraft, setSaveDraft] = useState<ResearchDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [sigOpen, setSigOpen] = useState(false);
+  const [sigDefaults, setSigDefaults] = useState<{ name?: string; title?: string; company?: string; signature?: string }>({});
   const [lastUsage, setLastUsage] = useState<{ tokens: number; credits: number } | null>(null);
   const [draftEmailPending, setDraftEmailPending] = useState(false);
   // Cache for background-generated summaries keyed by assistant message id
@@ -2147,6 +2150,33 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
               onAction: () => navigate('/profile-coach')
             });
           }
+          // Offer quick Save Signature inline
+          try {
+            const parsedSig = (() => {
+              try {
+                const lines = (email || '').split(/\r?\n/);
+                const idx = lines.findIndex(l => /^(best|regards|thanks|thank you|sincerely)[,]?$/i.test(l.trim()));
+                if (idx >= 0) {
+                  const block = lines.slice(idx).join('\n').trim();
+                  return block.split('\n').slice(0, 6).join('\n');
+                }
+              } catch {}
+              return '';
+            })();
+            setSigDefaults({
+              name: fullName,
+              title: role || 'Account Executive',
+              company: userProfile?.company_name || '',
+              signature: parsedSig
+            });
+            addToast({
+              type: 'info',
+              title: 'Use this signature by default?',
+              description: 'Save your signature so future drafts match your style.',
+              actionText: 'Save',
+              onAction: () => setSigOpen(true)
+            });
+          } catch {}
         } catch {}
       } else {
         addToast({ type: 'error', title: 'No email generated', description: 'The drafting service returned an empty response.' });
@@ -2314,6 +2344,14 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
 
   return (
     <>
+      <SaveSignatureDialog
+        open={sigOpen}
+        onClose={() => setSigOpen(false)}
+        defaultName={sigDefaults.name}
+        defaultTitle={sigDefaults.title}
+        defaultCompany={sigDefaults.company}
+        defaultSignature={sigDefaults.signature}
+      />
     <div className="flex h-screen bg-gray-50">
       <Sidebar
         onNewChat={handleNewChatClick}

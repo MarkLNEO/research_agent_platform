@@ -30,7 +30,11 @@ export default async function handler(req: any, res: any) {
 
     // Derive sender details (best-effort)
     const um = (user.user_metadata || {}) as any;
-    const senderName = (um.full_name || um.name || [um.first_name, um.last_name].filter(Boolean).join(' ') || String(user.email || '').split('@')[0] || '').trim();
+    const senderName = (
+      (profile as any)?.metadata?.sender_name ||
+      um.full_name || um.name || [um.first_name, um.last_name].filter(Boolean).join(' ') ||
+      String(user.email || '').split('@')[0] || ''
+    ).trim();
     const senderTitle = (profile?.user_role || um.title || 'Account Executive').trim();
     const senderCompany = (profile?.company_name || um.company || '').trim();
     const signatureOverride = profile?.metadata && typeof (profile as any).metadata?.email_signature === 'string'
