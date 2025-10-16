@@ -2794,6 +2794,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     showActions={false}
                     streaming
                     mode={lastRunMode || null}
+                    assumed={lastAssumedSubject || undefined}
                     agentType="company_research"
                   />
               )}
