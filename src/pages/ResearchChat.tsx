@@ -78,6 +78,31 @@ const isBareNameQuery = (raw: string | null | undefined): boolean => {
   return cleaned.split(/\s+/).filter(Boolean).length <= 2;
 };
 
+// Heuristic: infer a short "industry/space" label from markdown content
+const inferIndustryFromMarkdown = (markdown: string | null | undefined): string | undefined => {
+  if (!markdown) return undefined;
+  const text = String(markdown);
+  // Focus on Executive Summary section if present
+  const execMatch = text.match(/##\s+Executive Summary\s*([\s\S]*?)(?=\n##\s+|$)/i);
+  const body = (execMatch ? execMatch[1] : text).slice(0, 800);
+  // Patterns like: "X is a <space> company/vendor/platform/provider"
+  const re = /\bis a[n]?\s+([^\n.,;]{3,80}?)\s+(?:company|vendor|platform|provider|solution|software)\b/i;
+  const m = re.exec(body);
+  if (m && m[1]) {
+    const raw = m[1]
+      .replace(/^(well[- ]funded|scale[- ]stage|mid[- ]?market|enterprise|leading|global|fast[- ]growing|publicly traded)\b\s*/i, '')
+      .replace(/\b(SaaS|cloud[- ]based)\b/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    if (raw) return raw.length > 60 ? raw.slice(0, 57) + '…' : raw;
+  }
+  // Backup: capture comma phrase after name: "X, a <space> ..."
+  const re2 = /,\s+a[n]?\s+([^\n.,;]{3,80}?)\s+(?:company|vendor|platform|provider|solution|software)\b/i;
+  const m2 = re2.exec(body);
+  if (m2 && m2[1]) return m2[1].trim();
+  return undefined;
+};
+
 const deriveChatTitle = (text: string): string => {
   const company = extractCompanyNameFromQuery(text);
   if (company) return `Research: ${company}`;
@@ -2607,7 +2632,10 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                   const q = lastUser?.content || '';
                   if (isBareNameQuery(q)) {
                     const name = extractCompanyNameFromQuery(q) || q.trim();
-                    if (name) return { name } as { name: string };
+                    if (name) {
+                      const inferred = inferIndustryFromMarkdown(m.content);
+                      return { name, industry: inferred } as { name: string; industry?: string };
+                    }
                   }
                   return undefined;
                 })();
@@ -2824,7 +2852,10 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     showActions={false}
                     streaming
                     mode={lastRunMode || null}
-                    assumed={lastAssumedSubject || undefined}
+                    assumed={(lastAssumedSubject ? {
+                      ...lastAssumedSubject,
+                      industry: lastAssumedSubject.industry || inferIndustryFromMarkdown(streamingMessage)
+                    } : (inferIndustryFromMarkdown(streamingMessage) ? { name: activeSubject || 'This company', industry: inferIndustryFromMarkdown(streamingMessage) } as any : undefined))}
                     onAssumedChange={(a) => {
                       const name = (a?.name || '').trim();
                       const seed = name ? `Research ${name.replace(/\n+/g, ' ').trim()}\n` : 'Research ';
