@@ -2751,8 +2751,8 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                       })();
 
                       if (normalizedDraft) {
-                        setSaveDraft(normalizedDraft);
-                        setSaveOpen(true);
+                        // Default to one-click save: persist immediately without modal
+                        void handleSaveResearch(normalizedDraft);
                       } else {
                         addToast({ type: 'error', title: 'Nothing to save', description: 'No recent research found to save.' });
                       }
