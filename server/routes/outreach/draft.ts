@@ -21,13 +21,32 @@ export default async function handler(req: any, res: any) {
     const { data: { user } } = await supabase.auth.getUser(token);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
+    // Fetch lightweight profile context for sender details
+    const { data: profile } = await supabase
+      .from('company_profiles')
+      .select('company_name, user_role, metadata')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    // Derive sender details (best-effort)
+    const um = (user.user_metadata || {}) as any;
+    const senderName = (um.full_name || um.name || [um.first_name, um.last_name].filter(Boolean).join(' ') || String(user.email || '').split('@')[0] || '').trim();
+    const senderTitle = (profile?.user_role || um.title || 'Account Executive').trim();
+    const senderCompany = (profile?.company_name || um.company || '').trim();
+    const signatureOverride = profile?.metadata && typeof (profile as any).metadata?.email_signature === 'string'
+      ? String((profile as any).metadata.email_signature)
+      : null;
+
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY, project: process.env.OPENAI_PROJECT });
     const instructions = `Write a concise, personalized outreach email for a sales AE.
-Use the research markdown to extract 1–2 specific hooks. Keep to 120–180 words.
+Use the research markdown to extract 1–2 specific hooks. Keep to ~140–180 words.
 Structure: subject line, greeting, 2 short paragraphs, 1 CTA, sign-off.
-Tone: helpful, confident, specific. Avoid fluff.`;
+Tone: helpful, confident, specific. Avoid fluff.
 
-    const input = `COMPANY: ${company || 'Target Account'}\nTARGET ROLE: ${role}\n\nRESEARCH:\n---\n${research_markdown}\n---`;
+Recipient name: If the research clearly identifies the ${role} by name (e.g., under Decision Makers), greet them by first name. If not confident, greet the role only (e.g., "Hi ${role},"). Never output bracketed placeholders.
+Signature: Prefer the provided sender name/title/company. If a custom signature template is provided, use it verbatim for the signature block. Do not invent placeholders if anything is missing; omit that piece.`;
+
+    const input = `COMPANY: ${company || 'Target Account'}\nTARGET ROLE: ${role}\nSENDER_NAME: ${senderName || ''}\nSENDER_TITLE: ${senderTitle || ''}\nSENDER_COMPANY: ${senderCompany || ''}\nSIGNATURE_TEMPLATE: ${signatureOverride || ''}\n\nRESEARCH:\n---\n${research_markdown}\n---`;
     const stream = await openai.responses.stream({
       model: 'gpt-5-mini',
       instructions,

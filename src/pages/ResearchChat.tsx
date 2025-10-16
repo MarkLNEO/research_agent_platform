@@ -2132,6 +2132,22 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
         }
 
         setMessages(prev => [...prev, savedAssistant!]);
+
+        // Nudge to set sender preferences if missing (name/title)
+        try {
+          const { data: userData } = await supabase.auth.getUser();
+          const fullName = (userData?.user?.user_metadata?.full_name || userData?.user?.user_metadata?.name || '').trim();
+          const role = userProfile?.user_role || '';
+          if (!fullName || !role) {
+            addToast({
+              type: 'info',
+              title: 'Save your sender details?',
+              description: 'Add your name and title so future drafts auto-fill your signature.',
+              actionText: 'Update',
+              onAction: () => navigate('/profile-coach')
+            });
+          }
+        } catch {}
       } else {
         addToast({ type: 'error', title: 'No email generated', description: 'The drafting service returned an empty response.' });
       }
