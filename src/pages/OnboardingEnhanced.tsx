@@ -528,7 +528,7 @@ export function OnboardingEnhanced() {
         const merged = Array.from(new Set([...selectedSignals, ...entries]));
         setSelectedSignals(merged);
         const human = (list: string[]) => list.map(x => x.replace(/_/g, ' ')).map(x => x.charAt(0).toUpperCase() + x.slice(1)).join(', ');
-        await addAgentMessage(`Added signal(s): ${human(entries)}\nCurrently tracking: ${human(merged)}\n\nType more or "done" to continue.`);
+        await addAgentMessage(`Now tracking: ${human(merged)}\n\nType more or "done" to continue.`);
         break;
       }
 
