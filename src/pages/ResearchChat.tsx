@@ -519,6 +519,33 @@ export function ResearchChat() {
       return true;
     }).slice(0, 6);
   }, [suggestions, serverSuggestions]);
+
+  const appliedContext = useMemo(() => {
+    const profile = userProfile || null;
+    const icp = profile?.icp_definition || profile?.icp || profile?.industry || null;
+    const targetTitles = Array.isArray(profile?.target_titles)
+      ? profile!.target_titles.filter((t: string) => typeof t === 'string' && t.trim().length > 0).slice(0, 4)
+      : [];
+    const criteria = customCriteria
+      .filter((c: any) => c?.name)
+      .slice(0, 4)
+      .map((c: any) => ({ name: c.name, importance: c?.importance || null }));
+    const signals = signalPreferences
+      .map((s: any) => (s?.signal_type ? String(s.signal_type).replace(/_/g, ' ') : null))
+      .filter((v: string | null): v is string => Boolean(v))
+      .slice(0, 4);
+
+    if (!icp && targetTitles.length === 0 && criteria.length === 0 && signals.length === 0) {
+      return null;
+    }
+
+    return {
+      icp,
+      targetTitles,
+      criteria,
+      signals,
+    };
+  }, [userProfile, customCriteria, signalPreferences]);
   const dismissContextTooltip = () => {
     setShowContextTooltip(false);
     if (typeof window !== 'undefined') {
@@ -1189,15 +1216,20 @@ useEffect(() => {
     }
   };
 
-  const handleSendMessageWithChat = async (chatId: string, text: string, runModeOverride?: 'deep' | 'quick' | 'specific') => {
+  const handleSendMessageWithChat = async (
+    chatId: string,
+    text: string,
+    runModeOverride?: 'deep' | 'quick' | 'specific',
+    options?: { force?: boolean }
+  ) => {
     if (!text.trim() || loading) return;
     const normalized = text.trim();
     const now = Date.now();
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
-    if (
+    if (!options?.force && (
       (lastUser && lastUser.content.trim().toLowerCase() === normalized.toLowerCase()) ||
       (lastSentRef.current && lastSentRef.current.text === normalized.toLowerCase() && now - lastSentRef.current.at < 4000)
-    ) {
+    )) {
       return; // prevent duplicate immediate sends of same text
     }
     lastSentRef.current = { text: normalized.toLowerCase(), at: now };
@@ -1699,7 +1731,7 @@ useEffect(() => {
       const depth = overrideDepth || inferredDepth || preferredResearchType || 'deep';
       setLastRunMode((depth as any) || 'auto');
       const cfg: any = { ...(options?.config || {}) };
-      if (depth === 'deep') cfg.model = 'gpt-5';
+      if (depth === 'deep') cfg.model = 'gpt-5-mini';
       if (depth === 'quick') cfg.model = 'gpt-5-mini';
       if (depth === 'specific') cfg.model = 'gpt-5-mini';
       cfg.clarifiers_locked = clarifiersLocked;
@@ -2070,6 +2102,13 @@ useEffect(() => {
     // Regenerate the response
     await handleSendMessageWithChat(currentChatId, lastUserMessage.content);
   };
+
+  const handleModeSwitch = useCallback(async (mode: 'deep' | 'quick' | 'specific') => {
+    if (streamingMessage || loading) return;
+    const lastUserMessage = [...messages].reverse().find(m => m.role === 'user');
+    if (!lastUserMessage || !currentChatId) return;
+    await handleSendMessageWithChat(currentChatId, lastUserMessage.content, mode, { force: true });
+  }, [streamingMessage, loading, messages, currentChatId, handleSendMessageWithChat]);
 
   const ensureActiveChat = useCallback(async (): Promise<string | null> => {
     if (currentChatId) return currentChatId;
@@ -2746,6 +2785,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     userName={getUserInitial()}
                     showActions={isLastAssistant}
                     mode={isLastAssistant ? (lastRunMode || null) : null}
+                    onModeChange={isLastAssistant ? handleModeSwitch : undefined}
                     collapseEnabled={isLastAssistant && lastRunMode === 'quick'}
                     collapseThresholdWords={150}
                     onTrackAccount={handleTrackAccount}
@@ -2759,6 +2799,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                       const seed = name ? `Research ${name.replace(/\n+/g, ' ').trim()}\n` : 'Research ';
                       startSuggestion(seed);
                     }}
+                    contextSummary={isLastAssistant ? appliedContext : null}
                     onPromote={isLastAssistant && !thisIsDraft ? () => {
                       // Build draft using the latest research message (skip any later email drafts)
                       const research = (() => {
@@ -2960,6 +3001,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     showActions={false}
                     streaming
                     mode={lastRunMode || null}
+                    onModeChange={handleModeSwitch}
                     assumed={(lastAssumedSubject ? {
                       ...lastAssumedSubject,
                       industry: lastAssumedSubject.industry || inferIndustryFromMarkdown(streamingMessage)
@@ -2970,6 +3012,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                       startSuggestion(seed);
                     }}
                     agentType="company_research"
+                    contextSummary={appliedContext}
                   />
               )}
 
@@ -2987,6 +3030,22 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                       email •{' '}
                       <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">R</kbd> refine
                     </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
+                    <span className="text-xs font-semibold text-gray-600 uppercase">Research depth</span>
+                    {(['quick', 'deep', 'specific'] as const).map(option => (
+                      <button
+                        key={`mode-toggle-${option}`}
+                        type="button"
+                        disabled={!!streamingMessage}
+                        className={`px-3 py-1.5 text-xs rounded-full border transition-colors ${lastRunMode === option
+                          ? 'border-blue-500 bg-blue-50 text-blue-700'
+                          : 'border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-700'} ${streamingMessage ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        onClick={() => { void handleModeSwitch(option); }}
+                      >
+                        {option.charAt(0).toUpperCase() + option.slice(1)}
+                      </button>
+                    ))}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button

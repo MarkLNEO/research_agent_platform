@@ -11,6 +11,7 @@ interface MessageBubbleProps {
   showActions?: boolean;
   streaming?: boolean;
   mode?: 'deep' | 'quick' | 'specific' | 'auto' | null;
+  onModeChange?: (mode: 'deep' | 'quick' | 'specific') => void;
   onPromote?: () => void;
   disablePromote?: boolean;
   onRetry?: () => void;
@@ -26,6 +27,12 @@ interface MessageBubbleProps {
   summarizeReady?: boolean;
   assumed?: { name: string; industry?: string | null; website?: string | null };
   onAssumedChange?: (assumed: { name: string; industry?: string | null; website?: string | null }) => void;
+  contextSummary?: {
+    icp?: string | null;
+    targetTitles?: string[];
+    criteria?: Array<{ name: string; importance?: string | null }>;
+    signals?: string[];
+  } | null;
 }
 
 function MarkdownContent({ content }: { content: string }) {
@@ -60,6 +67,7 @@ export function MessageBubble({
   showActions = false,
   streaming = false,
   mode = null,
+  onModeChange,
   onPromote,
   disablePromote,
   onRetry,
@@ -74,11 +82,13 @@ export function MessageBubble({
   summarizeReady = false,
   assumed,
   onAssumedChange,
+  contextSummary,
 }: MessageBubbleProps) {
   const { addToast } = useToast();
   const [expanded, setExpanded] = useState(false);
   const safeContent = content ?? '';
   const isCompanyResearch = agentType === 'company_research';
+  const selectableMode = mode && mode !== 'auto' ? mode : null;
   const icpMeta = useMemo(() => {
     if (!isCompanyResearch || role !== 'assistant' || streaming) return null;
     // Do not show ICP scorecard for draft email content
@@ -92,6 +102,27 @@ export function MessageBubble({
       return null;
     }
   }, [safeContent, role, streaming, isCompanyResearch]);
+
+  const contextDetails = useMemo(() => {
+    if (!contextSummary) return null;
+    const items: Array<{ label: string; value: string }> = [];
+    if (contextSummary.icp) {
+      items.push({ label: 'ICP', value: contextSummary.icp });
+    }
+    if (Array.isArray(contextSummary.targetTitles) && contextSummary.targetTitles.length) {
+      items.push({ label: 'Target titles', value: contextSummary.targetTitles.join(', ') });
+    }
+    if (Array.isArray(contextSummary.criteria) && contextSummary.criteria.length) {
+      const crit = contextSummary.criteria
+        .map(c => `${c.name}${c.importance ? ` (${c.importance.toLowerCase()})` : ''}`)
+        .join(', ');
+      if (crit) items.push({ label: 'Criteria applied', value: crit });
+    }
+    if (Array.isArray(contextSummary.signals) && contextSummary.signals.length) {
+      items.push({ label: 'Signals monitoring', value: contextSummary.signals.join(', ') });
+    }
+    return items.length ? items : null;
+  }, [contextSummary]);
 
   // Simple markdown-stripping for word count
   const stripMd = (s: string) => s
@@ -324,8 +355,27 @@ export function MessageBubble({
   const isDraftEmail = /^\s*##\s*Draft Email\b/i.test(safeContent);
   return (
     <div className="space-y-3" data-testid="message-assistant">
-      {(mode || assumed) && (
-        <div className="flex justify-end gap-2">
+      {(assumed || onModeChange || selectableMode) && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {onModeChange && (
+            <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-full px-2 py-1">
+              <span className="text-[10px] font-semibold uppercase text-gray-500">Mode</span>
+              {(['quick', 'deep', 'specific'] as const).map(option => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => onModeChange(option)}
+                  disabled={streaming}
+                  className={`px-2 py-0.5 text-[10px] rounded-full font-semibold transition-colors ${selectableMode === option
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'} ${streaming ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  aria-pressed={selectableMode === option}
+                >
+                  {option.charAt(0).toUpperCase() + option.slice(1)}
+                </button>
+              ))}
+            </div>
+          )}
           {assumed && (
             <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full border border-amber-200 bg-amber-50 text-amber-700 inline-flex items-center gap-1">
               <span>Assumed: {assumed.name}{assumed.industry ? ` — ${assumed.industry}` : ''}</span>
@@ -341,11 +391,6 @@ export function MessageBubble({
               )}
             </span>
           )}
-          {mode && (
-            <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full border border-gray-200 bg-gray-50 text-gray-600">
-              Mode: {String(mode).charAt(0).toUpperCase() + String(mode).slice(1)}
-            </span>
-          )}
         </div>
       )}
       {structured ? (
@@ -354,6 +399,16 @@ export function MessageBubble({
             <p className="text-xs text-gray-500 italic">{ackLine}</p>
           )}
           {renderIcpScorecard}
+          {contextDetails && (
+            <div className="bg-white border border-blue-100 rounded-2xl p-4 shadow-sm">
+              <div className="text-xs font-semibold text-blue-900 uppercase tracking-wide mb-1">Context Applied</div>
+              <ul className="space-y-1 text-xs text-blue-800">
+                {contextDetails.map(item => (
+                  <li key={`${item.label}-${item.value}`}><span className="font-semibold text-blue-900">{item.label}:</span> {item.value}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {execBody && (
             <div className="bg-gradient-to-br from-blue-50 to-purple-50 border border-blue-200 rounded-2xl p-4">
               <div className="flex items-start gap-3">
