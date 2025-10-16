@@ -283,6 +283,36 @@ export function buildSystemPrompt(
   if (isResearchAgent && resolvedMode === 'deep') {
     extras.push(DEFAULT_CRITERIA_GUIDANCE);
   }
+
+  const profile = userContext.profile || {};
+  const contextLens: string[] = [];
+  if (profile.icp_definition || profile.icp || profile.industry) {
+    contextLens.push(`- ICP: Tie headline insights and "Why Now" directly to ${profile.icp_definition || profile.icp || profile.industry}. Explain fit through this lens.`);
+  }
+  if (Array.isArray(profile.target_titles) && profile.target_titles.length) {
+    contextLens.push(`- Target titles (${profile.target_titles.join(', ')}): Prioritize these roles in Deal Strategy and Decision Makers; spell out why each matters.`);
+  }
+  const criteriaNames = (userContext.customCriteria || []).map((c: any) => c?.field_name).filter(Boolean);
+  if (criteriaNames.length) {
+    contextLens.push(`- Custom criteria (${criteriaNames.join(', ')}): Evaluate each item with Met / Not met / Unknown and cite evidence.`);
+  }
+  const signalNames = (userContext.signals || []).map((s: any) => s?.signal_type?.replace(/_/g, ' ')).filter(Boolean);
+  if (signalNames.length) {
+    contextLens.push(`- Signal preferences (${signalNames.join(', ')}): Highlight matching news/signals; if none, state what you'll monitor next.`);
+  }
+  if (contextLens.length) {
+    extras.push(`Context expectations:\n${contextLens.join('\n')}\n- Thread these preferences through every section; the brief should feel tailored to this profile.`);
+  }
+  if (contextLens.length && Array.isArray(profile.target_titles) && profile.target_titles.length) {
+    extras.push('Decision Maker guidance: Where possible, surface contacts that align with saved target titles and include personalization drawn from those roles.');
+  }
+  if (contextLens.length && criteriaNames.length) {
+    extras.push('In the "Custom Criteria" section, list each criterion explicitly with status (Met / Not met / Unknown) and a one-sentence rationale or follow-up action.');
+  }
+  if (contextLens.length && signalNames.length) {
+    extras.push('In "Signals" and "Why Now", prioritize activity that maps to the user’s preferred signal types.');
+  }
+
   if (isResearchAgent) {
     extras.push(buildImmediateAckGuidance(resolvedMode));
     extras.push(resolvedMode === 'specific' ? SPECIFIC_FOLLOW_UP_GUIDANCE : PROACTIVE_FOLLOW_UP_GUIDANCE);
