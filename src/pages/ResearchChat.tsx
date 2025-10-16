@@ -66,6 +66,18 @@ const extractCompanyNameFromQuery = (raw: string): string | null => {
     .trim();
 };
 
+const isBareNameQuery = (raw: string | null | undefined): boolean => {
+  if (!raw) return false;
+  const text = raw.trim();
+  if (!text) return false;
+  if (/https?:\/\//i.test(text)) return false;
+  if (/\./.test(text)) return false;
+  const cleaned = text.replace(/^(research|tell me about|find|analy[sz]e|who is|what is)\s+/i, '').trim();
+  if (!cleaned) return false;
+  if (/(inc\.|corp\.|ltd\.|llc|company|co\b|group|holdings|technologies|systems)/i.test(cleaned)) return false;
+  return cleaned.split(/\s+/).filter(Boolean).length <= 2;
+};
+
 const deriveChatTitle = (text: string): string => {
   const company = extractCompanyNameFromQuery(text);
   if (company) return `Research: ${company}`;
@@ -2588,6 +2600,18 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                   return !!(rid && summaryCache[rid]);
                 })();
                 const thisIsDraft = /^##\s*Draft Email\b/i.test((m.content || '').trim());
+                // Fallback: derive assumed label if server didn't emit it but the query was a bare name
+                const assumedForUi = (() => {
+                  if (lastAssumedSubject) return lastAssumedSubject;
+                  const lastUser = [...messages].slice(0, idx + 1).reverse().find(mm => mm.role === 'user');
+                  const q = lastUser?.content || '';
+                  if (isBareNameQuery(q)) {
+                    const name = extractCompanyNameFromQuery(q) || q.trim();
+                    if (name) return { name } as { name: string };
+                  }
+                  return undefined;
+                })();
+
                 return (
                   <MessageBubble
                     key={m.id}
@@ -2602,7 +2626,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     agentType="company_research"
                     summarizeReady={isLastAssistant && !thisIsDraft ? summarizeReady : false}
                     isSummarizing={isLastAssistant && !thisIsDraft ? summaryPending : false}
-                    assumed={isLastAssistant ? lastAssumedSubject || undefined : undefined}
+                    assumed={isLastAssistant ? (assumedForUi as any) : undefined}
                     onPromote={isLastAssistant && !thisIsDraft ? () => {
                       // Build draft using the latest research message (skip any later email drafts)
                       const research = (() => {
