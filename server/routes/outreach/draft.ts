@@ -47,8 +47,8 @@ Use the research markdown to extract 1–2 specific hooks. Keep to ~140–180 wo
 Structure: subject line, greeting, 2 short paragraphs, 1 CTA, sign-off.
 Tone: helpful, confident, specific. Avoid fluff.
 
-Recipient name: If the research clearly identifies the ${role} by name (e.g., under Decision Makers), greet them by first name. If not confident, greet the role only (e.g., "Hi ${role},"). Never output bracketed placeholders.
-Signature: Prefer the provided sender name/title/company. If a custom signature template is provided, use it verbatim for the signature block. Do not invent placeholders if anything is missing; omit that piece.`;
+Recipient name: If the research clearly identifies the ${role} by name (e.g., under Decision Makers), greet them by first name. If you aren't confident in the name, keep a bracket placeholder (e.g., "Hi [${role} Name],"). Avoid generic "Hi ${role}," if the name is unknown.
+Signature: Prefer the provided sender name/title/company. If a custom signature template is provided, use it verbatim for the signature block. If any sender fields are missing, include bracket placeholders such as [Your Name], [Your Company], [Your Title].`;
 
     const input = `COMPANY: ${company || 'Target Account'}\nTARGET ROLE: ${role}\nSENDER_NAME: ${senderName || ''}\nSENDER_TITLE: ${senderTitle || ''}\nSENDER_COMPANY: ${senderCompany || ''}\nSIGNATURE_TEMPLATE: ${signatureOverride || ''}\n\nRESEARCH:\n---\n${research_markdown}\n---`;
     const stream = await openai.responses.stream({
