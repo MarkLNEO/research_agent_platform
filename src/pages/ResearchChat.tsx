@@ -2898,6 +2898,16 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                 );
               })()}
 
+              {/* Show a timer indicator in the chat while drafting an email */}
+              {draftEmailPending && (
+                <ThinkingIndicator
+                  type="reasoning_progress"
+                  content={
+                    'Drafting personalized outreach…\nI\'ll paste the email here once it\'s ready.'
+                  }
+                />
+              )}
+
               {streamingMessage && (
                   <MessageBubble
                     role="assistant"
