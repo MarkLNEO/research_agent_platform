@@ -286,7 +286,7 @@ export default async function handler(req, res) {
         const authAndCreditMs = Date.now() - processStart;
         // Parse request body
         const { messages, systemPrompt, chatId, chat_id, agentType = 'company_research', config: userConfig = {}, research_type, active_subject } = body;
-        const fastMode = Boolean(userConfig?.fast_mode);
+        const fastMode = false;
         const activeContextCompany = typeof active_subject === 'string' ? active_subject.trim() : '';
         const contextFetchStart = Date.now();
         const userContext = await fetchUserContext(supabase, user.id);
@@ -337,15 +337,7 @@ export default async function handler(req, res) {
         if (typeof userConfig?.summary_brevity === 'string') {
             instructions += `\n\n<summary_brevity>${userConfig.summary_brevity}</summary_brevity>`;
         }
-        if (fastMode) {
-            instructions += `\n\n<fast_mode>On</fast_mode>\n` +
-                `Do not include an acknowledgement line or progress updates. ` +
-                `Be terse and action-focused. Prefer bullets. Avoid filler. ` +
-                `Only output the final answer in the required sections.`;
-            if (!userConfig?.summary_brevity) {
-                instructions += `\n<summary_brevity>short</summary_brevity>`;
-            }
-        }
+        // Fast mode removed; always request full context in outputs
         // Append guardrail hint if present in prompt config
         try {
             const guard = userContext.promptConfig?.guardrail_profile;
@@ -407,7 +399,7 @@ export default async function handler(req, res) {
                 }
                 if (_isResearchQuery || research_type) {
                     // Build explicit research task input and include brief recent context
-                    const recentWindow = fastMode ? 2 : 4;
+                    const recentWindow = 4;
                     const recent = (messages || []).slice(-recentWindow).map((m) => {
                         const role = m.role === 'user' ? 'User' : (m.role === 'assistant' ? 'Assistant' : 'System');
                         const text = String(m.content || '').replace(/\s+/g, ' ').trim();
@@ -512,8 +504,8 @@ export default async function handler(req, res) {
             const shortQ = /^(who|what|when|where|which|how|do|does|did|is|are|was|were)\b/i.test((lastUserMessage?.content || '').trim()) && ((lastUserMessage?.content || '').trim().length <= 120);
             const autoMode = (activeContextCompany && shortQ) ? 'specific' : undefined;
             const effectiveMode = (autoMode || research_type);
-            const reasoningEffort = fastMode ? 'low' : (effectiveMode === 'deep' ? 'medium' : 'low');
-            const isQuick = fastMode ? true : (effectiveMode === 'quick');
+            const reasoningEffort = effectiveMode === 'deep' ? 'medium' : 'low';
+            const isQuick = effectiveMode === 'quick';
             // Summarization mode: if the client passed summarize_source, bypass research flow
             const summarizeSource = userConfig?.summarize_source;
             if (summarizeSource && typeof summarizeSource === 'string' && summarizeSource.trim().length > 0) {
@@ -596,7 +588,7 @@ export default async function handler(req, res) {
                 safeWrite(`data: ${JSON.stringify({ type: 'reasoning_progress', content: preview })}\n\n`);
             }
             const storeRun = true;
-            const shouldPlanStream = isResearchQuery && !userConfig?.disable_fast_plan && !fastMode;
+            const shouldPlanStream = isResearchQuery && !userConfig?.disable_fast_plan;
             // Emit a hard-coded acknowledgment only if the fast plan stream is disabled
             if (!shouldPlanStream) {
                 try {
@@ -719,9 +711,9 @@ export default async function handler(req, res) {
                 text: { format: { type: 'text' }, verbosity: 'low' },
                 reasoning: { effort: reasoningEffort },
                 tools: useTools ? [{ type: 'web_search' }] : [],
-                include: (fastMode ? [] : ['reasoning.encrypted_content', 'web_search_call.results']),
+                include: ['reasoning.encrypted_content', 'web_search_call.results'],
                 parallel_tool_calls: useTools,
-                max_output_tokens: fastMode ? (research_type === 'deep' ? 900 : 500) : (isQuick ? 450 : undefined),
+                max_output_tokens: research_type === 'deep' ? undefined : (isQuick ? 450 : undefined),
                 store: storeRun,
                 metadata: {
                     agent: 'company_research',
@@ -788,7 +780,7 @@ export default async function handler(req, res) {
             }
             // Configure reasoning streaming behaviour
             // We keep reasoning visible in all modes. For quick mode, we throttle/compact updates.
-            const forwardReasoning = fastMode ? false : true;
+            const forwardReasoning = true;
             let quickReasoningBuffer = '';
             let quickReasoningLastEmit = 0;
             // Process the stream

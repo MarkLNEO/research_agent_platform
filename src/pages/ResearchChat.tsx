@@ -357,25 +357,6 @@ export function ResearchChat() {
   const [showInlineReasoning, setShowInlineReasoning] = useState<boolean>(() => {
     try { return localStorage.getItem('showInlineReasoning') !== '0'; } catch { return true; }
   });
-  // Fast mode toggle: prioritizes speed via concise outputs and minimal reasoning
-  const [fastMode, setFastMode] = useState<boolean>(() => {
-    try {
-      const v = localStorage.getItem('fastMode');
-      if (v === '1') return true;
-      if (v === '0') return false;
-      // Default ON for users asking for faster responses
-      return true;
-    } catch { return true; }
-  });
-  const persistFastMode = (v: boolean) => {
-    setFastMode(v);
-    try { localStorage.setItem('fastMode', v ? '1' : '0'); } catch {}
-    // When fast mode is enabled, hide inline reasoning to reduce UI noise
-    if (v) {
-      try { localStorage.setItem('showInlineReasoning', '0'); } catch {}
-      setShowInlineReasoning(false);
-    }
-  };
   const persistInlineReasoning = (v: boolean) => {
     setShowInlineReasoning(v);
     try { localStorage.setItem('showInlineReasoning', v ? '1' : '0'); } catch {}
@@ -1737,12 +1718,7 @@ useEffect(() => {
       cfg.clarifiers_locked = clarifiersLocked;
       cfg.facet_budget = depth === 'quick' ? 3 : depth === 'deep' ? 8 : 6;
       // Fast mode hints to server for lower verbosity/reasoning and shorter summaries
-      if (fastMode) {
-        cfg.fast_mode = true;
-        cfg.summary_brevity = 'short';
-        // Lock clarifiers to avoid back-and-forth and save time
-        cfg.clarifiers_locked = true;
-      }
+      // No fast mode: always favor full context for research outputs
 
       // Setup abort controller for Stop action
       const controller = new AbortController();
@@ -2107,6 +2083,7 @@ useEffect(() => {
     if (streamingMessage || loading) return;
     const lastUserMessage = [...messages].reverse().find(m => m.role === 'user');
     if (!lastUserMessage || !currentChatId) return;
+    void persistPreference(mode);
     await handleSendMessageWithChat(currentChatId, lastUserMessage.content, mode, { force: true });
   }, [streamingMessage, loading, messages, currentChatId, handleSendMessageWithChat]);
 
@@ -2492,16 +2469,6 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                   <span>Bulk Research {bulkProgress.label}</span>
                 </button>
               )}
-              <button
-                onClick={() => persistFastMode(!fastMode)}
-                className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${fastMode ? 'bg-yellow-50 border-yellow-200 text-yellow-800 hover:bg-yellow-100' : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100'}`}
-                aria-pressed={fastMode}
-                title="Fast mode: shorter outputs, minimal reasoning"
-                data-testid="fast-mode-toggle"
-              >
-                <span className="mr-1">⚡</span>
-                <span className="font-medium">{fastMode ? 'Fast' : 'Standard'}</span>
-              </button>
               <div className="relative">
               <button
                 onClick={() => setAgentMenuOpen(prev => !prev)}

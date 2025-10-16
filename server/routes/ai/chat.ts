@@ -301,7 +301,7 @@ export default async function handler(req: any, res: any) {
 
     // Parse request body
     const { messages, systemPrompt, chatId, chat_id, agentType = 'company_research', config: userConfig = {}, research_type, active_subject } = body as any;
-    const fastMode = Boolean((userConfig as any)?.fast_mode);
+    const fastMode = false;
     const activeContextCompany = typeof active_subject === 'string' ? active_subject.trim() : '';
 
     const contextFetchStart = Date.now();
@@ -351,16 +351,7 @@ export default async function handler(req: any, res: any) {
     if (typeof userConfig?.summary_brevity === 'string') {
       instructions += `\n\n<summary_brevity>${userConfig.summary_brevity}</summary_brevity>`;
     }
-    // Only apply fast_mode hint for non-deep requests
-    if (fastMode && body.research_type !== 'deep') {
-      instructions += `\n\n<fast_mode>On</fast_mode>\n` +
-        `Do not include an acknowledgement line or progress updates. ` +
-        `Be terse and action-focused. Prefer bullets. Avoid filler. ` +
-        `Only output the final answer in the required sections.`;
-      if (!userConfig?.summary_brevity) {
-        instructions += `\n<summary_brevity>short</summary_brevity>`;
-      }
-    }
+    // Fast mode retired: always prompt for full contextual outputs
     // Append guardrail hint if present in prompt config
     try {
       const guard = (userContext.promptConfig as any)?.guardrail_profile;
@@ -423,7 +414,7 @@ export default async function handler(req: any, res: any) {
 
         if (_isResearchQuery || research_type) {
           // Build explicit research task input and include brief recent context
-          const recentWindow = fastMode ? 2 : 4;
+          const recentWindow = 4;
           const recent = (messages || []).slice(-recentWindow).map((m: any) => {
             const role = m.role === 'user' ? 'User' : (m.role === 'assistant' ? 'Assistant' : 'System');
             const text = String(m.content || '').replace(/\s+/g, ' ').trim();
@@ -523,9 +514,9 @@ export default async function handler(req: any, res: any) {
       const shortQ = /^(who|what|when|where|which|how|do|does|did|is|are|was|were)\b/i.test((lastUserMessage?.content || '').trim()) && ((lastUserMessage?.content || '').trim().length <= 120);
       const autoMode = (activeContextCompany && shortQ) ? 'specific' : undefined;
       const effectiveMode = (autoMode || research_type) as 'quick'|'deep'|'specific'|undefined;
-      // Deep should keep richer reasoning even if fast_mode is toggled
-      const reasoningEffort = (effectiveMode === 'deep') ? 'medium' : (fastMode ? 'low' : 'low');
-      const isQuick = fastMode ? true : (effectiveMode === 'quick');
+      // Deep runs demand richer reasoning; quick/specific stay lightweight
+      const reasoningEffort = (effectiveMode === 'deep') ? 'medium' : 'low';
+      const isQuick = effectiveMode === 'quick';
 
       // Summarization mode: if the client passed summarize_source, bypass research flow
       const summarizeSource = (userConfig as any)?.summarize_source as string | undefined;
@@ -674,7 +665,7 @@ export default async function handler(req: any, res: any) {
         safeWrite(`data: ${JSON.stringify({ type: 'reasoning_progress', content: preview })}\n\n`);
       }
       const storeRun = true;
-      const shouldPlanStream = isResearchQuery && !userConfig?.disable_fast_plan && !fastMode;
+      const shouldPlanStream = isResearchQuery && !userConfig?.disable_fast_plan;
 
       // Emit a hard-coded acknowledgment only if the fast plan stream is disabled
       if (!shouldPlanStream) {
@@ -789,12 +780,12 @@ export default async function handler(req: any, res: any) {
         text: { format: { type: 'text' }, verbosity: 'low' },
         reasoning: { effort: reasoningEffort },
         tools: useTools ? [{ type: 'web_search' }] : [],
-        include: (fastMode ? [] : (['reasoning.encrypted_content', 'web_search_call.results'] as any)),
+        include: ['reasoning.encrypted_content', 'web_search_call.results'],
         parallel_tool_calls: useTools,
         // Allow full-depth for deep mode; keep light caps for quick/specific to improve latency
         max_output_tokens: (effectiveMode === 'deep')
           ? undefined
-          : (fastMode ? 500 : (isQuick ? 450 : undefined)),
+          : (isQuick ? 450 : undefined),
         store: storeRun,
         metadata: {
           agent: 'company_research',
@@ -863,7 +854,7 @@ export default async function handler(req: any, res: any) {
 
       // Configure reasoning streaming behaviour
       // We keep reasoning visible in all modes. For quick mode, we throttle/compact updates.
-      const forwardReasoning = fastMode ? false : true;
+      const forwardReasoning = true;
       let quickReasoningBuffer = '';
       let quickReasoningLastEmit = 0;
 
