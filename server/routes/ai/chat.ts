@@ -211,8 +211,8 @@ function extractCompanyName(raw: string | null | undefined) {
 
 export const config = {
   runtime: 'nodejs',
-  // Allow up to 300s hard cap on Vercel; we still self-abort earlier.
-  maxDuration: 300,
+  // Allow up to 600s if plan supports it; we still self‑abort earlier.
+  maxDuration: 600,
   // Pin close to users/OpenAI for lower latency. Adjust if your users are elsewhere.
   regions: ['sfo1'],
 };
@@ -254,8 +254,8 @@ export default async function handler(req: any, res: any) {
   const abortController = new AbortController();
   const overallTimeoutMs = (() => {
     const fromEnv = Number(process.env.STREAMING_DEADLINE_MS);
-    if (!isNaN(fromEnv) && fromEnv > 0) return Math.min(fromEnv, 295000);
-    // Default: end slightly before Vercel's 300s cap
+    if (!isNaN(fromEnv) && fromEnv > 0) return fromEnv; // trust operator-provided deadline
+    // Default: conservative 280s for older deployments
     return 280000;
   })();
   const overallTimeout = setTimeout(() => {
@@ -1071,17 +1071,13 @@ export default async function handler(req: any, res: any) {
         }
       }
 
-      if (planPromise) {
-        try {
-          await planPromise;
-        } catch (planAwaitErr) {
-          console.error('Fast plan await error:', planAwaitErr);
-        }
-      }
-
+      // Do not block finalization on the auxiliary fast plan stream.
+      // It can overrun and cause apparent timeouts even after content is done.
+      // We intentionally skip awaiting planPromise here.
       safeWrite(`data: [DONE]\n\n`);
       responseClosed = true;
       res.end();
+      try { abortController.abort(); } catch {}
 
       if (keepAlive) {
         clearTimeout(keepAlive);

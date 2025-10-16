@@ -198,8 +198,8 @@ function extractCompanyName(raw) {
 }
 export const config = {
     runtime: 'nodejs',
-    // Allow up to 300s hard cap on Vercel; we still self-abort earlier.
-    maxDuration: 300,
+    // Allow up to 600s if plan supports it; we still self‑abort earlier.
+    maxDuration: 600,
     // Pin close to users/OpenAI for lower latency. Adjust if your users are elsewhere.
     regions: ['sfo1'],
 };
@@ -235,8 +235,8 @@ export default async function handler(req, res) {
     const overallTimeoutMs = (() => {
         const fromEnv = Number(process.env.STREAMING_DEADLINE_MS);
         if (!isNaN(fromEnv) && fromEnv > 0)
-            return Math.min(fromEnv, 295000);
-        // Default: end slightly before Vercel's 300s cap
+            return fromEnv; // trust operator-provided deadline
+        // Default: end slightly before older 300s cap
         return 280000;
     })();
     const overallTimeout = setTimeout(() => {
@@ -998,17 +998,14 @@ export default async function handler(req, res) {
                     safeWrite(`data: ${JSON.stringify({ type: 'tldr_error', message: 'High level summary unavailable' })}\n\n`);
                 }
             }
-            if (planPromise) {
-                try {
-                    await planPromise;
-                }
-                catch (planAwaitErr) {
-                    console.error('Fast plan await error:', planAwaitErr);
-                }
-            }
+            // Do not block finalization on the auxiliary fast plan stream.
             safeWrite(`data: [DONE]\n\n`);
             responseClosed = true;
             res.end();
+            try {
+                abortController.abort();
+            }
+            catch { }
             if (keepAlive) {
                 clearTimeout(keepAlive);
                 keepAlive = null;
