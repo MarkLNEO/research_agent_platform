@@ -24,7 +24,7 @@ export default async function handler(req: any, res: any) {
     // Fetch lightweight profile context for sender details
     const { data: profile } = await supabase
       .from('company_profiles')
-      .select('company_name, user_role, metadata')
+      .select('company_name, user_role, metadata, target_titles')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -43,8 +43,27 @@ export default async function handler(req: any, res: any) {
 
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY, project: process.env.OPENAI_PROJECT });
 
+    // Resolve target role from user preferences (fallback to request or CISO)
+    const profileTitles = Array.isArray((profile as any)?.target_titles) ? (profile as any).target_titles.filter((t: any) => typeof t === 'string' && t.trim()) : [];
+    const targetRole = (req.body?.role && typeof req.body.role === 'string' ? req.body.role : '') || (profileTitles[0] || 'CISO');
+
     // Attempt deterministic extraction of CISO name from the research markdown
-    const extractCisoName = (md: string): string | null => {
+    const buildRoleRegex = (roleLabel: string): RegExp => {
+      const r = (roleLabel || '').trim();
+      if (!r) return /(CISO|Chief\s+Information\s+Security\s+Officer)/i;
+      const known: Record<string, string> = {
+        'CISO': '(?:CISO|Chief\\s+Information\\s+Security\\s+Officer)',
+        'CTO': '(?:CTO|Chief\\s+Technology\\s+Officer)',
+        'CIO': '(?:CIO|Chief\\s+Information\\s+Officer)',
+        'CEO': '(?:CEO|Chief\\s+Executive\\s+Officer)',
+        'CFO': '(?:CFO|Chief\\s+Financial\\s+Officer)'
+      };
+      const key = r.toUpperCase();
+      const pattern = known[key] || r.replace(/[-/\\^$*+?.()|[\]{}]/g, match => `\\${match}`);
+      return new RegExp(pattern, 'i');
+    };
+
+    const extractContactNameByRole = (md: string, roleLabel: string): string | null => {
       try {
         const text = String(md || '');
         if (!text) return null;
@@ -55,15 +74,16 @@ export default async function handler(req: any, res: any) {
           .replace(/\*\*|__|\*|_/g, '')
           .replace(/\r/g, '');
 
+        const roleRe = buildRoleRegex(roleLabel);
         const patterns: RegExp[] = [
           // Bullet or dash format: - Name — CISO
-          /^[\t >\-•]*([A-Z][A-Za-z' .-]{1,60})\s*[—\-–]\s*(?:Global\s+)?(?:Chief\s+Information\s+Security\s+Officer|CISO)\b/im,
+          new RegExp(String.raw`^[\t >\-•]*([A-Z][A-Za-z' .-]{1,60})\s*[—\-–]\s*(?:Global\s+)?${roleRe.source}\b`, 'im'),
           // Name (CISO)
-          /(^|\n)\s*([A-Z][A-Za-z' .-]{1,60})\s*\((?:Chief\s+Information\s+Security\s+Officer|CISO)\)/i,
+          new RegExp(String.raw`(^|\n)\s*([A-Z][A-Za-z' .-]{1,60})\s*\(\s*${roleRe.source}\s*\)`, 'i'),
           // Table format: | Name | CISO |
-          /\|\s*([A-Z][A-Za-z' .-]{1,60})\s*\|\s*[^|]*\b(CISO|Chief\s+Information\s+Security\s+Officer)\b[^|]*\|/i,
+          new RegExp(String.raw`\|\s*([A-Z][A-Za-z' .-]{1,60})\s*\|\s*[^|]*\b${roleRe.source}\b[^|]*\|`, 'i'),
           // Comma format: Name, CISO
-          /(^|\n)\s*([A-Z][A-Za-z' .-]{1,60})\s*,\s*(?:Chief\s+Information\s+Security\s+Officer|CISO)\b/i
+          new RegExp(String.raw`(^|\n)\s*([A-Z][A-Za-z' .-]{1,60})\s*,\s*${roleRe.source}\b`, 'i')
         ];
 
         for (const re of patterns) {
@@ -78,17 +98,17 @@ export default async function handler(req: any, res: any) {
         return null;
       }
     };
-    const cisoFullName = research_markdown ? extractCisoName(research_markdown) : null;
-    const cisoFirstName = cisoFullName ? cisoFullName.split(/\s+/)[0] : null;
+    const recipientFullName = research_markdown ? extractContactNameByRole(research_markdown, targetRole) : null;
+    const recipientFirstName = recipientFullName ? recipientFullName.split(/\s+/)[0] : null;
     const instructions = `Write a concise, personalized outreach email for a sales AE.
 Use the research markdown to extract 1–2 specific hooks. Keep to ~140–180 words.
 Structure: subject line, greeting, 2 short paragraphs, 1 CTA, sign-off.
 Tone: helpful, confident, specific. Avoid fluff.
 
-Recipient name: If the research clearly identifies the ${role} by name (e.g., under Decision Makers), greet them by first name. If RECIPIENT_NAME_HINT is provided, use it. If you aren't confident in the name, keep a bracket placeholder (e.g., "Hi [${role} Name],"). Avoid generic "Hi ${role}," if the name is unknown.
+Recipient name: If the research clearly identifies the ${targetRole} by name (e.g., under Decision Makers), greet them by first name. If RECIPIENT_NAME_HINT is provided, use it. If you aren't confident in the name, keep a bracket placeholder (e.g., "Hi [${targetRole} Name],"). Avoid generic "Hi ${targetRole}," if the name is unknown.
 Signature: Prefer the provided sender name/title/company. If a custom signature template is provided, use it verbatim for the signature block. If any sender fields are missing, include bracket placeholders such as [Your Name], [Your Company], [Your Title].`;
 
-    const input = `COMPANY: ${company || 'Target Account'}\nTARGET ROLE: ${role}\nRECIPIENT_NAME_HINT: ${cisoFirstName || ''}\nSENDER_NAME: ${senderName || ''}\nSENDER_TITLE: ${senderTitle || ''}\nSENDER_COMPANY: ${senderCompany || ''}\nSIGNATURE_TEMPLATE: ${signatureOverride || ''}\n\nRESEARCH:\n---\n${research_markdown}\n---`;
+    const input = `COMPANY: ${company || 'Target Account'}\nTARGET ROLE: ${targetRole}\nRECIPIENT_NAME_HINT: ${recipientFirstName || ''}\nSENDER_NAME: ${senderName || ''}\nSENDER_TITLE: ${senderTitle || ''}\nSENDER_COMPANY: ${senderCompany || ''}\nSIGNATURE_TEMPLATE: ${signatureOverride || ''}\n\nRESEARCH:\n---\n${research_markdown}\n---`;
     const stream = await openai.responses.stream({
       model: 'gpt-5-mini',
       instructions,
@@ -123,15 +143,15 @@ Signature: Prefer the provided sender name/title/company. If a custom signature 
 
     // Post-process: if we have a CISO name, replace common placeholders
     try {
-      if (cisoFirstName && typeof email === 'string' && email) {
+      if (recipientFirstName && typeof email === 'string' && email) {
         const replacements = [
           /\[CISO Name\]/gi,
           /\[Security Leader Name\]/gi,
           /\[Recipient Name\]/gi,
-          /\[${role}\s*Name\]/gi
+          new RegExp(String.raw`\[${targetRole}\s*Name\]`, 'gi')
         ];
-        for (const re of replacements) {
-          email = email.replace(re, cisoFirstName);
+        for (const re of replacements as any[]) {
+          email = email.replace(re, recipientFirstName);
         }
       }
     } catch {}
