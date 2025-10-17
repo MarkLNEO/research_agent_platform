@@ -13,7 +13,15 @@ export default async function handler(req: any, res: any) {
     const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY as string;
     if (!OPENAI_API_KEY || !SUPABASE_URL || !SERVICE_KEY) return res.status(500).json({ error: 'Missing environment variables' });
 
-    const { research_markdown, company, role = 'CISO' } = req.body || {};
+    const {
+      research_markdown,
+      company,
+      role = 'CISO',
+      recipient_name,
+      recipient_title,
+      generic = false,
+      sender_override
+    } = req.body || {};
     if (!research_markdown) return res.status(400).json({ error: 'research_markdown is required' });
 
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
@@ -30,22 +38,27 @@ export default async function handler(req: any, res: any) {
 
     // Derive sender details (best-effort)
     const um = (user.user_metadata || {}) as any;
-    const senderName = (
+    const senderNameDefault = (
       (profile as any)?.metadata?.sender_name ||
       um.full_name || um.name || [um.first_name, um.last_name].filter(Boolean).join(' ') ||
       String(user.email || '').split('@')[0] || ''
     ).trim();
-    const senderTitle = (profile?.user_role || um.title || 'Account Executive').trim();
-    const senderCompany = (profile?.company_name || um.company || '').trim();
+    const senderTitleDefault = (profile?.user_role || um.title || 'Account Executive').trim();
+    const senderCompanyDefault = (profile?.company_name || um.company || '').trim();
     const signatureOverride = profile?.metadata && typeof (profile as any).metadata?.email_signature === 'string'
       ? String((profile as any).metadata.email_signature)
       : null;
+    const senderOverrideObject = sender_override && typeof sender_override === 'object' ? sender_override : null;
+    const senderName = (senderOverrideObject?.name || senderNameDefault).trim();
+    const senderTitle = (senderOverrideObject?.title || senderTitleDefault).trim();
+    const senderCompany = (senderOverrideObject?.company || senderCompanyDefault).trim();
 
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY, project: process.env.OPENAI_PROJECT });
 
     // Resolve target role from user preferences (fallback to request or CISO)
     const profileTitles = Array.isArray((profile as any)?.target_titles) ? (profile as any).target_titles.filter((t: any) => typeof t === 'string' && t.trim()) : [];
-    const targetRole = (req.body?.role && typeof req.body.role === 'string' ? req.body.role : '') || (profileTitles[0] || 'CISO');
+    const providedRole = typeof recipient_title === 'string' ? recipient_title : '';
+    const targetRole = providedRole || (typeof role === 'string' && role ? role : '') || (profileTitles[0] || 'CISO');
 
     // Attempt deterministic extraction of CISO name from the research markdown
     const buildRoleRegex = (roleLabel: string): RegExp => {
@@ -98,7 +111,8 @@ export default async function handler(req: any, res: any) {
         return null;
       }
     };
-    const recipientFullName = research_markdown ? extractContactNameByRole(research_markdown, targetRole) : null;
+    const providedRecipient = typeof recipient_name === 'string' ? recipient_name.trim() : '';
+    const recipientFullName = providedRecipient || (generic ? null : (research_markdown ? extractContactNameByRole(research_markdown, targetRole) : null));
     const recipientFirstName = recipientFullName ? recipientFullName.split(/\s+/)[0] : null;
     const instructions = `Write a concise, personalized outreach email for a sales AE.
 Use the research markdown to extract 1–2 specific hooks. Keep to ~140–180 words.
@@ -106,9 +120,10 @@ Structure: subject line, greeting, 2 short paragraphs, 1 CTA, sign-off.
 Tone: helpful, confident, specific. Avoid fluff.
 
 Recipient name: If the research clearly identifies the ${targetRole} by name (e.g., under Decision Makers), greet them by first name. If RECIPIENT_NAME_HINT is provided, use it. If you aren't confident in the name, keep a bracket placeholder (e.g., "Hi [${targetRole} Name],"). Avoid generic "Hi ${targetRole}," if the name is unknown.
+Generic outreach: If GENERIC_OUTREACH is yes, do not reference a specific person and use a team-level greeting instead (e.g., "Hi security team").
 Signature: Prefer the provided sender name/title/company. If a custom signature template is provided, use it verbatim for the signature block. If any sender fields are missing, include bracket placeholders such as [Your Name], [Your Company], [Your Title].`;
 
-    const input = `COMPANY: ${company || 'Target Account'}\nTARGET ROLE: ${targetRole}\nRECIPIENT_NAME_HINT: ${recipientFirstName || ''}\nSENDER_NAME: ${senderName || ''}\nSENDER_TITLE: ${senderTitle || ''}\nSENDER_COMPANY: ${senderCompany || ''}\nSIGNATURE_TEMPLATE: ${signatureOverride || ''}\n\nRESEARCH:\n---\n${research_markdown}\n---`;
+    const input = `COMPANY: ${company || 'Target Account'}\nTARGET ROLE: ${targetRole}\nRECIPIENT_NAME_HINT: ${recipientFirstName || ''}\nGENERIC_OUTREACH: ${generic ? 'yes' : 'no'}\nSENDER_NAME: ${senderName || ''}\nSENDER_TITLE: ${senderTitle || ''}\nSENDER_COMPANY: ${senderCompany || ''}\nSIGNATURE_TEMPLATE: ${signatureOverride || ''}\n\nRESEARCH:\n---\n${research_markdown}\n---`;
     const stream = await openai.responses.stream({
       model: 'gpt-5-mini',
       instructions,
@@ -143,7 +158,7 @@ Signature: Prefer the provided sender name/title/company. If a custom signature 
 
     // Post-process: if we have a CISO name, replace common placeholders
     try {
-      if (recipientFirstName && typeof email === 'string' && email) {
+      if (recipientFirstName && typeof email === 'string' && email && !generic) {
         const replacements = [
           /\[CISO Name\]/gi,
           /\[Security Leader Name\]/gi,

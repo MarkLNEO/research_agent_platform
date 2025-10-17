@@ -129,7 +129,7 @@ const stripMarkdown = (text: string): string => {
     .replace(/\*\*(.*?)\*\*/g, '$1')
     .replace(/_(.*?)_/g, '$1')
     .replace(/\*(.*?)\*/g, '$1')
-    .replace(/^[#>\-]+\s*/gm, '') // headings / blockquotes / lists
+    .replace(/^[-#>]+\s*/gm, '') // headings / blockquotes / lists
     .replace(/^\d+\.\s*/gm, '')
     .replace(/^\(?[a-zA-Z0-9]\)\s*/gm, '')
     .replace(/\s+/g, ' ')
@@ -153,7 +153,7 @@ const normalizeLinesToSentences = (text: string): string => {
     .filter(Boolean)
     // Strip common list markers
     .map(line => line.replace(/^[-*•\u2022]+\s*/, ''))
-    .map(line => line.replace(/^\d+[\.)]\s*/, ''))
+    .map(line => line.replace(/^\d+[.)]\s*/, ''))
     // Strip markdown heading and blockquote markers at line start so they don't leak into sentences
     .map(line => line.replace(/^#{1,6}\s*/, ''))
     .map(line => line.replace(/^>+\s*/, ''))
@@ -221,6 +221,94 @@ export function deriveIcpMeta(markdown: string): { score: number; confidence: nu
     verdict,
     rationale,
   };
+}
+
+export interface ResearchContact {
+  name: string;
+  title?: string;
+}
+
+export function extractDecisionMakerContacts(markdown: string | null | undefined, max = 6): ResearchContact[] {
+  if (!markdown) return [];
+  const section = extractSection(markdown, 'Decision Makers')
+    || extractSection(markdown, 'Key Contacts')
+    || '';
+  const scope = section || markdown;
+  const lines = scope
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line && !/^##\s+/i.test(line));
+
+  const contacts: ResearchContact[] = [];
+  const addContact = (name?: string | null, title?: string | null) => {
+    if (!name) return;
+    const normalizedName = name.replace(/[*_`]/g, '').trim();
+    if (normalizedName.split(' ').length > 7 || normalizedName.length < 2) return;
+    const key = normalizedName.toLowerCase();
+    if (contacts.some(c => c.name.toLowerCase() === key)) return;
+    contacts.push({ name: normalizedName, title: title?.replace(/[*_`]/g, '').trim() || undefined });
+  };
+
+  const parseCandidate = (raw: string) => {
+    const cleaned = raw
+      .replace(/^[-*•]\s*/, '')
+      .replace(/\*\*|__/g, '')
+      .replace(/\[(.*?)\]\([^)]*\)/g, '$1')
+      .trim();
+
+    if (!cleaned) return;
+
+    if (cleaned.startsWith('|') && cleaned.endsWith('|')) {
+      const cells = cleaned.split('|').map(cell => cell.trim()).filter(Boolean);
+      if (cells.length >= 2) {
+        addContact(cells[0], cells[1]);
+      }
+      return;
+    }
+
+    const dashMatch = cleaned.match(/^([A-Z][A-Za-z' .-]{1,80})\s*[—–-]\s*(.+)$/);
+    if (dashMatch) {
+      const [, name, titlePart] = dashMatch;
+      const title = titlePart.split(/[:•-]/)[0].split(/\(/)[0].trim();
+      addContact(name, title);
+      return;
+    }
+
+    const parenMatch = cleaned.match(/^([A-Z][A-Za-z' .-]{1,80})\s*\(([^)]+)\)/);
+    if (parenMatch) {
+      addContact(parenMatch[1], parenMatch[2]);
+      return;
+    }
+
+    const commaMatch = cleaned.match(/^([A-Z][A-Za-z' .-]{1,80})\s*,\s*([^,]+)$/);
+    if (commaMatch) {
+      addContact(commaMatch[1], commaMatch[2]);
+      return;
+    }
+
+    // Fallback: treat first clause as name, second as title if uppercase keywords present
+    const words = cleaned.split(' - ');
+    if (words.length >= 2) {
+      addContact(words[0], words[1]);
+      return;
+    }
+
+    // Last resort: if line contains uppercase role keywords
+    const roleKeywords = /(CISO|CTO|CIO|CEO|CFO|VP|Vice President|Head of|Director|Chief)/i;
+    if (roleKeywords.test(cleaned)) {
+      const [maybeName, maybeTitle] = cleaned.split(roleKeywords).length > 1
+        ? cleaned.split(/\s{2,}| - | — /)
+        : [cleaned.replace(roleKeywords, '').trim(), cleaned.match(roleKeywords)?.[0]];
+      if (maybeName) {
+        addContact(maybeName, maybeTitle || cleaned.match(roleKeywords)?.[0] || undefined);
+      }
+    }
+  };
+
+  lines.forEach(line => parseCandidate(line));
+  return contacts.slice(0, max);
 }
 
 function extractCompanyData(markdown: string): Record<string, string> {

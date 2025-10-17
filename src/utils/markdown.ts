@@ -5,8 +5,8 @@ const CLARIFIER_PATTERNS: RegExp[] = [
   /What specifically do you want researched[—-]?[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|##\s+Detailed Findings|\nDetailed Findings|Detailed Findings|Retry|Agent can make mistakes|$))/gi,
   /What exactly do you want researched[—-]?[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|##\s+Detailed Findings|\nDetailed Findings|Detailed Findings|Retry|Agent can make mistakes|$))/gi,
   /If you want research[^\n]*\n[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|##\s+Detailed Findings|\nDetailed Findings|Detailed Findings|Retry|Agent can make mistakes|$))/gi,
-  /If you want research[^\.]*\.[\s\S]*?(Which do you want\?|Example request you can copy|Also specify depth)/gi,
-  /Pick one of these and give a date range and depth[^\.]*\.[\s\S]*?(Which do you want\?|Also specify depth)/gi,
+  /If you want research[^.]*\.[\s\S]*?(Which do you want\?|Example request you can copy|Also specify depth)/gi,
+  /Pick one of these and give a date range and depth[^.]*\.[\s\S]*?(Which do you want\?|Also specify depth)/gi,
   /Tell me what you want to learn and pick scope:[\s\S]*?(Also specify depth|Which do you want\?)/gi,
   /Do you mean the company\/product[^?]+\?[\s\S]*?(?=\n##\s+Key Findings|\nKey Findings|\nDetailed Findings|Detailed Findings|$)/gi,
   /If useful, copy[^\n]*request template[\s\S]*?(?=(?:##\s+Key Findings|\nKey Findings|##\s+Signals|\nSignals|Detailed Findings|Retry|Agent can make mistakes|$))/gi,
@@ -26,6 +26,7 @@ export function stripClarifierBlocks(raw: string): string {
   text = text.replace(/^[ \t]*Timeframe.*\n?/gim, '');
   text = text.replace(/^[ \t]*Level of detail.*\n?/gim, '');
   text = text.replace(/^[ \t]*Whether to perform a web search.*\n?/gim, '');
+  text = text.replace(/Added signal\(s\):\s*([^\n]+)\n\s*Currently tracking:\s*\1/gi, (_match, list) => `Tracking signals: ${list.trim()}`);
   // Normalize inline "High Level" placeholders that were streamed without headings.
   text = text.replace(/(^|\n)High Level\s+No high[- ]level summary provided yet\.?/gi, '$1## High Level\n- No high-level summary provided yet.\n');
   return text;
@@ -104,7 +105,7 @@ export function normalizeMarkdown(raw: string, opts?: { enforceResearchSections?
 
   if (enforce) {
     // If a High Level section still contains clarifier-style prompts, replace with default placeholder.
-    text = text.replace(/(^##\s+High Level[\s\S]*?)(?=^##\s+|\Z)/gim, (section) => {
+    text = text.replace(/(^##\s+High Level[\s\S]*?)(?=^##\s+|$)/gim, (section) => {
       if (/do you mean/i.test(section) || /what do you want/i.test(section)) {
         return '## High Level\n- No high-level summary provided yet.\n';
       }

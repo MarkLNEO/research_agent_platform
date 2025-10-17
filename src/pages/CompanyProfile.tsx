@@ -384,7 +384,7 @@ Coach flow requirements:
 
       systemPrompt = `The user ${userName} already has a company profile with the following details:\n${profileSummary.join('\n')}\n\n${needs}\n${guidance}\nGreet them warmly, then begin.`;
     } else {
-      systemPrompt = `Greet the user ${userName} warmly and help them get started with creating their company profile. Explain briefly how a detailed profile improves research quality. Start by asking for company name and industry, then guide them through target_titles, custom_criteria (3+ items), and signal_preferences (2+ items) using the same JSON \"save_profile\" format described earlier. Keep each question short and proceed step-by-step.`;
+      systemPrompt = `Greet the user ${userName} warmly and help them get started with creating their company profile. Explain briefly how a detailed profile improves research quality. Start by asking for company name and industry, then guide them through target_titles, custom_criteria (3+ items), and signal_preferences (2+ items) using the same JSON "save_profile" format described earlier. Keep each question short and proceed step-by-step.`;
     }
 
     try {

@@ -55,7 +55,7 @@ const DEEP_OUTPUT = `Deep Research format (strict):
 - Start with a brief, friendly acknowledgement line (e.g., "On it — deep dive (~2 min).") that states research depth and ETA, then proceed.
 - ${EXEC_SUMMARY_GUIDANCE}
 - After the Executive Summary, continue with the sections, in this order:
-  "## Why Now" (2–3 short mini-paragraphs synthesizing timing and urgency through the user\'s ICP and signal preferences),
+  "## Why Now" (2–3 short mini-paragraphs synthesizing timing and urgency through the user's ICP and signal preferences),
   "## Deal Strategy" (tailor to saved target_titles; include 3–5 moves with who to contact and why),
   "## Key Findings" (keep to the sharpest 5–7; avoid duplicating Why Now),
   "## Custom Criteria" (if applicable),

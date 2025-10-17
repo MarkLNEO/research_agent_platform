@@ -14,27 +14,38 @@ import { BulkResearchDialog } from '../components/BulkResearchDialog';
 import { BulkResearchStatus } from '../components/BulkResearchStatus';
 import { ProfileCompletenessBanner } from '../components/ProfileCompletenessBanner';
 import { AccountSignalsDrawer } from '../components/AccountSignalsDrawer';
+import { AssumedSubjectDialog } from '../components/AssumedSubjectDialog';
+import { DraftEmailDialog, type DraftEmailRecipient } from '../components/DraftEmailDialog';
 import { listRecentSignals, type AccountSignalSummary } from '../services/signalService';
 import { fetchDashboardGreeting } from '../services/accountService';
 import { useToast } from '../components/ToastProvider';
-import { buildResearchDraft, approximateTokenCount } from '../utils/researchOutput';
+import { buildResearchDraft, approximateTokenCount, extractDecisionMakerContacts } from '../utils/researchOutput';
 import type { ResearchDraft } from '../utils/researchOutput';
 import { normalizeMarkdown, stripClarifierBlocks } from '../utils/markdown';
 import type { TrackedAccount, AccountStats } from '../services/accountService';
-import { useUserProfile } from '../hooks/useUserProfile';
+import { useUserProfile, invalidateUserProfileCache } from '../hooks/useUserProfile';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { OptimizeICPModal } from '../components/OptimizeICPModal';
 import { useResearchEngine } from '../contexts/ResearchEngineContext';
 
 const ALL_REFINE_FACETS = ['leadership', 'funding', 'tech stack', 'news', 'competitors', 'hiring'] as const;
 
-type ResearchAction = 'new' | 'continue' | 'email' | 'refine';
+type ResearchAction = 'new' | 'continue' | 'email' | 'refine' | 'follow_up';
 
 type Suggestion = {
   icon: string;
   title: string;
   description: string;
   prompt: string;
+};
+
+type DashboardAction = {
+  id: string;
+  icon: string;
+  title: string;
+  description: string;
+  kind: 'seed' | 'prompt' | 'bulk' | 'track' | 'navigate';
+  value?: string;
 };
 
 const extractCompanyNameFromQuery = (raw: string): string | null => {
@@ -369,7 +380,7 @@ export function ResearchChat() {
   const [focusComposerTick, setFocusComposerTick] = useState(0);
   const [preferredResearchType, setPreferredResearchType] = useState<'deep' | 'quick' | 'specific' | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
-  const [saveDraft, setSaveDraft] = useState<ResearchDraft | null>(null);
+  const saveDraft: ResearchDraft | null = null;
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [sigOpen, setSigOpen] = useState(false);
@@ -400,8 +411,16 @@ export function ResearchChat() {
   const [lastAssumedSubject, setLastAssumedSubject] = useState<{ name: string; industry?: string | null; website?: string | null } | null>(null);
   const [clarifiersLocked, setClarifiersLocked] = useState(false);
   const [activeSubject, setActiveSubject] = useState<string | null>(null);
+  const [recentlySavedMessageId, setRecentlySavedMessageId] = useState<string | null>(null);
+  const [assumedDialogOpen, setAssumedDialogOpen] = useState(false);
+  const [assumedDialogName, setAssumedDialogName] = useState('');
+  const [assumedDialogIndustry, setAssumedDialogIndustry] = useState<string | null>(null);
+  const [assumedSuggestions, setAssumedSuggestions] = useState<Array<{ name: string; industry?: string | null }>>([]);
+  const [assumedSuggestionsLoading, setAssumedSuggestionsLoading] = useState(false);
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
+  const [emailCandidates, setEmailCandidates] = useState<DraftEmailRecipient[]>([]);
+  const [emailDialogLoading, setEmailDialogLoading] = useState(false);
   const currentActionCompany = actionBarCompany || activeSubject;
-  const displayActionCompany = currentActionCompany ? formatDisplaySubject(currentActionCompany) : null;
   const canRefreshResearch = Boolean(currentActionCompany);
   // Keep the refresh label concise and stable to avoid accidental long subjects
   const refreshLabel = canRefreshResearch ? 'Refresh on this' : 'Refresh';
@@ -416,6 +435,7 @@ export function ResearchChat() {
   const [lastRunMode, setLastRunMode] = useState<'deep'|'quick'|'specific'|'auto'|null>(null);
   const skipInitialLoadRef = useRef(false);
   const { profile: userProfile } = useUserProfile();
+  const profileMetadata = (userProfile?.metadata ?? {}) as Record<string, any>;
   const {
     selectedTemplate,
     selectedTemplateId,
@@ -500,6 +520,73 @@ export function ResearchChat() {
       return true;
     }).slice(0, 6);
   }, [suggestions, serverSuggestions]);
+
+  const dashboardActions = useMemo<DashboardAction[]>(() => {
+    const actions: DashboardAction[] = [];
+    const remainingQuick = [...icpQuickSuggestions];
+    const takeQuick = (title: string) => {
+      const idx = remainingQuick.findIndex(item => item.title === title);
+      if (idx >= 0) {
+        return remainingQuick.splice(idx, 1)[0];
+      }
+      return null;
+    };
+
+    actions.push({
+      id: 'research-company',
+      icon: '🏢',
+      title: 'Research a company',
+      description: 'Run a deep account brief in about 2 minutes.',
+      kind: 'seed',
+      value: 'Research '
+    });
+
+    actions.push({
+      id: 'bulk-research',
+      icon: '📥',
+      title: 'Bulk research',
+      description: 'Upload a short list and generate reports together.',
+      kind: 'bulk'
+    });
+
+    actions.push({
+      id: 'find-contacts',
+      icon: '🔎',
+      title: 'Find contacts',
+      description: 'Surface decision makers with personalization cues.',
+      kind: 'prompt',
+      value: 'Find decision makers and personalization points for my top accounts'
+    });
+
+    const icpMatch = takeQuick('Companies that match your ICP');
+    actions.push({
+      id: 'icp-matches',
+      icon: '🎯',
+      title: 'Find ICP matches',
+      description: icpMatch?.description || 'Discover companies that look like your best customers.',
+      kind: 'prompt',
+      value: icpMatch?.prompt || 'Find companies that match my ideal customer profile'
+    });
+
+    const seenTitles = new Set(actions.map(item => item.title.toLowerCase()));
+    const dynamicPool = [...remainingQuick, ...combinedSuggestions];
+    for (const item of dynamicPool) {
+      if (actions.length >= 6) break;
+      const titleKey = item.title.toLowerCase();
+      if (seenTitles.has(titleKey)) continue;
+      seenTitles.add(titleKey);
+      actions.push({
+        id: `dynamic-${titleKey}`,
+        icon: 'icon' in item ? (item as Suggestion).icon : '✨',
+        title: item.title,
+        description: item.description,
+        kind: 'prompt',
+        value: item.prompt
+      });
+    }
+
+    return actions.slice(0, 6);
+  }, [icpQuickSuggestions, combinedSuggestions]);
 
   const appliedContext = useMemo(() => {
     const profile = userProfile || null;
@@ -1096,6 +1183,8 @@ useEffect(() => {
       if (normalizedDraft) {
         try {
           await persistResearchDraft(normalizedDraft);
+          const latestId = getLatestResearchMessageId();
+          if (latestId) setRecentlySavedMessageId(latestId);
           addToast({
             title: 'Research attached',
             description: `Saved the current ${companyName} report and started monitoring.`,
@@ -1138,7 +1227,15 @@ useEffect(() => {
     try {
       await persistResearchDraft(draft);
       setSaveOpen(false);
-      addToast({ type: 'success', title: 'Saved to history', description: 'Your research was added to History.' , actionText: 'View', onAction: () => navigate('/research') });
+      const latestId = getLatestResearchMessageId();
+      if (latestId) setRecentlySavedMessageId(latestId);
+      addToast({
+        type: 'success',
+        title: 'Saved to history',
+        description: 'Find it in Research History → Recent saved. Track this account to see it on your dashboard.',
+        actionText: 'Open history',
+        onAction: () => navigate('/research')
+      });
     } catch (e: any) {
       setSaveError(e?.message || 'Failed to save research');
       addToast({ type: 'error', title: 'Save failed', description: 'Could not save this response. Try again.' });
@@ -1146,6 +1243,78 @@ useEffect(() => {
       setSaving(false);
     }
   };
+
+  const loadAssumedSuggestions = useCallback(async (term: string) => {
+    if (!user?.id) {
+      setAssumedSuggestions([]);
+      return;
+    }
+    const query = term.trim();
+    if (!query) {
+      setAssumedSuggestions([]);
+      return;
+    }
+    const pattern = `%${query.replace(/[%_]/g, '')}%`;
+    setAssumedSuggestionsLoading(true);
+    try {
+      const [tracked, recent] = await Promise.all([
+        supabase
+          .from('tracked_accounts')
+          .select('company_name, industry')
+          .eq('user_id', user.id)
+          .ilike('company_name', pattern)
+          .limit(10),
+        supabase
+          .from('research_outputs')
+          .select('subject')
+          .eq('user_id', user.id)
+          .ilike('subject', pattern)
+          .order('created_at', { ascending: false })
+          .limit(15),
+      ]);
+
+      const merged = new Map<string, { name: string; industry?: string | null }>();
+      const seed = query ? { name: query, industry: assumedDialogIndustry } : null;
+      if (seed) merged.set(seed.name.toLowerCase(), seed);
+      if (tracked.data) {
+        tracked.data.forEach((row: any) => {
+          if (!row?.company_name) return;
+          const key = String(row.company_name).toLowerCase();
+          if (!merged.has(key)) {
+            merged.set(key, { name: row.company_name, industry: row.industry || null });
+          }
+        });
+      }
+      if (recent.data) {
+        recent.data.forEach((row: any) => {
+          if (!row?.subject) return;
+          const key = String(row.subject).toLowerCase();
+          if (!merged.has(key)) {
+            merged.set(key, { name: row.subject });
+          }
+        });
+      }
+      setAssumedSuggestions(Array.from(merged.values()));
+    } catch (error) {
+      console.warn('Failed to load assumed suggestions', error);
+      setAssumedSuggestions([]);
+    } finally {
+      setAssumedSuggestionsLoading(false);
+    }
+  }, [supabase, user?.id, assumedDialogIndustry]);
+
+  const handleAssumedChangeRequest = useCallback((assumed: { name: string; industry?: string | null }) => {
+    const base = (assumed?.name || '').trim();
+    if (!base) return;
+    setAssumedDialogName(base);
+    setAssumedDialogIndustry(assumed?.industry || null);
+    setAssumedDialogOpen(true);
+    setAssumedSuggestions(prev => {
+      const filtered = prev.filter(item => item.name.toLowerCase() !== base.toLowerCase());
+      return [{ name: base, industry: assumed?.industry || null }, ...filtered];
+    });
+    void loadAssumedSuggestions(base);
+  }, [loadAssumedSuggestions]);
 
   const loadMessages = async (chatId: string) => {
     const { data } = await supabase
@@ -1670,6 +1839,7 @@ useEffect(() => {
     try {
       // Reset assumption badge for this run
       setLastAssumedSubject(null);
+      setRecentlySavedMessageId(null);
       const history = messages
         .filter(m => m.role === 'user' || m.role === 'assistant')
         .map(m => ({ role: m.role, content: m.content }));
@@ -2058,11 +2228,6 @@ useEffect(() => {
     }
   };
 
-  const startSummarize = async (chatId: string, sourceMarkdown: string) => {
-    const prompt = 'Summarize the previous research for executive consumption.';
-    await streamAIResponse(prompt, chatId, { config: { summarize_source: sourceMarkdown } });
-  };
-
   const getUserInitial = () => (user?.email ? user.email[0].toUpperCase() : 'Y');
 
   const handleRetry = async () => {
@@ -2126,24 +2291,77 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
     }
   }, [currentActionCompany, ensureActiveChat, handleSendMessageWithChat]);
 
-  const handleEmailDraftFromLast = useCallback(async (markdownOverride?: string, companyOverride?: string | null) => {
-    if (draftEmailPending) return;
+  const handleEmailDraftFromLast = useCallback(async (
+    markdownOverride?: string,
+    companyOverride?: string | null,
+    overrides?: {
+      recipientName?: string;
+      recipientTitle?: string;
+      useGeneric?: boolean;
+      senderName?: string;
+      senderTitle?: string;
+      rememberSender?: boolean;
+    }
+  ): Promise<boolean> => {
+    if (draftEmailPending) return false;
+    let success = false;
     try {
       const researchMarkdown = markdownOverride ?? lastAssistantMessage?.content;
       if (!researchMarkdown) {
         addToast({ type: 'error', title: 'No content to draft', description: 'Run research before drafting an email.' });
-        return;
+        return false;
       }
+
+      const trimmedSenderName = overrides?.senderName?.trim();
+      const trimmedSenderTitle = overrides?.senderTitle?.trim();
+      if (overrides?.rememberSender && (trimmedSenderName || trimmedSenderTitle)) {
+        try {
+          const metadata = {
+            ...(userProfile?.metadata || {}),
+            ...(trimmedSenderName ? { sender_name: trimmedSenderName } : {}),
+            ...(trimmedSenderTitle ? { sender_title: trimmedSenderTitle } : {}),
+          };
+          const payload: any = { profile: { metadata } };
+          if (trimmedSenderTitle) payload.profile.user_role = trimmedSenderTitle;
+          const { data: { session } } = await supabase.auth.getSession();
+          await fetch('/api/update-profile', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+            },
+            body: JSON.stringify(payload)
+          });
+          invalidateUserProfileCache(user?.id);
+        } catch (err) {
+          console.warn('Failed to persist sender defaults', err);
+        }
+      }
+
       setDraftEmailPending(true);
       addToast({ type: 'info', title: 'Drafting email', description: 'Generating tailored outreach copy…' });
       const { data: { session } } = await supabase.auth.getSession();
       const auth = session?.access_token;
+      const recipientName = overrides?.recipientName?.trim();
+      const recipientTitle = overrides?.recipientTitle?.trim();
+      const senderOverride = (trimmedSenderName || trimmedSenderTitle)
+        ? {
+            name: trimmedSenderName || undefined,
+            title: trimmedSenderTitle || undefined,
+            company: userProfile?.company_name || undefined,
+          }
+        : undefined;
+
       const resp = await fetch('/api/outreach/draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: `Bearer ${auth}` } : {}) },
         body: JSON.stringify({
           research_markdown: researchMarkdown,
-          company: companyOverride || activeSubject || undefined
+          company: companyOverride || activeSubject || undefined,
+          role: recipientTitle || undefined,
+          recipient_name: recipientName || undefined,
+          generic: Boolean(overrides?.useGeneric),
+          sender_override: senderOverride,
         })
       });
       const json = await resp.json();
@@ -2196,7 +2414,6 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
 
         setMessages(prev => [...prev, savedAssistant!]);
 
-        // Nudge to set sender preferences if missing (name/title)
         try {
           const { data: userData } = await supabase.auth.getUser();
           const fullName = (userData?.user?.user_metadata?.full_name || userData?.user?.user_metadata?.name || '').trim();
@@ -2210,12 +2427,11 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
               onAction: () => navigate('/profile-coach')
             });
           }
-          // Offer quick Save Signature inline
           try {
             const parsedSig = (() => {
               try {
                 const lines = (email || '').split(/\r?\n/);
-                const idx = lines.findIndex(l => /^(best|regards|thanks|thank you|sincerely)[,]?$/i.test(l.trim()));
+                const idx = lines.findIndex((line: string) => /^(best|regards|thanks|thank you|sincerely)[,]?$/i.test(line.trim()));
                 if (idx >= 0) {
                   const block = lines.slice(idx).join('\n').trim();
                   return block.split('\n').slice(0, 6).join('\n');
@@ -2238,6 +2454,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
             });
           } catch {}
         } catch {}
+        success = true;
       } else {
         addToast({ type: 'error', title: 'No email generated', description: 'The drafting service returned an empty response.' });
       }
@@ -2246,7 +2463,9 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
     } finally {
       setDraftEmailPending(false);
     }
-  }, [draftEmailPending, lastAssistantMessage, supabase, activeSubject, addToast, currentChatId, setMessages]);
+    return success;
+  }, [draftEmailPending, lastAssistantMessage, addToast, supabase, activeSubject, currentChatId, setMessages, userProfile, navigate, user?.id]);
+
 
   const handleNextAction = async (action: string) => {
     if (!currentChatId) return;
@@ -2267,9 +2486,30 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
         }
         await handleContinueCompany();
         return;
-      case 'email':
-        await handleEmailDraftFromLast();
+      case 'follow_up': {
+        addToast({ type: 'info', title: 'Ask a follow-up', description: 'Type your question and I’ll keep context from this report.' });
+        setShowClarify(false);
+        setPendingQuery(null);
+        setInputValue(currentActionCompany ? `What follow-up questions should I ask ${currentActionCompany}? ` : 'What follow-up question should I ask? ');
+        setFocusComposerTick(t => t + 1);
         return;
+      }
+      case 'email': {
+        if (!currentActionCompany) {
+          addToast({ type: 'info', title: 'Draft email', description: 'Run research first so I can tailor outreach.' });
+          return;
+        }
+        const latest = findLatestResearchAssistant();
+        if (!latest) {
+          addToast({ type: 'error', title: 'No research to reference', description: 'Run company research before drafting outreach.' });
+          return;
+        }
+        const contacts = extractDecisionMakerContacts(latest.message.content || '');
+        setEmailCandidates(contacts.map(contact => ({ name: contact.name, title: contact.title })));
+        setEmailDialogLoading(false);
+        setEmailDialogOpen(true);
+        return;
+      }
       case 'refine':
         addToast({ type: 'info', title: 'Refine scope', description: 'Adjust focus areas for the next run.' });
         setShowRefine(true);
@@ -2277,7 +2517,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
       default:
         return;
     }
-  }, [handleStartNewCompany, handleContinueCompany, handleEmailDraftFromLast, currentActionCompany, addToast]);
+  }, [handleStartNewCompany, handleContinueCompany, currentActionCompany, addToast, findLatestResearchAssistant]);
 
   const shortcutHandlers = useMemo<Record<string, () => void>>(() => {
     const handlers: Record<string, () => void> = {};
@@ -2285,6 +2525,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
       return handlers;
     }
     handlers.n = () => { void handleActionBarAction('new'); };
+    handlers.f = () => { void handleActionBarAction('follow_up'); };
     handlers.c = () => { void handleActionBarAction('continue'); };
     if (canDraftEmail) handlers.e = () => { void handleActionBarAction('email'); };
     handlers.r = () => { void handleActionBarAction('refine'); };
@@ -2292,6 +2533,25 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
   }, [actionBarVisible, streamingMessage, handleActionBarAction, canDraftEmail]);
 
   useKeyboardShortcuts(shortcutHandlers);
+
+  const handleEmailDialogSubmit = useCallback(async (options: {
+    recipientName?: string;
+    recipientTitle?: string;
+    useGeneric?: boolean;
+    senderName?: string;
+    senderTitle?: string;
+    rememberSender?: boolean;
+  }) => {
+    setEmailDialogLoading(true);
+    try {
+      const ok = await handleEmailDraftFromLast(undefined, currentActionCompany, options);
+      if (ok) {
+        setEmailDialogOpen(false);
+      }
+    } finally {
+      setEmailDialogLoading(false);
+    }
+  }, [handleEmailDraftFromLast, currentActionCompany]);
 
   const canUndoSubject = () => {
     const at = lastSubjectRef.current.at; if (!at) return false; return (Date.now() - at) < 10000;
@@ -2570,42 +2830,40 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                               ))}
                           </div>
                         )}
-                        {icpQuickSuggestions.length > 0 && (
+                        {dashboardActions.length > 0 && (
                           <div className="grid gap-3 md:grid-cols-2">
-                            {icpQuickSuggestions.map((item, idx) => (
+                            {dashboardActions.map((action) => (
                               <button
-                                key={`${item.title}-${idx}`}
-                                onClick={() => startSuggestion(item.prompt)}
+                                key={action.id}
+                                onClick={() => {
+                                  switch (action.kind) {
+                                    case 'seed':
+                                      setInputValue(action.value || '');
+                                      setFocusComposerTick(t => t + 1);
+                                      break;
+                                    case 'bulk':
+                                      setBulkResearchOpen(true);
+                                      break;
+                                    case 'prompt':
+                                      if (action.value) startSuggestion(action.value);
+                                      break;
+                                    case 'track':
+                                      handleAddAccount();
+                                      break;
+                                    case 'navigate':
+                                      if (action.value) navigate(action.value);
+                                      break;
+                                    default:
+                                      break;
+                                  }
+                                }}
                                 className="w-full text-left border border-blue-100 hover:border-blue-300 hover:shadow-md transition-all rounded-xl p-3 bg-blue-50/60"
                               >
                                 <div className="flex items-start gap-3">
-                                  <span className="text-lg">💡</span>
+                                  <span className="text-xl">{action.icon}</span>
                                   <div className="flex-1">
-                                    <div className="text-sm font-semibold text-gray-900 mb-1">{item.title}</div>
-                                    <p className="text-xs text-gray-600">{item.description}</p>
-                                  </div>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                        {combinedSuggestions.length > 0 && (
-                          <div className="grid gap-3 md:grid-cols-2">
-                            {combinedSuggestions.map((suggestion, index) => (
-                              <button
-                                key={`${suggestion.title}-${index}`}
-                                onClick={() => startSuggestion(suggestion.prompt)}
-                                className="w-full text-left border border-blue-100 hover:border-blue-300 hover:shadow-md transition-all rounded-xl p-3 bg-blue-50/50"
-                              >
-                                <div className="flex items-start gap-3">
-                                  <span className="text-xl">{suggestion.icon}</span>
-                                  <div className="flex-1">
-                                    <div className="text-sm font-semibold text-gray-900 mb-1">
-                                      {suggestion.title}
-                                    </div>
-                                    <p className="text-xs text-gray-600">
-                                      {suggestion.description}
-                                    </p>
+                                    <div className="text-sm font-semibold text-gray-900 mb-1">{action.title}</div>
+                                    <p className="text-xs text-gray-600">{action.description}</p>
                                   </div>
                                 </div>
                               </button>
@@ -2678,20 +2936,21 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                       Upload a list
                     </button>
                     <button
-                      onClick={handleAddAccount}
+                      onClick={() => startSuggestion('Find security and IT decision makers at my tracked accounts')}
                       className="px-3 py-1.5 text-xs bg-gray-100 rounded-full hover:bg-gray-200 text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                      aria-label="Suggestion: Track an account"
+                      aria-label="Suggestion: Find contacts"
                     >
-                      Track an account
+                      Find contacts
                     </button>
                     <button
-                      type="button"
-                      disabled
-                      title="Coming soon"
-                      className="px-3 py-1.5 text-xs rounded-full bg-gray-100 text-gray-400 cursor-not-allowed border border-dashed border-gray-300"
-                      aria-label="Lead list generator coming soon"
+                      onClick={() => {
+                        const icp = userProfile?.icp_definition || userProfile?.icp || 'my ideal customer profile';
+                        startSuggestion(`Find companies that match this ICP: ${icp}`);
+                      }}
+                      className="px-3 py-1.5 text-xs bg-gray-100 rounded-full hover:bg-gray-200 text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      aria-label="Suggestion: Find ICP matches"
                     >
-                      Lead list generator
+                      Find ICP matches
                     </button>
                   </div>
               </div>
@@ -2760,13 +3019,9 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     summarizeReady={isLastAssistant && !thisIsDraft ? summarizeReady : false}
                     isSummarizing={isLastAssistant && !thisIsDraft ? summaryPending : false}
                     assumed={isLastAssistant ? (assumedForUi as any) : undefined}
-                    onAssumedChange={(a) => {
-                      // One-click switch helper: prefill composer to change company quickly
-                      const name = (a?.name || '').trim();
-                      const seed = name ? `Research ${name.replace(/\n+/g, ' ').trim()}\n` : 'Research ';
-                      startSuggestion(seed);
-                    }}
+                    onAssumedChange={isLastAssistant ? handleAssumedChangeRequest : undefined}
                     contextSummary={isLastAssistant ? appliedContext : null}
+                    recentlySaved={isLastAssistant && recentlySavedMessageId ? recentlySavedMessageId === m.id : false}
                     onPromote={isLastAssistant && !thisIsDraft ? () => {
                       // Build draft using the latest research message (skip any later email drafts)
                       const research = (() => {
@@ -2973,11 +3228,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                       ...lastAssumedSubject,
                       industry: lastAssumedSubject.industry || inferIndustryFromMarkdown(streamingMessage)
                     } : (inferIndustryFromMarkdown(streamingMessage) ? { name: activeSubject || 'This company', industry: inferIndustryFromMarkdown(streamingMessage) } as any : undefined))}
-                    onAssumedChange={(a) => {
-                      const name = (a?.name || '').trim();
-                      const seed = name ? `Research ${name.replace(/\n+/g, ' ').trim()}\n` : 'Research ';
-                      startSuggestion(seed);
-                    }}
+                    onAssumedChange={handleAssumedChangeRequest}
                     agentType="company_research"
                     contextSummary={appliedContext}
                   />
@@ -2991,6 +3242,8 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     <div className="hidden sm:block text-xs text-gray-500">
                       Shortcuts:&nbsp;
                       <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">N</kbd> new •{' '}
+                      <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">F</kbd>{' '}
+                      follow-up •{' '}
                       <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">C</kbd>{' '}
                       refresh •{' '}
                       <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">E</kbd>{' '}
@@ -3020,6 +3273,12 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                       onClick={() => { void handleActionBarAction('new'); }}
                     >
                       ➕ New research
+                    </button>
+                    <button
+                      className="inline-flex items-center gap-2 rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      onClick={() => { void handleActionBarAction('follow_up'); }}
+                    >
+                      🧠 Follow-up question
                     </button>
                     <button
                       className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 transition-colors ${
@@ -3069,7 +3328,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     )}
                   </div>
                   <div className="mt-3 text-xs text-gray-500 sm:hidden">
-                    Shortcuts: N new • C refresh • E email • R refine
+                    Shortcuts: N new • F follow-up • C refresh • E email • R refine
                   </div>
                   <label className="mt-3 inline-flex items-center gap-2 text-xs text-gray-600">
                     <input
@@ -3372,6 +3631,35 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
 
     {/* Optimize ICP modal (for inline scorecard link) */}
     <OptimizeICPModal isOpen={optimizeOpen} onClose={() => setOptimizeOpen(false)} />
+
+    <AssumedSubjectDialog
+      open={assumedDialogOpen}
+      initialName={assumedDialogName || lastAssumedSubject?.name || activeSubject || ''}
+      loading={assumedSuggestionsLoading}
+      suggestions={assumedSuggestions}
+      onRefresh={(query) => { setAssumedDialogName(query); void loadAssumedSuggestions(query); }}
+      onSelect={(name) => {
+        const trimmed = name.trim();
+        setAssumedDialogOpen(false);
+        setAssumedDialogIndustry(null);
+        if (trimmed) {
+          startSuggestion(`Research ${trimmed}\n`);
+        }
+      }}
+      onClose={() => { setAssumedDialogOpen(false); setAssumedDialogIndustry(null); }}
+    />
+
+    <DraftEmailDialog
+      open={emailDialogOpen}
+      loading={emailDialogLoading || draftEmailPending}
+      company={currentActionCompany || activeSubject || undefined}
+      candidates={emailCandidates}
+      defaultRole={(Array.isArray(userProfile?.target_titles) && userProfile?.target_titles?.length ? userProfile.target_titles[0] : 'CISO')}
+      initialSenderName={typeof profileMetadata.sender_name === 'string' ? profileMetadata.sender_name : ''}
+      initialSenderTitle={(typeof profileMetadata.sender_title === 'string' && profileMetadata.sender_title) || userProfile?.user_role || ''}
+      onClose={() => { if (!draftEmailPending) { setEmailDialogOpen(false); setEmailDialogLoading(false); } }}
+      onSubmit={(options) => { void handleEmailDialogSubmit(options); }}
+    />
 
     {reasoningOpen && (
       <div

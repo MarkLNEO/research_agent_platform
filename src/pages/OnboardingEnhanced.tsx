@@ -1043,19 +1043,11 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-100"
-                  onClick={() => { void finishOnboarding([]); }}
-                  disabled={isTyping}
-                >
-                  Skip for now
-                </button>
-                <button
-                  type="button"
-                  className="px-3 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
-                  onClick={() => { void finishOnboarding(selectedFocus); }}
-                  disabled={isTyping}
-                >
-                  Create my agent
+                    className="px-3 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
+                    onClick={() => { void finishOnboarding(selectedFocus); }}
+                    disabled={isTyping}
+                  >
+                    Create my agent
                   </button>
                 </div>
               </div>
