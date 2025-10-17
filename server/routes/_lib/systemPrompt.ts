@@ -305,6 +305,7 @@ export function buildSystemPrompt(
   }
   if (contextLens.length && Array.isArray(profile.target_titles) && profile.target_titles.length) {
     extras.push('Decision Maker guidance: Where possible, surface contacts that align with saved target titles and include personalization drawn from those roles.');
+    extras.push('Leadership guidance: In the Leadership/Decision Makers sections, actively search for the saved target titles (and close adjacencies—e.g., VP RevOps vs. Head of Revenue Operations). If you cannot find exact matches, surface the closest relevant roles and explain the overlap. Always cite why each surfaced contact maps to the user’s priorities.');
   }
   if (contextLens.length && criteriaNames.length) {
     extras.push('In the "Custom Criteria" section, list each criterion explicitly with status (Met / Not met / Unknown) and a one-sentence rationale or follow-up action.');
