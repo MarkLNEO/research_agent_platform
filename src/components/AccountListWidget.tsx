@@ -8,9 +8,10 @@ interface AccountListWidgetProps {
   onAccountClick: (account: TrackedAccount) => void;
   onAddAccount: () => void;
   onResearchAccount?: (account: TrackedAccount) => void;
+  showFooter?: boolean;
 }
 
-export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAccount }: AccountListWidgetProps) {
+export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAccount, showFooter = true }: AccountListWidgetProps) {
   const [accounts, setAccounts] = useState<TrackedAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -367,7 +368,7 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
         )}
       </div>
 
-      {accounts.length > 0 && (
+      {showFooter && accounts.length > 0 && (
         <div className="px-4 py-2 border-t border-gray-200 bg-gray-50">
           <div className="flex items-center justify-between text-xs text-gray-600">
             <span>{stats.total} total</span>

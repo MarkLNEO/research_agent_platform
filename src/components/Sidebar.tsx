@@ -162,6 +162,7 @@ export function Sidebar({
             onAccountClick={onAccountClick}
             onAddAccount={onAddAccount}
             onResearchAccount={onResearchAccount}
+            showFooter={false}
           />
         </div>
       )}
