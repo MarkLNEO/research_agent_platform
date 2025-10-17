@@ -52,7 +52,7 @@ const dropEmptySections = (markdown: string | null | undefined): string => {
   const ETA_LINE = /^\s*ETA\s*:\s*~?\d+\s*min(?:ute)?s?\.?\s*$/i;
   trimmed = trimmed
     .split('\n')
-    .filter((line, idx, all) => {
+    .filter((line) => {
       const isAck = ACK_LINE.test(line.trim());
       const isEta = ETA_LINE.test(line.trim());
       // Keep if not a pure ack/eta line

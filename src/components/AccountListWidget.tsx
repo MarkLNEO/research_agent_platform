@@ -28,10 +28,14 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
   });
   const { addToast } = useToast();
   const notifiedRef = useRef<Set<string>>(new Set());
+  const inFlightRef = useRef(false);
+  const debounceTimer = useRef<number | null>(null);
 
   const loadAccounts = useCallback(async () => {
     try {
-      setLoading(true);
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+      setLoading(accounts.length === 0); // avoid flicker if we already have data
       const result = await listTrackedAccounts(filter === 'all' ? undefined : filter);
       setAccounts(result.accounts);
       setStats(result.stats);
@@ -41,8 +45,9 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
       setError(err.message);
     } finally {
       setLoading(false);
+      inFlightRef.current = false;
     }
-  }, [filter]);
+  }, [filter, accounts.length]);
 
   useEffect(() => {
     void loadAccounts();
@@ -51,7 +56,9 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
   useEffect(() => {
     const handleAccountsUpdated = () => {
       console.log('[AccountListWidget] Accounts updated event received, reloading...');
-      void loadAccounts();
+      // Debounce rapid successive updates to prevent oscillation/flicker
+      if (debounceTimer.current) window.clearTimeout(debounceTimer.current);
+      debounceTimer.current = window.setTimeout(() => { void loadAccounts(); }, 150);
     };
 
     window.addEventListener('accounts-updated', handleAccountsUpdated);

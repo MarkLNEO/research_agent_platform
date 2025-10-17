@@ -15,6 +15,7 @@ import { BulkResearchStatus } from '../components/BulkResearchStatus';
 import { ProfileCompletenessBanner } from '../components/ProfileCompletenessBanner';
 import { AccountSignalsDrawer } from '../components/AccountSignalsDrawer';
 import { AssumedSubjectDialog } from '../components/AssumedSubjectDialog';
+import { isGibberish, sanitizeCandidate } from '../utils/companyValidation';
 import { DraftEmailDialog, type DraftEmailRecipient } from '../components/DraftEmailDialog';
 import { listRecentSignals, type AccountSignalSummary } from '../services/signalService';
 import { fetchDashboardGreeting } from '../services/accountService';
@@ -1551,6 +1552,24 @@ useEffect(() => {
     }
     if (!isWHQuestion && !endsWithQuestion && (looksLikeResearch || continuationTarget) && isLikelySubject(detectedCompany) && detectedCompany && detectedCompany !== activeSubject) {
       lastResearchSummaryRef.current = '';
+    }
+
+    // Guardrail: if this looks like research but the subject is nonsense or low-confidence, open suggestions dialog instead of spending credits.
+    if (looksLikeResearch) {
+      const candidate = sanitizeCandidate(detectedCompany || normalized);
+      if (isGibberish(candidate) || !isLikelySubject(detectedCompany || candidate)) {
+        // Open the assumed-subject dialog and fetch suggestions; do not proceed to LLM.
+        setAssumedDialogName(candidate);
+        setAssumedDialogIndustry(null);
+        setAssumedDialogOpen(true);
+        try { await loadAssumedSuggestions(candidate); } catch {}
+        // Remove the temp user message since we aren't sending it to the server
+        setMessages(prev => prev.filter(m => m.id !== tempUser.id));
+        setLoading(false);
+        setStreamingMessage('');
+        setThinkingEvents([]);
+        return;
+      }
     }
 
     if (isGenericHelp) {

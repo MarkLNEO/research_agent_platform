@@ -57,6 +57,14 @@ export function BulkResearchDialog({ isOpen, onClose, onSuccess }: BulkResearchD
 
     setError(null);
 
+    // Basic size guard (5MB)
+    if (selectedFile.size > 5 * 1024 * 1024) {
+      setError('File is too large. Please upload a CSV under 5MB.');
+      setFile(null);
+      setPreview([]);
+      return;
+    }
+
     try {
       const csvText = await selectedFile.text();
       const accounts = parseAccountsCSV(csvText);

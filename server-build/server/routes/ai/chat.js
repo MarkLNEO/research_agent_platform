@@ -274,14 +274,17 @@ export default async function handler(req, res) {
         catch (e) {
             return res.status(e.statusCode || 403).json({ error: e.message });
         }
-        // Check user credits
-        const creditCheck = await checkUserCredits(supabase, user.id);
-        if (!creditCheck.hasCredits) {
-            return res.status(403).json({
-                error: creditCheck.message,
-                needsApproval: creditCheck.needsApproval,
-                remaining: creditCheck.remaining
-            });
+        // Check user credits (skip for non-billable settings agent)
+        const _agentTypeForCredits = String((req.body || {}).agentType || '').trim();
+        if (_agentTypeForCredits !== 'settings_agent') {
+            const creditCheck = await checkUserCredits(supabase, user.id);
+            if (!creditCheck.hasCredits) {
+                return res.status(403).json({
+                    error: creditCheck.message,
+                    needsApproval: creditCheck.needsApproval,
+                    remaining: creditCheck.remaining
+                });
+            }
         }
         const authAndCreditMs = Date.now() - processStart;
         // Parse request body
@@ -1097,18 +1100,23 @@ export default async function handler(req, res) {
                 clearTimeout(overallTimeout);
             }
             catch { }
-            // Log usage and deduct credits
-            await logUsage(supabase, user.id, 'chat_completion', totalEstimatedTokens, {
-                chat_id: chatId,
-                agent_type: agentType,
-                model: selectedModel,
-                api: 'responses', // Note that we're using Responses API
-                chunks: chunkCount,
-                prompt_head: (instructions || '').slice(0, 1000),
-                input_head: (input || '').slice(0, 400),
-                final_response_id: finalResponseData?.id || finalResponseData?.response?.id || null
-            });
-            await deductCredits(supabase, user.id, totalEstimatedTokens);
+            // Log usage and deduct credits (skip billing for settings_agent)
+            try {
+                await logUsage(supabase, user.id, 'chat_completion', totalEstimatedTokens, {
+                    chat_id: chatId,
+                    agent_type: agentType,
+                    model: selectedModel,
+                    api: 'responses',
+                    chunks: chunkCount,
+                    prompt_head: (instructions || '').slice(0, 1000),
+                    input_head: (input || '').slice(0, 400),
+                    final_response_id: finalResponseData?.id || finalResponseData?.response?.id || null,
+                    billable: agentType !== 'settings_agent'
+                });
+            } catch {}
+            if (agentType !== 'settings_agent') {
+                await deductCredits(supabase, user.id, totalEstimatedTokens);
+            }
             // Background: rolling summary
             ;
             (async () => {

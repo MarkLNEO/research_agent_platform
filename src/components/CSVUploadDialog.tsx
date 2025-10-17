@@ -63,6 +63,11 @@ export function CSVUploadDialog({ isOpen, onClose, onSuccess }: CSVUploadDialogP
       return;
     }
 
+    if (uploadedFile.size > 5 * 1024 * 1024) {
+      setError('File is too large. Please upload a CSV under 5MB.');
+      return;
+    }
+
     setFile(uploadedFile);
 
     // Read and parse the file

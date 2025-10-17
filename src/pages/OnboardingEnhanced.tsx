@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Send, Sparkles } from 'lucide-react';
 import { invalidateUserProfileCache, primeUserProfileCache } from '../hooks/useUserProfile';
+import { isGenericPlaceholder } from '../utils/companyValidation';
 
 interface Message {
   id: string;
@@ -337,6 +338,10 @@ export function OnboardingEnhanced() {
 
         if (input.length < 2) {
           await addAgentMessage("That seems quite short. Try the full company name (e.g., 'Acme Corp') or paste the website.");
+          return;
+        }
+        if (isGenericPlaceholder(input)) {
+          await addAgentMessage("Please enter your company name (e.g., 'Acme Corp') or paste the website domain (e.g., acme.com).");
           return;
         }
         setProfileData(prev => ({ ...prev, companyName: input }));
