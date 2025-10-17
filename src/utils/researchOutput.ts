@@ -225,50 +225,69 @@ export function deriveIcpMeta(markdown: string): { score: number; confidence: nu
 
 export interface ResearchContact {
   name: string;
-  title?: string;
+  title: string;
 }
+
+const CONTACT_SECTION_LABELS = [
+  'Decision Makers',
+  'Key Contacts',
+  'Leadership & Key Contacts',
+  'Leadership',
+  'Buying Committee'
+];
+
+const TITLE_KEYWORDS = /(chief|ciso|security|cio|cto|technology|information|risk|compliance|privacy|trust|data|vp|vice president|svp|evp|director|head|lead|manager)/i;
 
 export function extractDecisionMakerContacts(markdown: string | null | undefined, max = 6): ResearchContact[] {
   if (!markdown) return [];
-  const section = extractSection(markdown, 'Decision Makers')
-    || extractSection(markdown, 'Key Contacts')
-    || '';
-  const scope = section || markdown;
-  const lines = scope
+  let section: string | null = null;
+  for (const label of CONTACT_SECTION_LABELS) {
+    section = extractSection(markdown, label);
+    if (section) break;
+  }
+  if (!section) return [];
+
+  const lines = section
     .replace(/```[\s\S]*?```/g, '')
     .replace(/\r/g, '')
     .split('\n')
     .map(line => line.trim())
-    .filter(line => line && !/^##\s+/i.test(line));
+    .filter(line => line && !/^\|?\s*-{3,}\s*\|?$/i.test(line) && !/^##\s+/i.test(line));
 
   const contacts: ResearchContact[] = [];
-  const addContact = (name?: string | null, title?: string | null) => {
-    if (!name) return;
-    const normalizedName = name.replace(/[*_`]/g, '').trim();
-    if (normalizedName.split(' ').length > 7 || normalizedName.length < 2) return;
-    const key = normalizedName.toLowerCase();
-    if (contacts.some(c => c.name.toLowerCase() === key)) return;
-    contacts.push({ name: normalizedName, title: title?.replace(/[*_`]/g, '').trim() || undefined });
+  const hasRoleKeywords = (value?: string | null) => Boolean(value && TITLE_KEYWORDS.test(value));
+  const sanitizeName = (value: string) => value.replace(/[*_`]/g, '').trim();
+  const sanitizeTitle = (value: string) => value.replace(/[*_`]/g, '').trim();
+
+  const addContact = (rawName?: string | null, rawTitle?: string | null) => {
+    const name = sanitizeName(rawName || '');
+    const title = sanitizeTitle(rawTitle || '');
+    if (!name || !title || !hasRoleKeywords(title)) return;
+    if (!/^[A-Z][A-Za-z' .-]+(?:\s+[A-Z][A-Za-z' .-]+)+$/.test(name)) return;
+    const key = `${name.toLowerCase()}::${title.toLowerCase()}`;
+    if (contacts.some(c => `${c.name.toLowerCase()}::${c.title.toLowerCase()}` === key)) return;
+    contacts.push({ name, title });
   };
 
-  const parseCandidate = (raw: string) => {
-    const cleaned = raw
-      .replace(/^[-*•]\s*/, '')
-      .replace(/\*\*|__/g, '')
-      .replace(/\[(.*?)\]\([^)]*\)/g, '$1')
-      .trim();
+  const parseTableRow = (raw: string) => {
+    const cells = raw.split('|').map(cell => cell.trim()).filter(Boolean);
+    if (cells.length < 2) return;
+    if (/^name$/i.test(cells[0])) return;
+    const [name, title] = cells;
+    addContact(name, title);
+  };
 
-    if (!cleaned) return;
+  lines.forEach(rawLine => {
+    let line = rawLine.replace(/^[-*•]\s*/, '');
+    line = line.replace(/\[(.*?)\]\([^)]*\)/g, '$1').trim();
+    if (!line) return;
 
-    if (cleaned.startsWith('|') && cleaned.endsWith('|')) {
-      const cells = cleaned.split('|').map(cell => cell.trim()).filter(Boolean);
-      if (cells.length >= 2) {
-        addContact(cells[0], cells[1]);
-      }
+    if (line.startsWith('|') && line.endsWith('|')) {
+      parseTableRow(line);
       return;
     }
 
-    const dashMatch = cleaned.match(/^([A-Z][A-Za-z' .-]{1,80})\s*[—–-]\s*(.+)$/);
+    const dashMatch = line.match(/^([A-Z][A-Za-z' .-]{1,80})\s*[—–-]\s*(.+)$/);
     if (dashMatch) {
       const [, name, titlePart] = dashMatch;
       const title = titlePart.split(/[:•-]/)[0].split(/\(/)[0].trim();
@@ -276,38 +295,31 @@ export function extractDecisionMakerContacts(markdown: string | null | undefined
       return;
     }
 
-    const parenMatch = cleaned.match(/^([A-Z][A-Za-z' .-]{1,80})\s*\(([^)]+)\)/);
+    const parenMatch = line.match(/^([A-Z][A-Za-z' .-]{1,80})\s*\(([^)]+)\)/);
     if (parenMatch) {
       addContact(parenMatch[1], parenMatch[2]);
       return;
     }
 
-    const commaMatch = cleaned.match(/^([A-Z][A-Za-z' .-]{1,80})\s*,\s*([^,]+)$/);
+    const commaMatch = line.match(/^([A-Z][A-Za-z' .-]{1,80})\s*,\s*([^,]+)$/);
     if (commaMatch) {
       addContact(commaMatch[1], commaMatch[2]);
       return;
     }
 
-    // Fallback: treat first clause as name, second as title if uppercase keywords present
-    const words = cleaned.split(' - ');
+    const colonMatch = line.match(/^([A-Z][A-Za-z' .-]{1,80})\s*[:]\s*(.+)$/);
+    if (colonMatch) {
+      addContact(colonMatch[1], colonMatch[2]);
+      return;
+    }
+
+    const words = line.split(/\s+-\s+/);
     if (words.length >= 2) {
       addContact(words[0], words[1]);
       return;
     }
+  });
 
-    // Last resort: if line contains uppercase role keywords
-    const roleKeywords = /(CISO|CTO|CIO|CEO|CFO|VP|Vice President|Head of|Director|Chief)/i;
-    if (roleKeywords.test(cleaned)) {
-      const [maybeName, maybeTitle] = cleaned.split(roleKeywords).length > 1
-        ? cleaned.split(/\s{2,}| - | — /)
-        : [cleaned.replace(roleKeywords, '').trim(), cleaned.match(roleKeywords)?.[0]];
-      if (maybeName) {
-        addContact(maybeName, maybeTitle || cleaned.match(roleKeywords)?.[0] || undefined);
-      }
-    }
-  };
-
-  lines.forEach(line => parseCandidate(line));
   return contacts.slice(0, max);
 }
 
