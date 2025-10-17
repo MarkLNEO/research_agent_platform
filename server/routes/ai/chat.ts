@@ -326,8 +326,16 @@ export default async function handler(req: any, res: any) {
       }
     } catch {}
 
-    // Build system prompt if not provided; pass research_type to bias depth
-    let instructions = systemPrompt || buildSystemPrompt(userContext as any, agentType as AgentType, body.research_type);
+    // Always build the canonical server-side prompt.
+    // Ignore client-provided systemPrompt unless explicitly allowed via flag.
+    let instructions = buildSystemPrompt(userContext as any, agentType as AgentType, body.research_type);
+    try {
+      const allowClientPrompt = Boolean((userConfig || {}).allow_client_prompt === true);
+      if (allowClientPrompt && typeof systemPrompt === 'string' && systemPrompt.trim().length > 0) {
+        // Append the client prompt as a non-authoritative addendum for debugging.
+        instructions += `\n\n<client_addendum>(Non-authoritative) Additional client instructions:\n${systemPrompt.trim()}\n</client_addendum>`;
+      }
+    } catch {}
     try {
       const memoryBlock = await buildMemoryBlock(user.id, agentType as string);
       if (memoryBlock) {
@@ -780,7 +788,6 @@ export default async function handler(req: any, res: any) {
         text: { format: { type: 'text' }, verbosity: 'low' },
         reasoning: { effort: reasoningEffort },
         tools: useTools ? [{ type: 'web_search' }] : [],
-        include: ['reasoning.encrypted_content', 'web_search_call.results'],
         parallel_tool_calls: useTools,
         // Allow full-depth for deep mode; keep light caps for quick/specific to improve latency
         max_output_tokens: (effectiveMode === 'deep')

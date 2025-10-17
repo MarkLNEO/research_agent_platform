@@ -1971,6 +1971,8 @@ cron.schedule('0 * * * *', checkQualityThresholds);
 - [ ] Implement A/B testing framework for prompt changes
 - [ ] Document prompt change process and approval workflow
 
+> **Prompt deployment reminder:** Prompt edits under `server/routes/_lib` only go live after recompiling the server bundle. After committing prompt changes, run `npm run build` (or restart the API via `npm run dev:api`) so `server-build/` picks up the new instructions, then redeploy/restart the API and verify the logs show the updated prompt.
+
 ---
 
 ## Visual Testing & UX Improvements

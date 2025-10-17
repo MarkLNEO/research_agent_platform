@@ -236,7 +236,7 @@ export default async function handler(req, res) {
         const fromEnv = Number(process.env.STREAMING_DEADLINE_MS);
         if (!isNaN(fromEnv) && fromEnv > 0)
             return fromEnv; // trust operator-provided deadline
-        // Default: end slightly before older 300s cap
+        // Default: conservative 280s for older deployments
         return 280000;
     })();
     const overallTimeout = setTimeout(() => {
@@ -309,8 +309,17 @@ export default async function handler(req, res) {
             }
         }
         catch { }
-        // Build system prompt if not provided; pass research_type to bias depth
-        let instructions = systemPrompt || buildSystemPrompt(userContext, agentType, body.research_type);
+        // Always build the canonical server-side prompt.
+        // Ignore client-provided systemPrompt unless explicitly allowed via flag.
+        let instructions = buildSystemPrompt(userContext, agentType, body.research_type);
+        try {
+            const allowClientPrompt = Boolean((userConfig || {}).allow_client_prompt === true);
+            if (allowClientPrompt && typeof systemPrompt === 'string' && systemPrompt.trim().length > 0) {
+                // Append the client prompt as a non-authoritative addendum for debugging.
+                instructions += `\n\n<client_addendum>(Non-authoritative) Additional client instructions:\n${systemPrompt.trim()}\n</client_addendum>`;
+            }
+        }
+        catch { }
         try {
             const memoryBlock = await buildMemoryBlock(user.id, agentType);
             if (memoryBlock) {
@@ -320,9 +329,8 @@ export default async function handler(req, res) {
         catch (memoryError) {
             console.error('[memory] failed to load memory block', memoryError);
         }
-        if (!instructions.startsWith('Formatting re-enabled')) {
-            instructions = `Formatting re-enabled\n\n${instructions}`;
-        }
+        // Remove legacy prefix that leaked into logs/UI
+        // (it provided no functional value and was confusing to users)
         if (subjectSnapshot)
             instructions += subjectSnapshot;
         // Apply clarifier lock and facet budget hints
@@ -337,7 +345,7 @@ export default async function handler(req, res) {
         if (typeof userConfig?.summary_brevity === 'string') {
             instructions += `\n\n<summary_brevity>${userConfig.summary_brevity}</summary_brevity>`;
         }
-        // Fast mode removed; always request full context in outputs
+        // Fast mode retired: always prompt for full contextual outputs
         // Append guardrail hint if present in prompt config
         try {
             const guard = userContext.promptConfig?.guardrail_profile;
@@ -504,7 +512,8 @@ export default async function handler(req, res) {
             const shortQ = /^(who|what|when|where|which|how|do|does|did|is|are|was|were)\b/i.test((lastUserMessage?.content || '').trim()) && ((lastUserMessage?.content || '').trim().length <= 120);
             const autoMode = (activeContextCompany && shortQ) ? 'specific' : undefined;
             const effectiveMode = (autoMode || research_type);
-            const reasoningEffort = effectiveMode === 'deep' ? 'medium' : 'low';
+            // Deep runs demand richer reasoning; quick/specific stay lightweight
+            const reasoningEffort = (effectiveMode === 'deep') ? 'medium' : 'low';
             const isQuick = effectiveMode === 'quick';
             // Summarization mode: if the client passed summarize_source, bypass research flow
             const summarizeSource = userConfig?.summarize_source;
@@ -551,6 +560,84 @@ export default async function handler(req, res) {
                 safeWrite('data: [DONE]\n\n');
                 responseClosed = true;
                 return;
+            }
+            // Short bare-name queries: infer the most likely company and proceed (no clarifying questions)
+            const requestedText = (lastUserMessage?.content || '').trim();
+            const strippedLeading = requestedText.replace(/^(research|tell me about|what can you tell me about|who is|analy[sz]e|find)\s+/i, '').trim();
+            const looksLikeBareName = (() => {
+                if (!strippedLeading)
+                    return false;
+                if (/https?:\/\//i.test(strippedLeading))
+                    return false;
+                if (/\./.test(strippedLeading))
+                    return false; // likely domain
+                if (/(inc\.|corp\.|ltd\.|llc|company|co\b|group|holdings|technologies|systems)/i.test(strippedLeading))
+                    return false;
+                const words = strippedLeading.split(/\s+/).filter(Boolean);
+                if (words.length === 0)
+                    return false;
+                return words.length <= 2; // very short, likely ambiguous
+            })();
+            const forceDisambiguate = Boolean(userConfig?.disambiguate_subject === true);
+            if (looksLikeBareName || forceDisambiguate) {
+                try {
+                    const term = strippedLeading || extractCompanyName(requestedText) || 'the company';
+                    safeWrite(`data: ${JSON.stringify({ type: 'reasoning_progress', content: `Interpreting “${term}” as a company — selecting the most likely match…` })}\n\n`);
+                    const resolveInstructions = [
+                        'Resolve a possibly ambiguous company term to the most likely real company.',
+                        'Output ONLY compact JSON with fields: {"top":{"name":"","industry":"","website":"","confidence":0-1},"alternates":[{"name":"","industry":"","website":"","confidence":0-1}] }',
+                        'Prefer the most prominent company when multiple exist. No commentary, no code fences.'
+                    ].join('\n');
+                    const rstream = await openai.responses.stream({
+                        model: 'gpt-5-mini',
+                        instructions: resolveInstructions,
+                        input: `term: ${term}`,
+                        text: { format: { type: 'text' }, verbosity: 'low' },
+                        store: false,
+                        metadata: { agent: 'company_research', stage: 'subject_resolution', chat_id: chatId || null, user_id: user.id },
+                    }, { signal: abortController.signal });
+                    let buf = '';
+                    for await (const ch of rstream) {
+                        if (ch.type === 'response.output_text.delta' && ch.delta)
+                            buf += ch.delta;
+                    }
+                    try {
+                        await rstream.finalResponse();
+                    }
+                    catch { }
+                    let assumed = null;
+                    try {
+                        const s = buf.indexOf('{');
+                        const e = buf.lastIndexOf('}');
+                        if (s >= 0 && e > s) {
+                            const parsed = JSON.parse(buf.slice(s, e + 1));
+                            if (parsed?.top?.name)
+                                assumed = parsed.top;
+                        }
+                    }
+                    catch { }
+                    if (assumed?.name) {
+                        const assumedLine = `Proceeding with ${assumed.name}${assumed.industry ? ` (${assumed.industry})` : ''}${assumed.website ? ` — ${assumed.website}` : ''}.`;
+                        safeWrite(`data: ${JSON.stringify({ type: 'reasoning_progress', content: assumedLine })}\n\n`);
+                        // Emit structured event so UI can show an "Assumed" badge like Claude
+                        try {
+                            safeWrite(`data: ${JSON.stringify({
+                                type: 'assumed_subject',
+                                name: assumed.name,
+                                industry: assumed.industry || null,
+                                website: assumed.website || null,
+                                confidence: typeof assumed.confidence === 'number' ? assumed.confidence : null
+                            })}\n\n`);
+                        }
+                        catch { }
+                        // Bias both instructions and request with the assumption; do not ask clarifying questions
+                        instructions = `Assumed subject: ${assumed.name}${assumed.website ? ` (${assumed.website})` : ''}.\nDo not ask clarifying questions; proceed with research on this subject. If the user later corrects, pivot silently.\n\n` + instructions;
+                        effectiveRequest = `${effectiveRequest}\n\nContext: The company in focus is ${assumed.name}${assumed.website ? ` (${assumed.website})` : ''}.`;
+                    }
+                }
+                catch (disErr) {
+                    console.warn('[subject_resolution] non-fatal error; continuing default flow', disErr);
+                }
             }
             const wantsFreshIntel = /recent|latest|today|yesterday|this week|signals?|news|breach|breaches|leadership|funding|acquisition|hiring|layoff|changed|update|report/i.test(normalizedRequest);
             const mentionsTimeframe = /\b(last|past)\s+\d+\s+(day|days|week|weeks|month|months|year|years)\b/i.test(requestText);
@@ -711,9 +798,11 @@ export default async function handler(req, res) {
                 text: { format: { type: 'text' }, verbosity: 'low' },
                 reasoning: { effort: reasoningEffort },
                 tools: useTools ? [{ type: 'web_search' }] : [],
-                include: ['reasoning.encrypted_content', 'web_search_call.results'],
                 parallel_tool_calls: useTools,
-                max_output_tokens: research_type === 'deep' ? undefined : (isQuick ? 450 : undefined),
+                // Allow full-depth for deep mode; keep light caps for quick/specific to improve latency
+                max_output_tokens: (effectiveMode === 'deep')
+                    ? undefined
+                    : (isQuick ? 450 : undefined),
                 store: storeRun,
                 metadata: {
                     agent: 'company_research',
@@ -991,6 +1080,8 @@ export default async function handler(req, res) {
                 }
             }
             // Do not block finalization on the auxiliary fast plan stream.
+            // It can overrun and cause apparent timeouts even after content is done.
+            // We intentionally skip awaiting planPromise here.
             safeWrite(`data: [DONE]\n\n`);
             responseClosed = true;
             res.end();

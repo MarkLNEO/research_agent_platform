@@ -50,6 +50,7 @@ export function useStreamingAgent(userContext: UserContext, options: StreamingAg
 
     try {
       const agent = createAgent();
+      // Build locally for internal use (rendering/preview) but do not send to API.
       const systemPrompt = agent.buildSystemPrompt();
 
       // Get auth token
@@ -74,7 +75,6 @@ export function useStreamingAgent(userContext: UserContext, options: StreamingAg
         },
         body: JSON.stringify({
           messages: agent.optimizeContext(messages),
-          systemPrompt,
           chatId: options.chatId,
           agentType
         }),

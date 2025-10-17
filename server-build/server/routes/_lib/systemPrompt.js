@@ -5,7 +5,7 @@ const AGENT_ROLE = {
 };
 const MODE_HINT = {
     quick: 'Quick Facts mode: output ONLY essential facts. Keep total length ≤ 150 words. No extra sections, no preamble, no filler. Prefer bullets over prose.',
-    deep: 'Perform thorough research. Cover executive summary, ICP fit, qualifying criteria status, decision makers with personalization, recent signals, tech stack, competitors, and recommended next steps. Use evidence-backed statements with short source references.',
+    deep: 'Deep Research mode: move beyond raw bullets. Synthesize implications through the user\'s ICP and saved criteria. Prioritize insight density over list length; include brief mini‑paragraphs where synthesis is required, and keep evidence inline.',
     specific: 'Answer the specific question directly. Pull only the supporting facts that justify the answer. If information is unavailable, say so and suggest where to investigate next.'
 };
 const STREAMING_BEHAVIOUR = `While reasoning, surface short bullet updates ("- assessing funding rounds", "- reading tech stack coverage") so the UI can stream progress.`;
@@ -30,6 +30,23 @@ const STRUCTURED_OUTPUT = `Output format (strict):
 - If a section has no content, keep the heading and state "None found" with a note on next steps.
 - Use bold call-outs within sections for clarity, but do not omit or rename the headings.
 - When saved follow-up questions exist, add "## Saved Follow-up Answers" after the core sections and answer each saved question in 1-2 concise bullets.`;
+// Deep-only enhanced structure: adds Why Now and Deal Strategy sections, and encourages synthesis over bullet dumps
+const DEEP_OUTPUT = `Deep Research format (strict):
+- Start with a brief, friendly acknowledgement line (e.g., "On it — deep dive (~2 min).") that states research depth and ETA, then proceed.
+- ${EXEC_SUMMARY_GUIDANCE}
+- After the Executive Summary, continue with the sections, in this order:
+  "## Why Now" (2–3 short mini-paragraphs synthesizing timing and urgency through the user's ICP and signal preferences),
+  "## Deal Strategy" (tailor to saved target_titles; include 3–5 moves with who to contact and why),
+  "## Key Findings" (keep to the sharpest 5–7; avoid duplicating Why Now),
+  "## Custom Criteria" (if applicable),
+  "## Signals",
+  "## Tech/Footprint" (or "## Operating Footprint"),
+  "## Decision Makers" (with personalization),
+  "## Risks & Gaps" (optional),
+  "## Sources",
+  "## Proactive Follow-ups".
+- If prior context about a previous report is provided, insert "## What Changed" with 3–5 bullets after "Why Now".
+- Use short evidence-backed statements with inline source notes. Favor 2–3 short mini‑paragraphs where synthesis adds value; avoid long bullet sprawl.`;
 const QUICK_OUTPUT = `Quick Facts format (strict):
 - Output exactly two sections and nothing else:
   ## Executive Summary (≤ 80 words, include one sentence headline plus "ICP Fit: <value>" and "Recommendation: <value>")
@@ -110,6 +127,20 @@ function formatSection(title, body) {
         return null;
     return `${title.toUpperCase()}\n${body.trim()}`;
 }
+const normalizeTargetTitles = (raw) => {
+    if (Array.isArray(raw)) {
+        return raw
+            .map(value => (typeof value === 'string' ? value.trim() : ''))
+            .filter(Boolean);
+    }
+    if (typeof raw === 'string' && raw.trim().length) {
+        return raw
+            .split(/[,;\n]+/)
+            .map(value => value.trim())
+            .filter(Boolean);
+    }
+    return [];
+};
 function serializeProfile(profile) {
     if (!profile)
         return '';
@@ -120,9 +151,9 @@ function serializeProfile(profile) {
         lines.push(`Website: ${profile.company_url}`);
     if (profile.industry)
         lines.push(`Industry: ${profile.industry}`);
-    if (Array.isArray(profile.target_titles) && profile.target_titles.length) {
-        lines.push(`Target titles: ${profile.target_titles.join(', ')}`);
-    }
+    const normalizedTitles = normalizeTargetTitles(profile.target_titles);
+    if (normalizedTitles.length)
+        lines.push(`Target titles: ${normalizedTitles.join(', ')}`);
     if (profile.icp_definition)
         lines.push(`ICP definition: ${profile.icp_definition}`);
     if (profile.use_case)
@@ -236,6 +267,36 @@ export function buildSystemPrompt(userContext, agentType = 'company_research', r
     if (isResearchAgent && resolvedMode === 'deep') {
         extras.push(DEFAULT_CRITERIA_GUIDANCE);
     }
+    const profile = userContext.profile || {};
+    const contextLens = [];
+    const targetTitles = normalizeTargetTitles(profile.target_titles);
+    if (profile.icp_definition || profile.icp || profile.industry) {
+        contextLens.push(`- ICP: Tie headline insights and "Why Now" directly to ${profile.icp_definition || profile.icp || profile.industry}. Explain fit through this lens.`);
+    }
+    if (targetTitles.length) {
+        contextLens.push(`- Target titles (${targetTitles.join(', ')}): Prioritize these roles in Deal Strategy and Decision Makers; spell out why each matters.`);
+    }
+    const criteriaNames = (userContext.customCriteria || []).map((c) => c?.field_name).filter(Boolean);
+    if (criteriaNames.length) {
+        contextLens.push(`- Custom criteria (${criteriaNames.join(', ')}): Evaluate each item with Met / Not met / Unknown and cite evidence.`);
+    }
+    const signalNames = (userContext.signals || []).map((s) => s?.signal_type?.replace(/_/g, ' ')).filter(Boolean);
+    if (signalNames.length) {
+        contextLens.push(`- Signal preferences (${signalNames.join(', ')}): Highlight matching news/signals; if none, state what you'll monitor next.`);
+    }
+    if (contextLens.length) {
+        extras.push(`Context expectations:\n${contextLens.join('\n')}\n- Thread these preferences through every section; the brief should feel tailored to this profile.`);
+    }
+    if (contextLens.length && targetTitles.length) {
+        extras.push('Decision Maker guidance: Where possible, surface contacts that align with saved target titles and include personalization drawn from those roles.');
+        extras.push('Leadership guidance: In the Leadership/Decision Makers sections, actively search for the saved target titles (and close adjacencies—e.g., VP RevOps vs. Head of Revenue Operations). If you cannot find exact matches, surface the closest relevant roles and explain the overlap. Always cite why each surfaced contact maps to the user’s priorities.');
+    }
+    if (contextLens.length && criteriaNames.length) {
+        extras.push('In the "Custom Criteria" section, list each criterion explicitly with status (Met / Not met / Unknown) and a one-sentence rationale or follow-up action.');
+    }
+    if (contextLens.length && signalNames.length) {
+        extras.push('In "Signals" and "Why Now", prioritize activity that maps to the user’s preferred signal types.');
+    }
     if (isResearchAgent) {
         extras.push(buildImmediateAckGuidance(resolvedMode));
         extras.push(resolvedMode === 'specific' ? SPECIFIC_FOLLOW_UP_GUIDANCE : PROACTIVE_FOLLOW_UP_GUIDANCE);
@@ -257,7 +318,7 @@ Always answer them after the main sections inside "Saved Follow-up Answers".`);
             ? `Response Shape:\n- Keep outputs concise and decision-ready; prefer bullets.\n- ${QUICK_OUTPUT}`
             : resolvedMode === 'specific'
                 ? `Response Shape:\n- Keep outputs concise and answer-led.\n- ${SPECIFIC_OUTPUT}`
-                : `Response Shape:\n- Keep outputs concise and decision-ready; prefer bullets and short sections.\n- ${STRUCTURED_OUTPUT}`;
+                : `Response Shape:\n- Keep outputs concise and decision-ready; balance mini‑paragraph synthesis with bullets.\n- ${DEEP_OUTPUT}`;
     }
     else if (isSettingsAgent) {
         responseShape = SETTINGS_RESPONSE_SHAPE;

@@ -63,6 +63,10 @@ export default async function handler(req: any, res: any) {
     const guard = (promptCfgResult.data as any)?.guardrail_profile;
     if (guard) prompt += `\n\n<guardrails>Use guardrail profile: ${guard}. Respect source allowlists and safety constraints.</guardrails>`;
 
+    const wantFull = (req.query && (req.query.full === '1' || req.query.full === 'true'));
+    if (wantFull) {
+      return res.status(200).json({ prompt });
+    }
     return res.status(200).json({ prompt_head: prompt.slice(0, 1200) });
   } catch (error: any) {
     console.error('debug/build-prompt error', error);
