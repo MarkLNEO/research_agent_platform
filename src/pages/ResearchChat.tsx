@@ -879,6 +879,20 @@ useEffect(() => {
     void load();
   }, []);
 
+  // Keep header account stats in sync when accounts change elsewhere
+  useEffect(() => {
+    const refreshStats = async () => {
+      try {
+        const { listTrackedAccounts } = await import('../services/accountService');
+        const result = await listTrackedAccounts('all');
+        setAccountStats(result.stats);
+      } catch {}
+    };
+    const handler = () => { void refreshStats(); };
+    window.addEventListener('accounts-updated', handler);
+    return () => window.removeEventListener('accounts-updated', handler);
+  }, []);
+
   // Poll compact bulk progress in the background; decoupled from status component
   useEffect(() => {
     let timer: any;
@@ -2568,9 +2582,18 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
   }, [draftEmailPending, lastAssistantMessage, addToast, supabase, activeSubject, currentChatId, setMessages, userProfile, navigate, user?.id]);
 
 
-  const handleNextAction = async (action: string) => {
+  const handleNextAction = async (rawAction: string) => {
     if (!currentChatId) return;
-    await handleSendMessageWithChat(currentChatId, `Help me with this next step: ${action}`);
+    // Sanitize noisy invitations like "Want that slide? (Yes/No?)"
+    let action = String(rawAction || '')
+      .replace(/\bwant that slide\?\s*\(yes\/?no\?\)?/i, '')
+      .replace(/\(\s*yes\s*\/?\s*no\s*\??\s*\)/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+      .replace(/[.?!]+\s*$/, '');
+    const subjectHint = activeSubject ? ` for ${activeSubject}` : '';
+    const prompt = `Help me with this next step: ${action}${subjectHint ? subjectHint : ''}`.trim();
+    await handleSendMessageWithChat(currentChatId, prompt, 'specific');
   };
 
   const handleActionBarAction = useCallback(async (action: ResearchAction) => {
