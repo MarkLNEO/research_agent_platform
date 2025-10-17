@@ -46,7 +46,19 @@ const EMPTY_SECTION_PATTERNS = [
 
 const dropEmptySections = (markdown: string | null | undefined): string => {
   if (!markdown) return '';
-  const trimmed = markdown.trim();
+  let trimmed = markdown.trim();
+  // Strip common acknowledgement/meta lines that sometimes leak into sections
+  const ACK_LINE = /^(?:on it\b.*?|starting\b.*?|quick facts\b.*?|quick scan\b.*?|specific answer\b.*?|deep dive\b.*?|starting deep research\b.*?)(?:\.|!|\))?\s*$/i;
+  const ETA_LINE = /^\s*ETA\s*:\s*~?\d+\s*min(?:ute)?s?\.?\s*$/i;
+  trimmed = trimmed
+    .split('\n')
+    .filter((line, idx, all) => {
+      const isAck = ACK_LINE.test(line.trim());
+      const isEta = ETA_LINE.test(line.trim());
+      // Keep if not a pure ack/eta line
+      return !(isAck || isEta);
+    })
+    .join('\n');
   if (!trimmed) return '';
   const segments = trimmed.split(/(?=^##\s+)/m);
   const preserved: string[] = [];
@@ -468,7 +480,30 @@ export function MessageBubble({
           {renderIcpScorecard}
           {contextDetails && (
             <div className="bg-white border border-blue-100 rounded-2xl p-4 shadow-sm">
-              <div className="text-xs font-semibold text-blue-900 uppercase tracking-wide mb-1">Context Applied</div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Context Applied</div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    className="text-[11px] text-blue-700 hover:text-blue-900 underline"
+                    onClick={() => addToast({
+                      type: 'info',
+                      title: 'About context',
+                      description: 'This context comes from your saved profile (ICP, target titles, criteria, and signals). It is threaded through each section to tailor the brief.'
+                    })}
+                  >
+                    What’s this?
+                  </button>
+                  <button
+                    type="button"
+                    className="text-[11px] text-blue-700 hover:text-blue-900 underline"
+                    onClick={() => { try { window.dispatchEvent(new Event('icp:optimize')); } catch {} }}
+                    aria-label="Edit context"
+                  >
+                    Edit
+                  </button>
+                </div>
+              </div>
               <ul className="space-y-1 text-xs text-blue-800">
                 {contextDetails.map(item => (
                   <li key={`${item.label}-${item.value}`}><span className="font-semibold text-blue-900">{item.label}:</span> {item.value}</li>
