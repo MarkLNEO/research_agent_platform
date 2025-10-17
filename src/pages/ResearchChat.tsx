@@ -137,9 +137,9 @@ const deriveChatTitle = (text: string): string => {
 };
 
 const formatDisplaySubject = (subject: string | null | undefined): string => {
-  if (!subject) return 'None';
+  if (!subject) return 'General';
   const trimmed = subject.trim();
-  if (!trimmed) return 'None';
+  if (!trimmed) return 'General';
   return trimmed.length > 30 ? `${trimmed.slice(0, 27)}…` : trimmed;
 };
 

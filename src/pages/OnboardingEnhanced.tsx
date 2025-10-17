@@ -721,7 +721,7 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
     const criteriaListFormatted = newCriteria.map((c, idx) => `${idx + 1}. ${c}`).join('\n');
 
     await addAgentMessage(
-      `Got it! I've identified ${newCriteria.length} ${newCriteria.length === 1 ? 'criterion' : 'criteria'}:\n\n${criteriaListFormatted}\n\nI'll make sensible assumptions about the data type for each one. Let's talk about priority next.`
+      `Got it! I've identified ${newCriteria.length} ${newCriteria.length === 1 ? 'criterion' : 'criteria'}:\n\n${criteriaListFormatted}\n\nI'll make sensible assumptions for each one. Let's talk about priority next.`
     );
 
     await promptImportanceForCriterion(newCriteria[0]);
@@ -882,7 +882,7 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
     }
   }, [currentStep, welcomeMode]);
 
-  const canSkip = !welcomeMode && [4, 5, 6, 7, 8].includes(currentStep);
+  const canSkip = false; // Streamline: remove skip option from onboarding
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
