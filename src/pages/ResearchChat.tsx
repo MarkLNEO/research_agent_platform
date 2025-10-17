@@ -1260,13 +1260,18 @@ useEffect(() => {
       setSaveOpen(false);
       const latestId = getLatestResearchMessageId();
       if (latestId) setRecentlySavedMessageId(latestId);
-      if (activeSubject && activeSubject.trim().length > 0) {
+      const subjectForToast = (activeSubject && activeSubject.trim().length > 0)
+        ? activeSubject
+        : (draft.subject || '').trim();
+      if (subjectForToast) {
+        // Ensure an account exists for this subject so saves and dashboard stay unified
+        const newlyTracked = await ensureTrackedAccount(subjectForToast);
         addToast({
           type: 'success',
-          title: 'Saved to history',
-          description: `Track ${activeSubject} to see updates on your dashboard.`,
-          actionText: 'Track account',
-          onAction: () => { void handleTrackAccount(activeSubject); }
+          title: newlyTracked ? 'Tracked and saved' : 'Saved to history',
+          description: newlyTracked
+            ? `${subjectForToast} is now tracked. You will see it on your dashboard.`
+            : `Attached to ${subjectForToast}. Find it in Tracked Accounts.`,
         });
       } else {
         addToast({
@@ -1282,6 +1287,32 @@ useEffect(() => {
       addToast({ type: 'error', title: 'Save failed', description: 'Could not save this response. Try again.' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Ensure an account row exists; returns true if newly created
+  const ensureTrackedAccount = async (rawCompanyName: string): Promise<boolean> => {
+    if (!user) return false;
+    const companyName = String(rawCompanyName || '').trim();
+    if (!companyName) return false;
+    try {
+      const { data: existing } = await supabase
+        .from('tracked_accounts')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('company_name', companyName)
+        .maybeSingle();
+      if (existing) return false;
+      const { error } = await supabase
+        .from('tracked_accounts')
+        .insert({ user_id: user.id, company_name: companyName, monitoring_enabled: true, priority: 'standard' });
+      if (error) throw error;
+      // Notify listeners to refresh tracked lists
+      window.dispatchEvent(new CustomEvent('accounts-updated'));
+      return true;
+    } catch (e) {
+      console.warn('ensureTrackedAccount failed:', e);
+      return false;
     }
   };
 

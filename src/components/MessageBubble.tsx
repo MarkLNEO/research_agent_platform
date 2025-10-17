@@ -207,11 +207,25 @@ export function MessageBubble({
       remaining = [before, after].filter(Boolean).join('\n\n').trim();
     }
 
+    // Helper: strip any acknowledgement line that accidentally streamed inside the Executive Summary body
+    const stripAckFromStart = (body: string): string => {
+      if (!body) return body;
+      const lines = body.split(/\n+/);
+      if (!lines.length) return body;
+      const first = (lines[0] || '').trim();
+      const ackLike = /^(on it\b|starting\b|quick facts\b|quick scan\b|specific answer\b|deep dive\b|starting deep research\b|got it\b)/i;
+      // Also catch variants like “On it — deep dive (~2 min).”
+      if (ackLike.test(first) || /deep\s*dive\s*\(~?\d+\s*min\)?/i.test(first)) {
+        return lines.slice(1).join('\n').trim();
+      }
+      return body;
+    };
+
     // 1) Canonical Executive Summary section
     const execRegex = /##\s+Executive Summary\s*([\s\S]*?)(?=\n##\s+|$)/i;
     let match = execRegex.exec(remaining);
     if (match) {
-      const execBody = match[1].trim();
+      const execBody = stripAckFromStart(match[1].trim());
       const before = remaining.slice(0, match.index).trim();
       const after = remaining.slice(match.index + match[0].length).trim();
       const rest = [before, after].filter(Boolean).join('\n\n').trim();
@@ -222,7 +236,7 @@ export function MessageBubble({
     const altExecRegex = /^#{1,3}\s+.*?executive\s+summary.*?\n([\s\S]*?)(?=\n#{1,3}\s+|$)/im;
     match = altExecRegex.exec(remaining);
     if (match) {
-      const execBody = match[1].trim();
+      const execBody = stripAckFromStart(match[1].trim());
       const before = remaining.slice(0, match.index).trim();
       const after = remaining.slice(match.index + match[0].length).trim();
       const rest = [before, after].filter(Boolean).join('\n\n').trim();
@@ -659,16 +673,24 @@ export function MessageBubble({
             <button
               onClick={onPromote}
               disabled={disablePromote || recentlySaved}
-              className={`text-xs font-semibold ${recentlySaved ? 'text-emerald-600 cursor-default' : 'text-blue-600 hover:text-blue-700'} ${(disablePromote || recentlySaved) ? 'disabled:text-gray-400 disabled:cursor-not-allowed' : ''}`}
-              aria-label="Save to Research"
+              className={`text-xs font-semibold ${recentlySaved ? 'text-emerald-600 cursor-default' : 'text-blue-600 hover:text-blue-700'} ${(disablePromote || recentlySaved) ? 'disabled:text-gray-400 disabled:cursor-not-allowed' : ''} inline-flex items-center gap-1`}
+              aria-label="Save & Track"
             >
               {recentlySaved ? (
                 <span className="inline-flex items-center gap-1">
                   <CheckCircle2 className="w-3 h-3" />
                   Saved
                 </span>
+              ) : disablePromote ? (
+                <>
+                  <svg className="animate-spin h-3 w-3 text-blue-600" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                  </svg>
+                  Saving…
+                </>
               ) : (
-                'Save to Research'
+                'Save & Track'
               )}
             </button>
           )}
