@@ -245,9 +245,10 @@ export function extractDecisionMakerContacts(markdown: string | null | undefined
     section = extractSection(markdown, label);
     if (section) break;
   }
-  if (!section) return [];
+  const source = (section && section.trim().length > 0 ? section : markdown) || '';
+  if (!source.trim()) return [];
 
-  const lines = section
+  const lines = source
     .replace(/```[\s\S]*?```/g, '')
     .replace(/\r/g, '')
     .split('\n')

@@ -436,6 +436,37 @@ export function ResearchChat() {
   const skipInitialLoadRef = useRef(false);
   const { profile: userProfile } = useUserProfile();
   const profileMetadata = (userProfile?.metadata ?? {}) as Record<string, any>;
+  const pickFirstString = (...values: Array<string | null | undefined>): string => {
+    for (const value of values) {
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (trimmed) return trimmed;
+      }
+    }
+    return '';
+  };
+  const defaultSenderName = useMemo(() => {
+    const meta = (user?.user_metadata ?? {}) as Record<string, any>;
+    const combined = [meta.first_name, meta.last_name].filter(Boolean).join(' ');
+    return pickFirstString(
+      profileMetadata.sender_name,
+      meta.sender_name,
+      meta.full_name,
+      meta.name,
+      combined
+    );
+  }, [profileMetadata.sender_name, user?.user_metadata]);
+
+  const defaultSenderTitle = useMemo(() => {
+    const meta = (user?.user_metadata ?? {}) as Record<string, any>;
+    return pickFirstString(
+      profileMetadata.sender_title,
+      userProfile?.user_role,
+      meta.sender_title,
+      meta.title,
+      meta.role
+    );
+  }, [profileMetadata.sender_title, userProfile?.user_role, user?.user_metadata]);
   const {
     selectedTemplate,
     selectedTemplateId,
@@ -3655,8 +3686,8 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
       company={currentActionCompany || activeSubject || undefined}
       candidates={emailCandidates}
       defaultRole={(Array.isArray(userProfile?.target_titles) && userProfile?.target_titles?.length ? userProfile.target_titles[0] : 'CISO')}
-      initialSenderName={typeof profileMetadata.sender_name === 'string' ? profileMetadata.sender_name : ''}
-      initialSenderTitle={(typeof profileMetadata.sender_title === 'string' && profileMetadata.sender_title) || userProfile?.user_role || ''}
+      initialSenderName={defaultSenderName}
+      initialSenderTitle={defaultSenderTitle}
       onClose={() => { if (!draftEmailPending) { setEmailDialogOpen(false); setEmailDialogLoading(false); } }}
       onSubmit={(options) => { void handleEmailDialogSubmit(options); }}
     />
