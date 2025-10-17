@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { normalizeApiError } from '../utils/errors';
 
 export interface ResearchSnapshot {
   id: string;
@@ -147,8 +148,8 @@ export async function fetchDashboardGreeting(): Promise<DashboardGreeting> {
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to fetch dashboard data');
+    const err = await normalizeApiError(response);
+    throw new Error(err.message || 'Failed to fetch dashboard data');
   }
 
   return await response.json();
@@ -182,8 +183,8 @@ export async function addTrackedAccount(
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to add account');
+    const err = await normalizeApiError(response);
+    throw new Error(err.message || 'Failed to add account');
   }
 
   const result = await response.json();
@@ -223,8 +224,8 @@ export async function bulkAddAccounts(
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to add accounts');
+    const err = await normalizeApiError(response);
+    throw new Error(err.message || 'Failed to add accounts');
   }
 
   return await response.json();
@@ -253,8 +254,8 @@ export async function listTrackedAccounts(
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to list accounts');
+    const err = await normalizeApiError(response);
+    throw new Error(err.message || 'Failed to list accounts');
   }
 
   const result = await response.json();
@@ -289,8 +290,8 @@ export async function updateTrackedAccount(
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to update account');
+    const err = await normalizeApiError(response);
+    throw new Error(err.message || 'Failed to update account');
   }
 
   const result = await response.json();
@@ -314,8 +315,8 @@ export async function deleteTrackedAccount(accountId: string): Promise<void> {
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to delete account');
+    const err = await normalizeApiError(response);
+    throw new Error(err.message || 'Failed to delete account');
   }
 }
 

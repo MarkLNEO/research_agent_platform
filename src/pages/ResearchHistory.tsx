@@ -179,7 +179,16 @@ export function ResearchHistory() {
       const result = await listTrackedAccounts('all');
       setAccounts(result.accounts);
       setStats(result.stats);
-      setUntrackedResearch(result.untrackedResearch || []);
+      // Safety filter: exclude junk/low-fit if backend misses any
+      const cleaned = (result.untrackedResearch || []).filter(r => {
+        try {
+          const subject = String(r.subject || '').trim();
+          if (!subject || subject.length < 2) return false;
+          if (typeof r.icp_fit_score === 'number' && r.icp_fit_score < 30) return false;
+        } catch {}
+        return true;
+      });
+      setUntrackedResearch(cleaned);
       setSelectedAccountId(prev => {
         if (prev && result.accounts.some(acc => acc.id === prev)) {
           return prev;
