@@ -1397,6 +1397,35 @@ useEffect(() => {
     if (data) setMessages(data);
   };
 
+  // When switching to an existing chat, infer an active subject from the latest
+  // assistant content so follow-up questions like "who is the CEO?" use context.
+  useEffect(() => {
+    if (!currentChatId) return;
+    if (activeSubject) return; // already set
+    if (!messages || messages.length === 0) return;
+    const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+    if (!lastAssistant?.content) return;
+    try {
+      const text = lastAssistant.content.slice(0, 800);
+      const patterns = [
+        /researching\s+([A-Z][\w\s&.-]{2,}?)(?:[\s,:.-]|$)/i,
+        /analysis of\s+([A-Z][\w\s&.-]{2,}?)(?:[\s,:.-]|$)/i,
+        /^#\s+([^\n]+)/m,
+      ];
+      let candidate: string | null = null;
+      for (const p of patterns) {
+        const mm = text.match(p);
+        if (mm && mm[1] && mm[1].trim()) { candidate = mm[1].trim(); break; }
+      }
+      if (!candidate) {
+        candidate = extractCompanyNameFromQuery(text || '');
+      }
+      if (candidate && isLikelySubject(candidate)) {
+        setActiveSubject(candidate);
+      }
+    } catch {}
+  }, [currentChatId, messages, activeSubject]);
+
   const createNewChat = useCallback(async () => {
     if (!user) return null;
     const { data } = await supabase
