@@ -133,6 +133,7 @@ export function MessageBubble({
   const safeContent = content ?? '';
   const isCompanyResearch = agentType === 'company_research';
   const selectableMode = mode && mode !== 'auto' ? mode : null;
+  const isSpecificMode = selectableMode === 'specific';
   const icpMeta = useMemo(() => {
     if (!isCompanyResearch || role !== 'assistant' || streaming) return null;
     // Do not show ICP scorecard for draft email content
@@ -181,6 +182,7 @@ export function MessageBubble({
     try { return stripMd(safeContent).trim().split(/\s+/).filter(Boolean).length; } catch { return 0; }
   })();
   const structured = useMemo(() => {
+    if (isSpecificMode) return null; // Do not force research sections for specific follow-ups
     if (!isCompanyResearch || role !== 'assistant' || streaming) return null;
     // Skip research-specific layout for draft emails
     if (/^\s*##\s*Draft Email\b/i.test(safeContent)) return null;
@@ -261,7 +263,7 @@ export function MessageBubble({
     // Auto-generate a quick summary if content is lengthy but missing an executive summary section
     const plain = stripMd(remaining);
     const words = plain.split(/\s+/).filter(Boolean);
-    if (words.length < 80) return null;
+    if (isSpecificMode || words.length < 80) return null;
     const summaryWordCount = Math.min(120, Math.max(80, Math.floor(words.length * 0.25)));
     const summary = words.slice(0, summaryWordCount).join(' ').trim();
     if (!summary) return null;

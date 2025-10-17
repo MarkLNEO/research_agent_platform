@@ -1343,7 +1343,7 @@ useEffect(() => {
     const pattern = `%${query.replace(/[%_]/g, '')}%`;
     setAssumedSuggestionsLoading(true);
     try {
-      const [tracked, recent] = await Promise.all([
+      const [tracked, recent, web] = await Promise.all([
         supabase
           .from('tracked_accounts')
           .select('company_name, industry')
@@ -1357,6 +1357,17 @@ useEffect(() => {
           .ilike('subject', pattern)
           .order('created_at', { ascending: false })
           .limit(15),
+        (async () => {
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) return { items: [] } as any;
+            const r = await fetch(`/api/companies/resolve?term=${encodeURIComponent(query)}`, {
+              headers: { Authorization: `Bearer ${session.access_token}` }
+            });
+            if (!r.ok) return { items: [] } as any;
+            return await r.json();
+          } catch { return { items: [] } as any; }
+        })(),
       ]);
 
       const merged = new Map<string, { name: string; industry?: string | null }>();
@@ -1380,7 +1391,15 @@ useEffect(() => {
           }
         });
       }
-      setAssumedSuggestions(Array.from(merged.values()));
+      if (web?.items && Array.isArray(web.items)) {
+        web.items.forEach((item: any) => {
+          const nm = String(item?.name || '').trim();
+          if (!nm) return;
+          const key = nm.toLowerCase();
+          if (!merged.has(key)) merged.set(key, { name: nm, industry: item.industry || null });
+        });
+      }
+      setAssumedSuggestions(Array.from(merged.values()).slice(0, 5));
     } catch (error) {
       console.warn('Failed to load assumed suggestions', error);
       setAssumedSuggestions([]);
@@ -1960,6 +1979,30 @@ useEffect(() => {
         .map(m => ({ role: m.role, content: m.content }));
 
       const looksLikeResearch = isResearchPrompt(userMessage);
+      // New: preflight intent + subject extraction to improve routing
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const resp = await fetch('/api/ai/intent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            body: JSON.stringify({ text: userMessage, active_subject: activeSubject || '' })
+          });
+          if (resp.ok) {
+            const json = await resp.json();
+            const extractedSubject = (json?.subject || '').trim();
+            const intent = String(json?.intent || '').toLowerCase();
+            if (extractedSubject && isLikelySubject(extractedSubject)) {
+              setActiveSubject(extractedSubject);
+            }
+            // Use Specific mode for follow-up style intents
+            if (!options?.overrideDepth && (intent === 'follow_up' || intent === 'compare' || intent === 'summarize')) {
+              // tag for later depth selection
+              (options as any) = { ...(options || {}), overrideDepth: 'specific' };
+            }
+          }
+        }
+      } catch {}
       const referencesActive = activeSubject
         ? userMessage.toLowerCase().includes(activeSubject.toLowerCase())
         : false;
