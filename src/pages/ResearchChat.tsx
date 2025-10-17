@@ -2535,7 +2535,11 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
           addToast({ type: 'error', title: 'No research to reference', description: 'Run company research before drafting outreach.' });
           return;
         }
-        const contacts = extractDecisionMakerContacts(latest.message.content || '');
+        const contacts = extractDecisionMakerContacts(
+          latest.message.content || '',
+          undefined,
+          Array.isArray(userProfile?.target_titles) ? userProfile.target_titles : undefined
+        );
         setEmailCandidates(contacts.map(contact => ({ name: contact.name, title: contact.title })));
         setEmailDialogLoading(false);
         setEmailDialogOpen(true);
@@ -2548,7 +2552,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
       default:
         return;
     }
-  }, [handleStartNewCompany, handleContinueCompany, currentActionCompany, addToast, findLatestResearchAssistant]);
+  }, [handleStartNewCompany, handleContinueCompany, currentActionCompany, addToast, findLatestResearchAssistant, userProfile?.target_titles]);
 
   const shortcutHandlers = useMemo<Record<string, () => void>>(() => {
     const handlers: Record<string, () => void> = {};

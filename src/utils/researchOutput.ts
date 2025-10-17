@@ -237,8 +237,27 @@ const CONTACT_SECTION_LABELS = [
 ];
 
 const TITLE_KEYWORDS = /(chief|ciso|security|cio|cto|technology|information|risk|compliance|privacy|trust|data|vp|vice president|svp|evp|director|head|lead|manager)/i;
+const STOP_WORDS = new Set(['and', 'of', 'the', 'for', 'global', 'senior', 'team', 'head', 'lead', 'manager', 'vp', 'svp', 'evp']);
 
-export function extractDecisionMakerContacts(markdown: string | null | undefined, max = 6): ResearchContact[] {
+const buildTargetKeywords = (titles?: string[]): string[] => {
+  if (!Array.isArray(titles) || !titles.length) return [];
+  const keywords = new Set<string>();
+  titles.forEach(title => {
+    if (!title || typeof title !== 'string') return;
+    title.toLowerCase().split(/[^a-z0-9]+/).forEach(token => {
+      if (token.length >= 3 && !STOP_WORDS.has(token)) {
+        keywords.add(token);
+      }
+    });
+  });
+  return Array.from(keywords);
+};
+
+export function extractDecisionMakerContacts(
+  markdown: string | null | undefined,
+  max = 6,
+  targetTitles?: string[]
+): ResearchContact[] {
   if (!markdown) return [];
   let section: string | null = null;
   for (const label of CONTACT_SECTION_LABELS) {
@@ -256,7 +275,16 @@ export function extractDecisionMakerContacts(markdown: string | null | undefined
     .filter(line => line && !/^\|?\s*-{3,}\s*\|?$/i.test(line) && !/^##\s+/i.test(line));
 
   const contacts: ResearchContact[] = [];
-  const hasRoleKeywords = (value?: string | null) => Boolean(value && TITLE_KEYWORDS.test(value));
+  const targetKeywords = buildTargetKeywords(targetTitles);
+  const hasRoleKeywords = (value?: string | null) => {
+    if (!value) return false;
+    if (TITLE_KEYWORDS.test(value)) {
+      TITLE_KEYWORDS.lastIndex = 0;
+      return true;
+    }
+    const lower = value.toLowerCase();
+    return targetKeywords.some(keyword => lower.includes(keyword));
+  };
   const sanitizeName = (value: string) => value.replace(/[*_`]/g, '').trim();
   const sanitizeTitle = (value: string) => value.replace(/[*_`]/g, '').trim();
 
