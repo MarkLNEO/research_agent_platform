@@ -160,15 +160,29 @@ function formatSection(title: string, body: string | undefined): string | null {
   return `${title.toUpperCase()}\n${body.trim()}`;
 }
 
+const normalizeTargetTitles = (raw: unknown): string[] => {
+  if (Array.isArray(raw)) {
+    return raw
+      .map(value => (typeof value === 'string' ? value.trim() : ''))
+      .filter(Boolean);
+  }
+  if (typeof raw === 'string' && raw.trim().length) {
+    return raw
+      .split(/[,;\n]+/)
+      .map(value => value.trim())
+      .filter(Boolean);
+  }
+  return [];
+};
+
 function serializeProfile(profile?: NullableRecord): string {
   if (!profile) return '';
   const lines: string[] = [];
   if (profile.company_name) lines.push(`Company: ${profile.company_name}`);
   if (profile.company_url) lines.push(`Website: ${profile.company_url}`);
   if (profile.industry) lines.push(`Industry: ${profile.industry}`);
-  if (Array.isArray(profile.target_titles) && profile.target_titles.length) {
-    lines.push(`Target titles: ${profile.target_titles.join(', ')}`);
-  }
+  const normalizedTitles = normalizeTargetTitles(profile.target_titles);
+  if (normalizedTitles.length) lines.push(`Target titles: ${normalizedTitles.join(', ')}`);
   if (profile.icp_definition) lines.push(`ICP definition: ${profile.icp_definition}`);
   if (profile.use_case) lines.push(`Use case focus: ${profile.use_case}`);
   return lines.join('\n');
@@ -286,11 +300,13 @@ export function buildSystemPrompt(
 
   const profile = userContext.profile || {};
   const contextLens: string[] = [];
+  const targetTitles = normalizeTargetTitles(profile.target_titles);
+
   if (profile.icp_definition || profile.icp || profile.industry) {
     contextLens.push(`- ICP: Tie headline insights and "Why Now" directly to ${profile.icp_definition || profile.icp || profile.industry}. Explain fit through this lens.`);
   }
-  if (Array.isArray(profile.target_titles) && profile.target_titles.length) {
-    contextLens.push(`- Target titles (${profile.target_titles.join(', ')}): Prioritize these roles in Deal Strategy and Decision Makers; spell out why each matters.`);
+  if (targetTitles.length) {
+    contextLens.push(`- Target titles (${targetTitles.join(', ')}): Prioritize these roles in Deal Strategy and Decision Makers; spell out why each matters.`);
   }
   const criteriaNames = (userContext.customCriteria || []).map((c: any) => c?.field_name).filter(Boolean);
   if (criteriaNames.length) {
@@ -303,7 +319,7 @@ export function buildSystemPrompt(
   if (contextLens.length) {
     extras.push(`Context expectations:\n${contextLens.join('\n')}\n- Thread these preferences through every section; the brief should feel tailored to this profile.`);
   }
-  if (contextLens.length && Array.isArray(profile.target_titles) && profile.target_titles.length) {
+  if (contextLens.length && targetTitles.length) {
     extras.push('Decision Maker guidance: Where possible, surface contacts that align with saved target titles and include personalization drawn from those roles.');
     extras.push('Leadership guidance: In the Leadership/Decision Makers sections, actively search for the saved target titles (and close adjacencies—e.g., VP RevOps vs. Head of Revenue Operations). If you cannot find exact matches, surface the closest relevant roles and explain the overlap. Always cite why each surfaced contact maps to the user’s priorities.');
   }
