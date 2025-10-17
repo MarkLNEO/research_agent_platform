@@ -1260,13 +1260,23 @@ useEffect(() => {
       setSaveOpen(false);
       const latestId = getLatestResearchMessageId();
       if (latestId) setRecentlySavedMessageId(latestId);
-      addToast({
-        type: 'success',
-        title: 'Saved to history',
-        description: 'Find it in Research History → Recent saved. Track this account to see it on your dashboard.',
-        actionText: 'Open history',
-        onAction: () => navigate('/research')
-      });
+      if (activeSubject && activeSubject.trim().length > 0) {
+        addToast({
+          type: 'success',
+          title: 'Saved to history',
+          description: `Track ${activeSubject} to see updates on your dashboard.`,
+          actionText: 'Track account',
+          onAction: () => { void handleTrackAccount(activeSubject); }
+        });
+      } else {
+        addToast({
+          type: 'success',
+          title: 'Saved to history',
+          description: 'Find it in Research History → Recent saved.',
+          actionText: 'Open history',
+          onAction: () => navigate('/research')
+        });
+      }
     } catch (e: any) {
       setSaveError(e?.message || 'Failed to save research');
       addToast({ type: 'error', title: 'Save failed', description: 'Could not save this response. Try again.' });
@@ -3281,9 +3291,13 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                       <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">F</kbd>{' '}
                       follow-up •{' '}
                       <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">C</kbd>{' '}
-                      refresh •{' '}
-                      <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">E</kbd>{' '}
-                      email •{' '}
+                      refresh{DRAFT_EMAIL_ENABLED ? (
+                        <>
+                          {' '}•{' '}
+                          <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">E</kbd>{' '}
+                          email
+                        </>
+                      ) : null} •{' '}
                       <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">R</kbd> refine
                     </div>
                   </div>

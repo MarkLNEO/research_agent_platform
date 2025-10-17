@@ -240,7 +240,7 @@ export function Settings() {
                     <span className="mt-0.5 text-xs text-gray-400">{idx + 1}.</span>
                     <div>
                       <span className="font-medium text-gray-900">{criterion.field_name}</span>
-                      <span className="ml-2 text-xs text-gray-500">{criterion.field_type} • {criterion.importance}</span>
+                        <span className="ml-2 text-xs text-gray-500">{criterion.importance}</span>
                     </div>
                   </li>
                 ))}
