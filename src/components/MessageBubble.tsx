@@ -1,4 +1,4 @@
-import { ThumbsUp, ThumbsDown, Copy, RotateCcw, Coins, Building2, CheckCircle2 } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, Copy, RotateCcw, Coins, Building2, CheckCircle2, Target } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Streamdown } from 'streamdown';
 import { useToast } from './ToastProvider';
@@ -400,7 +400,29 @@ export function MessageBubble({
   return (
     <div className="space-y-3" data-testid="message-assistant">
       {(assumed || onModeChange || selectableMode) && (
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="space-y-2">
+          {assumed && (
+            <div className="w-full flex items-center justify-between rounded-xl border border-amber-300 bg-amber-50/90 px-3 py-2 shadow-sm">
+              <div className="flex items-center gap-2 text-amber-900">
+                <Target className="w-4 h-4" />
+                <span className="text-xs font-semibold uppercase tracking-wide">Assumed</span>
+                <span className="text-sm font-semibold">{assumed.name}</span>
+                {assumed.industry ? (
+                  <span className="text-xs text-amber-800">— {assumed.industry}</span>
+                ) : null}
+              </div>
+              {onAssumedChange && (
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-amber-800 underline hover:text-amber-900"
+                  onClick={() => onAssumedChange(assumed)}
+                  aria-label="Change assumed company"
+                >
+                  Change
+                </button>
+              )}
+            </div>
+          )}
           {onModeChange && (
             <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-full px-2 py-1">
               <span className="text-[10px] font-semibold uppercase text-gray-500">Mode</span>
@@ -419,21 +441,6 @@ export function MessageBubble({
                 </button>
               ))}
             </div>
-          )}
-          {assumed && (
-            <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full border border-amber-200 bg-amber-50 text-amber-700 inline-flex items-center gap-1">
-              <span>Assumed: {assumed.name}{assumed.industry ? ` — ${assumed.industry}` : ''}</span>
-              {onAssumedChange && (
-                <button
-                  type="button"
-                  className="ml-1 underline text-amber-800 hover:text-amber-900"
-                  onClick={() => onAssumedChange(assumed)}
-                  aria-label="Change assumed company"
-                >
-                  change
-                </button>
-              )}
-            </span>
           )}
         </div>
       )}
