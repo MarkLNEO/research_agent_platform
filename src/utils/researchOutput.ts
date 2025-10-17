@@ -342,6 +342,14 @@ export function extractDecisionMakerContacts(
       return;
     }
 
+    const titleNameMatch = line.match(/^(.{3,80})\s*\(([A-Z][A-Za-z' .-]{1,80})\)/);
+    if (titleNameMatch) {
+      const title = titleNameMatch[1].trim();
+      const name = titleNameMatch[2].trim();
+      addContact(name, title);
+      return;
+    }
+
     const words = line.split(/\s+-\s+/);
     if (words.length >= 2) {
       addContact(words[0], words[1]);
