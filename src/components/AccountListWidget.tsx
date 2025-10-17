@@ -145,12 +145,16 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
               <Building2 className="w-4 h-4" />
               Tracked Accounts
             </h3>
-            <p className="text-xs text-gray-500 mt-1">
-              Monitoring {stats.total} strategic accounts for signal spikes, leadership changes, and stalled follow-ups.
-            </p>
-            <p className="text-xs text-gray-500 mt-2" id="account-priority-helper">
-              Hot accounts triggered recent critical signals, Warm accounts show emerging momentum, and Stale accounts have not been refreshed in over 14 days.
-            </p>
+            {stats.total === 0 ? (
+              <>
+                <p className="text-xs text-gray-500 mt-1">
+                  Monitoring 0 strategic accounts. Track a company to see it here.
+                </p>
+                <p className="text-xs text-gray-500 mt-2" id="account-priority-helper">
+                  Hot accounts triggered recent critical signals, Warm accounts show momentum, and Stale accounts haven’t been refreshed in 14+ days.
+                </p>
+              </>
+            ) : null}
           </div>
           <div className="flex items-center gap-1">
             <button
@@ -187,7 +191,7 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
           className="flex flex-wrap gap-2"
           role="tablist"
           aria-label="Account priority filters"
-          aria-describedby="account-priority-helper"
+          aria-describedby={stats.total === 0 ? 'account-priority-helper' : undefined}
         >
           {filterOptions.map(option => (
             <button
