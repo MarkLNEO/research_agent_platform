@@ -165,7 +165,7 @@ function serializeCriteria(criteria) {
         return '';
     return criteria
         .map((c, idx) => {
-        const name = c?.field_name || `Criterion ${idx + 1}`;
+        const name = c?.field_name || c?.name || `Criterion ${idx + 1}`;
         const importance = c?.importance ? ` (${c.importance})` : '';
         return `- ${name}${importance}`;
     })
@@ -276,7 +276,9 @@ export function buildSystemPrompt(userContext, agentType = 'company_research', r
     if (targetTitles.length) {
         contextLens.push(`- Target titles (${targetTitles.join(', ')}): Prioritize these roles in Deal Strategy and Decision Makers; spell out why each matters.`);
     }
-    const criteriaNames = (userContext.customCriteria || []).map((c) => c?.field_name).filter(Boolean);
+    const criteriaNames = (userContext.customCriteria || [])
+        .map((c) => c?.field_name || c?.name)
+        .filter(Boolean);
     if (criteriaNames.length) {
         contextLens.push(`- Custom criteria (${criteriaNames.join(', ')}): Evaluate each item with Met / Not met / Unknown and cite evidence.`);
     }
