@@ -2554,6 +2554,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
     }
   }, [handleStartNewCompany, handleContinueCompany, currentActionCompany, addToast, findLatestResearchAssistant, userProfile?.target_titles]);
 
+  const DRAFT_EMAIL_ENABLED = !import.meta.env.PROD;
   const shortcutHandlers = useMemo<Record<string, () => void>>(() => {
     const handlers: Record<string, () => void> = {};
     if (!actionBarVisible || streamingMessage) {
@@ -2562,7 +2563,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
     handlers.n = () => { void handleActionBarAction('new'); };
     handlers.f = () => { void handleActionBarAction('follow_up'); };
     handlers.c = () => { void handleActionBarAction('continue'); };
-    if (canDraftEmail) handlers.e = () => { void handleActionBarAction('email'); };
+    if (DRAFT_EMAIL_ENABLED && canDraftEmail) handlers.e = () => { void handleActionBarAction('email'); };
     handlers.r = () => { void handleActionBarAction('refine'); };
     return handlers;
   }, [actionBarVisible, streamingMessage, handleActionBarAction, canDraftEmail]);
@@ -3327,7 +3328,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     >
                       ↺ {refreshLabel}
                     </button>
-                    {(!lastIsDraftEmail) && (
+                    {DRAFT_EMAIL_ENABLED && (!lastIsDraftEmail) && (
                       <button
                         className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 transition-colors ${
                           draftEmailPending
@@ -3363,7 +3364,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     )}
                   </div>
                   <div className="mt-3 text-xs text-gray-500 sm:hidden">
-                    Shortcuts: N new • F follow-up • C refresh • E email • R refine
+                    Shortcuts: N new • F follow-up • C refresh{DRAFT_EMAIL_ENABLED ? ' • E email' : ''} • R refine
                   </div>
                   <label className="mt-3 inline-flex items-center gap-2 text-xs text-gray-600">
                     <input
