@@ -162,7 +162,22 @@ export default async function handler(req, res) {
                         return !d || (Date.now() - d) > (14 * 24 * 60 * 60 * 1000);
                     }).length,
                 };
-                const untracked = Array.from(untrackedMap.values()).slice(0, 30);
+                // Filter untracked research to exclude low-fit or junk subjects
+                const untracked = Array.from(untrackedMap.values())
+                    .filter((row) => {
+                    try {
+                        // Prefer items with reasonable subject names
+                        const subject = String(row.subject || '').trim();
+                        if (!subject || subject.length < 2)
+                            return false;
+                        // If icp_fit_score is present, require at least 30
+                        if (typeof row.icp_fit_score === 'number' && row.icp_fit_score < 30)
+                            return false;
+                    }
+                    catch { }
+                    return true;
+                })
+                    .slice(0, 30);
                 return res.status(200).json({
                     success: true,
                     accounts: enrichedAccounts,

@@ -7,26 +7,26 @@ export default async function handler(req, res) {
         return res.status(200).end();
     const term = (req.method === 'GET' ? req.query.term : req.body?.term);
     if (!term || term.trim().length < 2)
-        return res.status(400).json({ error: 'term is required' });
+        return res.status(400).json({ code: 'bad_request', message: 'term is required', error: 'term is required' });
     try {
         const authHeader = req.headers.authorization;
         if (!authHeader)
-            return res.status(401).json({ error: 'Authorization header required' });
+            return res.status(401).json({ code: 'unauthorized', message: 'Authorization header required', error: 'Authorization header required' });
         const SUPABASE_URL = process.env.SUPABASE_URL;
         const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
         const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
         if (!SUPABASE_URL || !SERVICE_KEY || !OPENAI_API_KEY)
-            return res.status(500).json({ error: 'Server not configured' });
+            return res.status(500).json({ code: 'server_config_error', message: 'Server not configured', error: 'Server not configured' });
         const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
         const token = authHeader.replace('Bearer ', '');
         const { data: { user }, error: authError } = await supabase.auth.getUser(token);
         if (authError || !user)
-            return res.status(401).json({ error: 'Authentication failed' });
+            return res.status(401).json({ code: 'unauthorized', message: 'Authentication failed', error: 'Authentication failed' });
         try {
             assertEmailAllowed(user.email);
         }
         catch (e) {
-            return res.status(e.statusCode || 403).json({ error: e.message });
+            return res.status(e.statusCode || 403).json({ code: 'access_denied', message: e.message, error: e.message });
         }
         const openai = new OpenAI({ apiKey: OPENAI_API_KEY, project: process.env.OPENAI_PROJECT });
         const instructions = [
@@ -74,6 +74,6 @@ export default async function handler(req, res) {
     }
     catch (err) {
         console.error('companies/resolve error', err);
-        return res.status(500).json({ error: err?.message || 'Internal error' });
+        return res.status(500).json({ code: 'internal_error', message: err?.message || 'Internal error', error: err?.message || 'Internal error' });
     }
 }

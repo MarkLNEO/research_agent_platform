@@ -328,6 +328,17 @@ export function BulkResearchStatus({ onJobComplete }: BulkResearchStatusProps) {
                   </button>
                 )}
                 
+                {job.results && job.results.length > 0 && job.status !== 'completed' && (
+                  <button
+                    onClick={() => downloadResults(job)}
+                    className="flex items-center gap-1 px-3 py-1 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors"
+                    title="Download partial results"
+                  >
+                    <Download size={14} />
+                    Download partial
+                  </button>
+                )}
+
                 {job.status === 'completed' && job.results && (
                   <button
                     onClick={() => downloadResults(job)}
@@ -351,7 +362,7 @@ export function BulkResearchStatus({ onJobComplete }: BulkResearchStatusProps) {
               </div>
             )}
 
-            {job.status === 'completed' && job.results && (
+            {job.results && (
               <div className="mt-3 text-sm text-gray-600">
                 <div className="flex items-center gap-4">
                   <span className="flex items-center gap-1">
@@ -365,6 +376,16 @@ export function BulkResearchStatus({ onJobComplete }: BulkResearchStatusProps) {
                     </span>
                   )}
                 </div>
+                {job.results.filter(r => r.status === 'failed').length > 0 && (
+                  <div className="mt-2 bg-red-50 border border-red-200 rounded p-2">
+                    <div className="text-red-700 font-medium mb-1">Recent errors</div>
+                    <ul className="list-disc list-inside text-red-700 space-y-1">
+                      {job.results.filter(r => r.status === 'failed').slice(-3).map((r, idx) => (
+                        <li key={idx}><span className="font-semibold">{r.company}:</span> {r.error || 'Unknown error'}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
 
