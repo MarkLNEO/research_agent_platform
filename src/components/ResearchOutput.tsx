@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useToast } from './ToastProvider';
 import { Download, FileText, TrendingUp, Zap, Users, Target, Lightbulb, HelpCircle } from 'lucide-react';
 import { OptimizeICPModal } from './OptimizeICPModal';
 
@@ -70,6 +71,8 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
   const [showIcpWhy, setShowIcpWhy] = useState(false);
   const [optimizeOpen, setOptimizeOpen] = useState(false);
   const [enriched, setEnriched] = useState<Record<string, { email?: string; linkedin_url?: string | null }>>({});
+  const [enriching, setEnriching] = useState(false);
+  const { addToast } = useToast();
 
   const domain = useMemo(() => {
     try {
@@ -82,26 +85,59 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
 
   useEffect(() => {
     let canceled = false;
+    // Auto-attempt enrichment shortly after mount for convenience
     (async () => {
       try {
-        if (!domain) return;
-        const names = (Array.isArray(research?.leadership_team) ? research.leadership_team : []).slice(0, 6).map((l: any) => ({ name: l?.name || '', title: l?.title || l?.role || '' })).filter(x => x.name);
-        if (names.length === 0) return;
-        const resp = await fetch('/api/contacts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domain, names, limit: 6 }) });
-        if (!resp.ok) return;
-        const data = await resp.json();
-        if (canceled) return;
-        const map: Record<string, { email?: string; linkedin_url?: string | null }> = {};
-        for (const c of (data?.contacts || [])) {
-          map[(c.name || '').toLowerCase()] = { email: c.email || undefined, linkedin_url: c.linkedin_url || null };
-        }
-        setEnriched(map);
-      } catch {
-        // graceful fallback
-      }
+        await runEnrichment(false, () => canceled);
+      } catch {}
     })();
     return () => { canceled = true; };
   }, [domain, research?.leadership_team]);
+
+  // Extract a domain from markdown/sources if structured company_data is missing
+  const extractDomainFallback = (): string => {
+    const text = [research?.markdown_report || '', JSON.stringify(research?.sources || {})].join('\n');
+    const subject = String(research?.subject || '').toLowerCase();
+    const matches = Array.from(text.matchAll(/\b(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)\b/gi));
+    const candidates = matches.map(m => (m[1] || '').toLowerCase()).filter(Boolean);
+    // Prefer domains containing the subject keyword
+    const preferred = candidates.find(d => subject && d.includes(subject.replace(/[^a-z0-9]/g, '')));
+    return preferred || candidates[0] || '';
+  };
+
+  const runEnrichment = async (manual = false, isCanceled?: () => boolean) => {
+    try {
+      const names = (Array.isArray(research?.leadership_team) ? research.leadership_team : []).slice(0, 6).map((l: any) => ({ name: l?.name || '', title: l?.title || l?.role || '' })).filter(x => x.name);
+      if (names.length === 0) return;
+      const resolved = domain || extractDomainFallback();
+      if (!resolved) {
+        if (manual) addToast({ type: 'info', title: 'No website found', description: 'Add a company website or include it in your research (e.g., “Research Acme (acme.com)”)' });
+        return;
+      }
+      setEnriching(true);
+      const resp = await fetch('/api/contacts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domain: resolved, names, limit: 6 }) });
+      if (isCanceled && isCanceled()) return;
+      if (!resp.ok) {
+        if (manual) addToast({ type: 'error', title: 'Verification failed', description: await resp.text().catch(() => 'Unknown error') });
+        return;
+      }
+      const data = await resp.json();
+      if (isCanceled && isCanceled()) return;
+      const map: Record<string, { email?: string; linkedin_url?: string | null }> = {};
+      for (const c of (data?.contacts || [])) {
+        map[(c.name || '').toLowerCase()] = { email: c.email || undefined, linkedin_url: c.linkedin_url || null };
+      }
+      setEnriched(map);
+      const count = Object.values(map).filter(x => x.email).length;
+      if (manual) {
+        addToast({ type: count > 0 ? 'success' : 'info', title: count > 0 ? `Found ${count} verified email${count === 1 ? '' : 's'}` : 'No verified emails found', description: count > 0 ? 'Verified emails are now shown under contacts.' : 'Some domains do not validate publicly.' });
+      }
+    } catch (e: any) {
+      if (manual) addToast({ type: 'error', title: 'Verification error', description: e?.message || 'Please try again.' });
+    } finally {
+      setEnriching(false);
+    }
+  };
   return (
     <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 space-y-6" data-testid="research-output">
       {/* Header */}
@@ -264,7 +300,23 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
       {/* Decision Makers */}
       {research.leadership_team && research.leadership_team.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl p-5" data-testid="research-section-decision-makers">
-          <h4 className="font-semibold text-gray-900 mb-4">Decision Makers</h4>
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="font-semibold text-gray-900">Decision Makers</h4>
+            <div className="flex items-center gap-2">
+              {enriching && (
+                <span className="text-xs text-gray-600">Verifying emails…</span>
+              )}
+              <button
+                type="button"
+                onClick={() => { void runEnrichment(true); }}
+                disabled={enriching}
+                className={`px-3 py-1.5 text-xs rounded-lg border ${enriching ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50'}`}
+                title="Verify and show decision-maker emails"
+              >
+                {enriching ? 'Verifying…' : 'Get verified emails'}
+              </button>
+            </div>
+          </div>
           <div className="space-y-3">
             {research.leadership_team.map((leader: any, idx: number) => (
               <div key={idx} className="flex items-start gap-3 pb-3 border-b border-gray-100 last:border-0">
