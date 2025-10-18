@@ -135,7 +135,12 @@ export function useUserProfile(forceRefresh = false) {
 
   const isProfileComplete = useCallback(() => {
     const { profile } = profileData;
-    if (!profile) return false;
+    if (!profile) {
+      try {
+        // Temporary bypass when onboarding just finished client-side
+        return window.localStorage.getItem('onboardingComplete') === '1';
+      } catch { return false; }
+    }
 
     // If onboarding is explicitly marked as complete, allow access to dashboard
     if (profile.onboarding_complete) return true;

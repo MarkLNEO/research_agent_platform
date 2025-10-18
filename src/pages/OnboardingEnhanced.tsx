@@ -340,11 +340,9 @@ export function OnboardingEnhanced() {
               company_name: finalName,
               company_url: sanitizedUrl
             });
-
-            setCurrentStep(3);
-            await addAgentMessage(
-              `Got it — I'll research for ${finalName}.\n\nNow, what's your role?\n\n• BDR/SDR (finding new prospects)\n• AE (researching existing accounts)\n• Marketing\n• Other`
-            );
+            // Ask for confirmation before proceeding
+            setConfirmPending({ name: finalName, url: sanitizedUrl });
+            await addAgentMessage(`We've set up your profile for ${finalName} • ${sanitizedUrl}.\n\nIs this correct? (yes/no)`);
             break;
           } catch {
             await addAgentMessage("That looks like a partial link. Paste the full domain (e.g., acme.com) or type the company name and I'll look it up for you.");
@@ -847,6 +845,12 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
     } else {
       invalidateUserProfileCache(user.id);
     }
+
+    try {
+      // Bypass HomeGate while caches settle
+      window.localStorage.setItem('skipHomeGate', '1');
+      window.localStorage.setItem('onboardingComplete', '1');
+    } catch {}
 
     navigate('/', { replace: true });
     // Best-effort: default research preference to 'deep' without blocking
