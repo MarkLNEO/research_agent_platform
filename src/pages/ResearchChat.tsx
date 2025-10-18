@@ -1543,33 +1543,31 @@ useEffect(() => {
       detectedCompany = extractCompanyNameFromQuery(`research ${continuationTarget}`);
     }
 
-    // Only set active subject if the extracted value looks like a proper entity,
-    // and not a generic follow-up question like "who is the ceo?"
+    // Guardrail: if this looks like research but the subject is nonsense or low-confidence,
+    // open suggestions dialog instead of spending credits AND do not set activeSubject.
     const isWHQuestion = /^(who|what|when|where|which|why|how)\b/i.test(normalized);
     const endsWithQuestion = /\?\s*$/.test(normalized);
-    if (!isWHQuestion && !endsWithQuestion && (looksLikeResearch || continuationTarget) && isLikelySubject(detectedCompany)) {
-      setActiveSubject(detectedCompany);
-    }
-    if (!isWHQuestion && !endsWithQuestion && (looksLikeResearch || continuationTarget) && isLikelySubject(detectedCompany) && detectedCompany && detectedCompany !== activeSubject) {
-      lastResearchSummaryRef.current = '';
-    }
-
-    // Guardrail: if this looks like research but the subject is nonsense or low-confidence, open suggestions dialog instead of spending credits.
     if (looksLikeResearch) {
       const candidate = sanitizeCandidate(detectedCompany || normalized);
       if (isGibberish(candidate) || !isLikelySubject(detectedCompany || candidate)) {
-        // Open the assumed-subject dialog and fetch suggestions; do not proceed to LLM.
         setAssumedDialogName(candidate);
         setAssumedDialogIndustry(null);
         setAssumedDialogOpen(true);
         try { await loadAssumedSuggestions(candidate); } catch {}
-        // Remove the temp user message since we aren't sending it to the server
         setMessages(prev => prev.filter(m => m.id !== tempUser.id));
         setLoading(false);
         setStreamingMessage('');
         setThinkingEvents([]);
         return;
       }
+    }
+
+    // Only set active subject if value looks like a proper entity
+    if (!isWHQuestion && !endsWithQuestion && (looksLikeResearch || continuationTarget) && isLikelySubject(detectedCompany)) {
+      setActiveSubject(detectedCompany);
+    }
+    if (!isWHQuestion && !endsWithQuestion && (looksLikeResearch || continuationTarget) && isLikelySubject(detectedCompany) && detectedCompany && detectedCompany !== activeSubject) {
+      lastResearchSummaryRef.current = '';
     }
 
     if (isGenericHelp) {

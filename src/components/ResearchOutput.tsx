@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Download, FileText, TrendingUp, Zap, Users, Target, Lightbulb, HelpCircle } from 'lucide-react';
 import { OptimizeICPModal } from './OptimizeICPModal';
 
@@ -69,6 +69,39 @@ function PriorityBadge({ level }: { level?: string }) {
 export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchOutputProps) {
   const [showIcpWhy, setShowIcpWhy] = useState(false);
   const [optimizeOpen, setOptimizeOpen] = useState(false);
+  const [enriched, setEnriched] = useState<Record<string, { email?: string; linkedin_url?: string | null }>>({});
+
+  const domain = useMemo(() => {
+    try {
+      const raw = research?.company_data?.website || research?.company_data?.domain || '';
+      if (!raw) return '';
+      const u = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
+      return u.hostname.replace(/^www\./, '');
+    } catch { return ''; }
+  }, [research?.company_data]);
+
+  useEffect(() => {
+    let canceled = false;
+    (async () => {
+      try {
+        if (!domain) return;
+        const names = (Array.isArray(research?.leadership_team) ? research.leadership_team : []).slice(0, 6).map((l: any) => ({ name: l?.name || '', title: l?.title || l?.role || '' })).filter(x => x.name);
+        if (names.length === 0) return;
+        const resp = await fetch('/api/contacts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domain, names, limit: 6 }) });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (canceled) return;
+        const map: Record<string, { email?: string; linkedin_url?: string | null }> = {};
+        for (const c of (data?.contacts || [])) {
+          map[(c.name || '').toLowerCase()] = { email: c.email || undefined, linkedin_url: c.linkedin_url || null };
+        }
+        setEnriched(map);
+      } catch {
+        // graceful fallback
+      }
+    })();
+    return () => { canceled = true; };
+  }, [domain, research?.leadership_team]);
   return (
     <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 space-y-6" data-testid="research-output">
       {/* Header */}
@@ -243,6 +276,13 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
                 <div className="flex-1">
                   <div className="font-semibold text-gray-900">{leader.name}</div>
                   <div className="text-sm text-gray-600">{leader.title || leader.role}</div>
+                  {enriched[String(leader.name || '').toLowerCase()]?.email && (
+                    <div className="text-sm text-gray-700">
+                      <a href={`mailto:${enriched[String(leader.name || '').toLowerCase()].email}`} className="text-blue-700 hover:underline">
+                        {enriched[String(leader.name || '').toLowerCase()].email}
+                      </a>
+                    </div>
+                  )}
                   {leader.linkedin && (
                     <a
                       href={leader.linkedin}

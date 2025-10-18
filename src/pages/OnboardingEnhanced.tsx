@@ -107,6 +107,7 @@ export function OnboardingEnhanced() {
   const [currentCriterionIndex, setCurrentCriterionIndex] = useState(-1);
   const [currentCriterionStep, setCurrentCriterionStep] = useState<'importance' | null>(null);
   const [tempCriterion, setTempCriterion] = useState<Partial<CustomCriterion>>({});
+  const [confirmPending, setConfirmPending] = useState<{ name: string; url?: string } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -147,7 +148,13 @@ export function OnboardingEnhanced() {
         .eq('user_id', user.id)
         .maybeSingle();
 
-      if (data?.onboarding_complete) {
+      // Sanitize any placeholder company_name saved from older runs
+      if (data?.company_name && isGenericPlaceholder(String(data.company_name))) {
+        await supabase.from('company_profiles').update({ company_name: null }).eq('user_id', user.id);
+        data.company_name = null as any;
+      }
+
+      if (data?.onboarding_complete && data?.company_name) {
         navigate('/');
       } else if (data) {
         // Load any saved values, but always start at the welcome card for clarity
@@ -287,6 +294,28 @@ export function OnboardingEnhanced() {
   const processUserInput = async (input: string) => {
     const lowerInput = input.toLowerCase();
 
+    // Global intercept for confirmation prompt
+    if (confirmPending) {
+      if (/(^y(es)?$)|(^correct$)/i.test(lowerInput)) {
+        // Proceed to role step
+        setConfirmPending(null);
+        setCurrentStep(3);
+        await addAgentMessage(
+          `Great — I'll use ${confirmPending.name}.\n\nNow, what's your role?\n\n• BDR/SDR (finding new prospects)\n• AE (researching existing accounts)\n• Marketing\n• Other`
+        );
+        return;
+      }
+      if (/(^n(o)?$)|(^change$)|(^edit$)/i.test(lowerInput)) {
+        setConfirmPending(null);
+        setProfileData(prev => ({ ...prev, companyName: '', companyUrl: '' }));
+        setCurrentStep(1);
+        await addAgentMessage('No problem — what\'s your company name? You can paste the website instead.');
+        return;
+      }
+      await addAgentMessage('Please reply "yes" to confirm or "no" to edit.');
+      return;
+    }
+
     switch (currentStep) {
       case 1: {
         const affirmations = ['yes', 'y', 'correct', 'same', 'unchanged', 'no change', 'yep', 'yeah'];
@@ -362,10 +391,8 @@ export function OnboardingEnhanced() {
             company_name: profileData.companyName,
             company_url: url
           });
-          setCurrentStep(3);
-          await addAgentMessage(
-            `Got it! Now, what's your role?\n\nType one of these or describe your role:\n• BDR/SDR (finding new prospects)\n• AE (researching existing accounts)\n• Marketing\n• Other`
-          );
+          setConfirmPending({ name: profileData.companyName || deriveCompanyNameFromUrl(url), url });
+          await addAgentMessage(`We've set up your profile for ${profileData.companyName || deriveCompanyNameFromUrl(url)} • ${url}.\n\nIs this correct? (yes/no)`);
         } catch {
           await addAgentMessage("That doesn't look like a valid URL. Try again? (e.g., 'acmecorp.com')");
         }

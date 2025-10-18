@@ -19,6 +19,7 @@ export function BulkResearchDialog({ isOpen, onClose, onSuccess }: BulkResearchD
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputId = 'bulk-research-file-input';
   const { addToast } = useToast();
 
   if (!isOpen) return null;
@@ -264,18 +265,16 @@ export function BulkResearchDialog({ isOpen, onClose, onSuccess }: BulkResearchD
                 Drag and drop your CSV file here
               </p>
               <p className="text-sm text-gray-600 mb-4">or</p>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
-              >
+              <label htmlFor={inputId} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors cursor-pointer">
                 Browse Files
-              </button>
+              </label>
               <input
+                id={inputId}
                 ref={fileInputRef}
                 type="file"
-                accept=".csv"
+                accept="text/csv,.csv,application/vnd.ms-excel"
                 onChange={handleFileInput}
-                className="hidden"
+                className="sr-only"
               />
             </div>
           ) : (

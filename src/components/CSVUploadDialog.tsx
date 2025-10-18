@@ -23,6 +23,7 @@ export function CSVUploadDialog({ isOpen, onClose, onSuccess }: CSVUploadDialogP
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputId = 'accounts-csv-file-input';
   const { addToast } = useToast();
 
   if (!isOpen) return null;
@@ -210,18 +211,16 @@ Raytheon,https://rtx.com,Aerospace & Defense,181000`;
                   Drag and drop your CSV file here
                 </p>
                 <p className="text-sm text-gray-600 mb-4">or</p>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
-                >
+                <label htmlFor={inputId} className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors cursor-pointer">
                   Browse Files
-                </button>
+                </label>
                 <input
+                  id={inputId}
                   ref={fileInputRef}
                   type="file"
-                  accept=".csv"
+                  accept="text/csv,.csv,application/vnd.ms-excel"
                   onChange={handleFileInput}
-                  className="hidden"
+                  className="sr-only"
                 />
               </div>
             </>
