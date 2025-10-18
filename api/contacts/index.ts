@@ -18,6 +18,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const domain = (body.domain || '').trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
     const names = Array.isArray(body.names) ? body.names.slice(0, body.limit || 8) : [];
     const HUNTER_API_KEY = process.env.HUNTER_API_KEY;
+    const VERIFY_URL = process.env.VERIFY_EMAIL_URL || 'https://rapid-email-verifier.fly.dev/api/validate';
+    const ENABLE_VERIFY = (process.env.ENABLE_EMAIL_VERIFIER || 'true').toLowerCase() !== 'false';
 
     if (!domain) {
       return res.status(200).json({ contacts: [], message: 'No domain provided' });
@@ -27,7 +29,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ contacts: [], message: 'No provider key configured' });
     }
 
-    const out: Array<{ name: string; title?: string; email?: string; confidence?: number; linkedin_url?: string | null }> = [];
+    const out: Array<{ name: string; title?: string; email?: string; confidence?: number; linkedin_url?: string | null; verification?: { status?: string; valid?: boolean } }> = [];
+
+    async function verifyEmail(email: string): Promise<{ valid: boolean; status: string }> {
+      if (!ENABLE_VERIFY || !email) return { valid: false, status: 'skipped' };
+      try {
+        const url = new URL(VERIFY_URL);
+        url.searchParams.set('email', email);
+        const r = await fetch(url.toString(), { method: 'GET' });
+        const j: any = await r.json().catch(() => ({}));
+        const status = String(j?.status || j?.result || j?.message || (j?.valid ? 'valid' : 'unknown'));
+        const score = Number(j?.score || j?.confidence || (status === 'valid' ? 100 : 0));
+        const valid = Boolean(j?.valid === true || /^(valid|deliverable|ok)$/i.test(status) || score >= 100);
+        return { valid, status };
+      } catch {
+        return { valid: false, status: 'error' };
+      }
+    }
+
+    function buildPatterns(fullName: string, domainOnly: string): string[] {
+      const raw = String(fullName || '').trim();
+      const parts = raw.split(/\s+/).filter(Boolean);
+      if (parts.length < 2) return [];
+      const first = parts[0].toLowerCase().replace(/[^a-z]/g, '');
+      const last = parts[parts.length - 1].toLowerCase().replace(/[^a-z]/g, '');
+      const f = first[0] || '';
+      const l = last[0] || '';
+      const d = domainOnly.toLowerCase();
+      const candidates = [
+        `${first}.${last}@${d}`,
+        `${f}${last}@${d}`,
+        `${first}${l}@${d}`,
+        `${first}_${last}@${d}`,
+        `${first}-${last}@${d}`,
+        `${first}@${d}`,
+        `${last}@${d}`,
+        `${f}.${last}@${d}`,
+      ];
+      // de-dup
+      return Array.from(new Set(candidates));
+    }
 
     // Try direct name-based enrichment first (email-finder)
     for (const n of names) {
@@ -47,9 +88,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const j: any = await r.json();
         const email = j?.data?.email || null;
         const confidence = j?.data?.score || null;
-        out.push({ name: n.name, title: n.title, email: email || undefined, confidence: confidence || undefined, linkedin_url: null });
+        let verification: { valid?: boolean; status?: string } | undefined = undefined;
+        if (email) {
+          verification = await verifyEmail(email);
+          if (!verification.valid) {
+            // fallback to pattern generation when provider email isn't confidently valid
+            const patterns = buildPatterns(n.name, domain);
+            for (const p of patterns) {
+              const v = await verifyEmail(p);
+              if (v.valid) {
+                out.push({ name: n.name, title: n.title, email: p, confidence: 100, linkedin_url: null, verification: v });
+                verification = v;
+                break;
+              }
+            }
+          }
+        }
+        if (!verification || !verification.valid) {
+          out.push({ name: n.name, title: n.title, email: email || undefined, confidence: confidence || undefined, linkedin_url: null, verification });
+        }
       } catch {
-        out.push({ name: n.name, title: n.title, linkedin_url: null });
+        // If provider call fails, try patterns directly
+        const patterns = buildPatterns(n.name, domain);
+        let added = false;
+        for (const p of patterns) {
+          const v = await verifyEmail(p);
+          if (v.valid) {
+            out.push({ name: n.name, title: n.title, email: p, confidence: 100, linkedin_url: null, verification: v });
+            added = true;
+            break;
+          }
+        }
+        if (!added) out.push({ name: n.name, title: n.title, linkedin_url: null });
       }
     }
 
@@ -59,4 +129,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ code: 'internal_error', message: e?.message || 'Internal error' });
   }
 }
-
