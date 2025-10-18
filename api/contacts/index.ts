@@ -25,10 +25,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ contacts: [], message: 'No domain provided' });
     }
 
-    if (!HUNTER_API_KEY) {
-      return res.status(200).json({ contacts: [], message: 'No provider key configured' });
-    }
-
     const out: Array<{ name: string; title?: string; email?: string; confidence?: number; linkedin_url?: string | null; verification?: { status?: string; valid?: boolean } }> = [];
 
     async function verifyEmail(email: string): Promise<{ valid: boolean; status: string }> {
@@ -70,56 +66,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return Array.from(new Set(candidates));
     }
 
-    // Try direct name-based enrichment first (email-finder)
+    // Enrichment strategy per contact: optional provider + pattern verification fallback
     for (const n of names) {
       const parts = String(n.name || '').trim().split(/\s+/);
-      if (parts.length < 2) continue;
+      if (parts.length < 2) { out.push({ name: n.name, title: n.title, linkedin_url: null }); continue; }
       const [first_name, ...rest] = parts;
       const last_name = rest.pop();
-      if (!first_name || !last_name) continue;
-      try {
-        const url = new URL('https://api.hunter.io/v2/email-finder');
-        url.searchParams.set('domain', domain);
-        url.searchParams.set('first_name', first_name);
-        url.searchParams.set('last_name', last_name);
-        url.searchParams.set('api_key', HUNTER_API_KEY);
-        const r = await fetch(url.toString());
-        if (!r.ok) throw new Error(`hunter finder ${r.status}`);
-        const j: any = await r.json();
-        const email = j?.data?.email || null;
-        const confidence = j?.data?.score || null;
-        let verification: { valid?: boolean; status?: string } | undefined = undefined;
-        if (email) {
-          verification = await verifyEmail(email);
-          if (!verification.valid) {
-            // fallback to pattern generation when provider email isn't confidently valid
-            const patterns = buildPatterns(n.name, domain);
-            for (const p of patterns) {
-              const v = await verifyEmail(p);
-              if (v.valid) {
-                out.push({ name: n.name, title: n.title, email: p, confidence: 100, linkedin_url: null, verification: v });
-                verification = v;
-                break;
+      if (!first_name || !last_name) { out.push({ name: n.name, title: n.title, linkedin_url: null }); continue; }
+
+      let resolved = false;
+      // 1) Try provider if configured
+      if (HUNTER_API_KEY) {
+        try {
+          const url = new URL('https://api.hunter.io/v2/email-finder');
+          url.searchParams.set('domain', domain);
+          url.searchParams.set('first_name', first_name);
+          url.searchParams.set('last_name', last_name);
+          url.searchParams.set('api_key', HUNTER_API_KEY);
+          const r = await fetch(url.toString());
+          if (r.ok) {
+            const j: any = await r.json();
+            const email = j?.data?.email || null;
+            const confidence = j?.data?.score || null;
+            if (email) {
+              const verification = await verifyEmail(email);
+              if (verification.valid) {
+                out.push({ name: n.name, title: n.title, email, confidence: confidence || 100, linkedin_url: null, verification });
+                resolved = true;
               }
             }
           }
+        } catch {
+          // provider error: fall through to patterns
         }
-        if (!verification || !verification.valid) {
-          out.push({ name: n.name, title: n.title, email: email || undefined, confidence: confidence || undefined, linkedin_url: null, verification });
-        }
-      } catch {
-        // If provider call fails, try patterns directly
+      }
+
+      if (!resolved) {
+        // 2) Pattern candidates validated by verifier
         const patterns = buildPatterns(n.name, domain);
-        let added = false;
+        let found = false;
         for (const p of patterns) {
           const v = await verifyEmail(p);
           if (v.valid) {
             out.push({ name: n.name, title: n.title, email: p, confidence: 100, linkedin_url: null, verification: v });
-            added = true;
+            found = true;
             break;
           }
         }
-        if (!added) out.push({ name: n.name, title: n.title, linkedin_url: null });
+        if (!found) out.push({ name: n.name, title: n.title, linkedin_url: null });
       }
     }
 
