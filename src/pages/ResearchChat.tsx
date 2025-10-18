@@ -816,9 +816,22 @@ export function ResearchChat() {
     void loadMessages(currentChatId);
   }, [currentChatId]);
 
-useEffect(() => {
-  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-}, [messages, streamingMessage, thinkingEvents]);
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, streamingMessage, thinkingEvents]);
+
+  // Allow other pages to request opening a specific chat by id
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ chatId?: string }>).detail;
+      const target = detail?.chatId;
+      if (typeof target === 'string' && target.trim()) {
+        setCurrentChatId(target);
+      }
+    };
+    window.addEventListener('chat:open', handler as EventListener);
+    return () => window.removeEventListener('chat:open', handler as EventListener);
+  }, []);
 
 useEffect(() => {
   if (showRefine && refineFacets.length === 0) {

@@ -1,4 +1,4 @@
-import { ThumbsUp, ThumbsDown, Copy, RotateCcw, Coins, Building2, CheckCircle2, Target } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, Copy, RotateCcw, Coins, Building2, CheckCircle2, Target, ShieldCheck } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Streamdown } from 'streamdown';
 import { useToast } from './ToastProvider';
@@ -193,6 +193,50 @@ export function MessageBubble({
   const wordCount = (() => {
     try { return stripMd(safeContent).trim().split(/\s+/).filter(Boolean).length; } catch { return 0; }
   })();
+
+  const extractFirstDomain = (text: string): string | null => {
+    const m = text.match(/\b(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)\b/i);
+    return m && m[1] ? m[1].toLowerCase() : null;
+  };
+
+  const extractContactNames = (): Array<{ name: string; title?: string }> => {
+    try {
+      const lines = safeContent.split(/\n+/);
+      const arr: Array<{ name: string; title?: string }> = [];
+      for (const ln of lines) {
+        const t = ln.replace(/^[-*•]\s*/, '');
+        const mm = t.match(/([A-Z][A-Za-z.'\-]+\s+[A-Z][A-Za-z.'\-]+)\s+\—\s+(.+)$/);
+        if (mm) arr.push({ name: mm[1], title: mm[2] });
+      }
+      return arr.slice(0, 6);
+    } catch { return []; }
+  };
+
+  const handleVerifyEmails = async () => {
+    try {
+      const domain = extractFirstDomain(safeContent);
+      const names = extractContactNames();
+      if (!domain || names.length === 0) {
+        alert('No website or contacts detected in this report.');
+        return;
+      }
+      const resp = await fetch('/api/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain, names, limit: 6 })
+      });
+      if (!resp.ok) {
+        const txt = await resp.text().catch(() => '');
+        alert(`Verification failed: ${txt || resp.statusText}`);
+        return;
+      }
+      const data = await resp.json();
+      const count = Array.isArray(data?.contacts) ? data.contacts.filter((c: any) => c?.email).length : 0;
+      alert(count > 0 ? `Found ${count} verified email${count === 1 ? '' : 's'}.` : 'No verified emails found.');
+    } catch (e: any) {
+      alert(`Verification error: ${e?.message || 'unknown error'}`);
+    }
+  };
   const structured = useMemo(() => {
     if (isSpecificMode) return null; // Do not force research sections for specific follow-ups
     if (!isCompanyResearch || role !== 'assistant' || streaming) return null;
@@ -707,29 +751,39 @@ export function MessageBubble({
           )}
 
           {onPromote && !isDraftEmail && (
-            <button
-              onClick={onPromote}
-              disabled={disablePromote || recentlySaved}
-              className={`text-xs font-semibold ${recentlySaved ? 'text-emerald-600 cursor-default' : 'text-blue-600 hover:text-blue-700'} ${(disablePromote || recentlySaved) ? 'disabled:text-gray-400 disabled:cursor-not-allowed' : ''} inline-flex items-center gap-1`}
-              aria-label="Save & Track"
-            >
-              {recentlySaved ? (
-                <span className="inline-flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" />
-                  Saved
-                </span>
-              ) : disablePromote ? (
-                <>
-                  <svg className="animate-spin h-3 w-3 text-blue-600" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                  </svg>
-                  Saving…
-                </>
-              ) : (
-                'Save & Track'
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onPromote}
+                disabled={disablePromote || recentlySaved}
+                className={`text-xs font-semibold ${recentlySaved ? 'text-emerald-600 cursor-default' : 'text-blue-600 hover:text-blue-700'} ${(disablePromote || recentlySaved) ? 'disabled:text-gray-400 disabled:cursor-not-allowed' : ''} inline-flex items-center gap-1`}
+                aria-label="Save & Track"
+              >
+                {recentlySaved ? (
+                  <span className="inline-flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" />
+                    Saved
+                  </span>
+                ) : disablePromote ? (
+                  <>
+                    <svg className="animate-spin h-3 w-3 text-blue-600" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                    </svg>
+                    Saving…
+                  </>
+                ) : (
+                  'Save & Track'
+                )}
+              </button>
+              <button
+                onClick={handleVerifyEmails}
+                className="text-xs font-semibold text-blue-700 hover:text-blue-900 inline-flex items-center gap-1"
+                title="Verify and surface decision-maker emails"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Get verified emails
+              </button>
+            </div>
           )}
           {onSummarize && !isDraftEmail && (
             <button

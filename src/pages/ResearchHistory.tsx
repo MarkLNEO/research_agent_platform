@@ -319,7 +319,12 @@ export function ResearchHistory() {
         userName={getUserInitial()}
         chats={chats}
         currentChatId={null}
-        onChatSelect={() => navigate('/')}
+        onChatSelect={(chatId) => {
+          navigate('/');
+          setTimeout(() => {
+            try { window.dispatchEvent(new CustomEvent('chat:open', { detail: { chatId } })); } catch {}
+          }, 0);
+        }}
         onCompanyProfile={() => navigate('/profile-coach')}
         onSettings={() => navigate('/settings')}
         onHome={() => navigate('/')}

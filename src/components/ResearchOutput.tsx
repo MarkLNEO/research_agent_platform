@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Streamdown } from 'streamdown';
 import { useToast } from './ToastProvider';
 import { Download, FileText, TrendingUp, Zap, Users, Target, Lightbulb, HelpCircle } from 'lucide-react';
 import { OptimizeICPModal } from './OptimizeICPModal';
@@ -488,12 +489,32 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
         </div>
       )}
 
-      {/* Full Report Link */}
+      {/* Full Report Link + Collapsible content */}
       {research.markdown_report && (
-        <div className="text-center pt-4 border-t border-gray-200" data-testid="research-section-markdown">
-          <button className="text-blue-600 hover:text-blue-700 font-medium text-sm">
-            View Full Research Report →
-          </button>
+        <FullReport markdown={research.markdown_report} />
+      )}
+    </div>
+  );
+}
+
+function FullReport({ markdown }: { markdown: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="pt-4 border-t border-gray-200" data-testid="research-section-markdown">
+      <div className="text-center">
+        <button
+          type="button"
+          onClick={() => setOpen(o => !o)}
+          className="text-blue-600 hover:text-blue-700 font-medium text-sm"
+        >
+          {open ? 'Hide full report' : 'View Full Research Report →'}
+        </button>
+      </div>
+      {open && (
+        <div className="mt-3 bg-white border border-gray-200 rounded-xl p-4">
+          <Streamdown className="prose prose-sm max-w-none text-gray-800">
+            {markdown}
+          </Streamdown>
         </div>
       )}
     </div>
