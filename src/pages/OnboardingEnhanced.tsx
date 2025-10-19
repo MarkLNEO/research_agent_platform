@@ -294,6 +294,19 @@ export function OnboardingEnhanced() {
   const processUserInput = async (input: string) => {
     const lowerInput = input.toLowerCase();
 
+    // If on the welcome card and the user types a research-style prompt, bypass onboarding and go to chat
+    if (welcomeMode) {
+      const looksLikeResearch = /^(research|find|show|compare|analy[sz]e|what can you do\??|who is|what is)\b/i.test(input.trim());
+      if (looksLikeResearch) {
+        try {
+          localStorage.setItem('onboardingComplete', '1');
+          localStorage.setItem('skipHomeGate', '1');
+        } catch {}
+        navigate(`/?q=${encodeURIComponent(input.trim())}`);
+        return;
+      }
+    }
+
     // Global intercept for confirmation prompt
     if (confirmPending) {
       if (/(^y(es)?$)|(^correct$)/i.test(lowerInput)) {
@@ -872,6 +885,10 @@ const deriveCompanyNameFromUrl = (raw: string): string => {
   const selectPath = (path: 'immediate' | 'guided', starter?: string) => {
     if (path === 'immediate') {
       const q = starter || 'Research Boeing';
+      try {
+        localStorage.setItem('onboardingComplete', '1');
+        localStorage.setItem('skipHomeGate', '1');
+      } catch {}
       navigate(`/?q=${encodeURIComponent(q)}`);
       return;
     }
