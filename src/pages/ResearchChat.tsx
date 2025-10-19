@@ -746,6 +746,13 @@ export function ResearchChat() {
     }
   }, [lastAssistantMessage]);
 
+  // Fallback: if a new assistant message arrived and we are not streaming, ensure the Action Bar is visible
+  useEffect(() => {
+    if (lastAssistantMessage && !streamingMessage) {
+      setActionBarVisible(true);
+    }
+  }, [lastAssistantMessage, streamingMessage]);
+
   const fetchUserPreferences = useCallback(async () => {
     if (!user?.id) return;
     try {
