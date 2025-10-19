@@ -360,6 +360,7 @@ export function ResearchChat() {
   const [loading, setLoading] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState('');
   const [actionBarVisible, setActionBarVisible] = useState(false);
+  const [verifyingEmails, setVerifyingEmails] = useState(false);
   const [actionBarCompany, setActionBarCompany] = useState<string | null>(null);
   const streamingAbortRef = useRef<AbortController | null>(null);
   // acknowledgment messages are displayed via ThinkingIndicator events
@@ -2669,7 +2670,8 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
     await handleSendMessageWithChat(currentChatId, prompt, 'specific');
   };
 
-  const handleActionBarAction = useCallback(async (action: ResearchAction) => {
+  type EnhancedAction = ResearchAction | 'verify_emails';
+  const handleActionBarAction = useCallback(async (action: EnhancedAction) => {
     switch (action) {
       case 'new':
         addToast({ type: 'info', title: 'Starting new research', description: 'Opening a fresh thread…' });
@@ -2715,6 +2717,52 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
         addToast({ type: 'info', title: 'Refine scope', description: 'Adjust focus areas for the next run.' });
         setShowRefine(true);
         return;
+      case 'verify_emails': {
+        // Extract domain + contact names from latest assistant message
+        const latest = findLatestResearchAssistant();
+        const text = latest?.message.content || '';
+        const domain = (() => {
+          const m = text.match(/\b(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)\b/i);
+          return m && m[1] ? m[1].toLowerCase() : null;
+        })();
+        const names = (() => {
+          try {
+            const lines = text.split(/\n+/);
+            const arr: Array<{ name: string; title?: string }> = [];
+            for (const ln of lines) {
+              const t = ln.replace(/^[-*•]\s*/, '');
+              const mm = t.match(/([A-Z][A-Za-z.'\-]+\s+[A-Z][A-Za-z.'\-]+)\s+\—\s+(.+)$/);
+              if (mm) arr.push({ name: mm[1], title: mm[2] });
+            }
+            return arr.slice(0, 6);
+          } catch { return []; }
+        })();
+        if (!domain) {
+          addToast({ type: 'info', title: 'No website found', description: 'Include the domain in your prompt (e.g., “Research HubSpot (hubspot.com)”).' });
+          return;
+        }
+        if (names.length === 0) {
+          addToast({ type: 'info', title: 'No contacts found', description: 'Run Deep/Standard research to include leadership contacts.' });
+          return;
+        }
+        setVerifyingEmails(true);
+        try {
+          const resp = await fetch('/api/contacts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domain, names, limit: 6 }) });
+          if (!resp.ok) {
+            const txt = await resp.text().catch(() => '');
+            addToast({ type: 'error', title: 'Verification failed', description: txt || resp.statusText });
+            return;
+          }
+          const data = await resp.json();
+          const count = Array.isArray(data?.contacts) ? data.contacts.filter((c: any) => c?.email).length : 0;
+          addToast({ type: count > 0 ? 'success' : 'info', title: count > 0 ? `Found ${count} verified email${count === 1 ? '' : 's'}` : 'No verified emails found' });
+        } catch (e: any) {
+          addToast({ type: 'error', title: 'Verification error', description: e?.message || 'Please try again.' });
+        } finally {
+          setVerifyingEmails(false);
+        }
+        return;
+      }
       default:
         return;
     }
@@ -3530,6 +3578,16 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                         title="Adjust focus areas (leadership, funding, tech stack, news, competitors, hiring) and timeframe, then re-run."
                       >
                         🎯 Refine focus
+                      </button>
+                    )}
+                    {(!lastIsDraftEmail) && (
+                      <button
+                        className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 transition-colors ${verifyingEmails ? 'bg-gray-300 text-gray-600 cursor-wait focus:ring-gray-300' : 'bg-teal-600 text-white hover:bg-teal-700 focus:ring-teal-400'}`}
+                        onClick={() => { if (!verifyingEmails) void handleActionBarAction('verify_emails'); }}
+                        disabled={verifyingEmails}
+                        title="Verify and surface decision-maker emails"
+                      >
+                        {verifyingEmails ? 'Verifying…' : '🔒 Get verified emails'}
                       </button>
                     )}
                   </div>
