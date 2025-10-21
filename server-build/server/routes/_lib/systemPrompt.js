@@ -299,6 +299,30 @@ export function buildSystemPrompt(userContext, agentType = 'company_research', r
     if (userContext.resolvedPrefs) {
         extras.push('Resolved preferences provided above. Honor them strictly—bias retrieval, synthesis, and recommendations toward stated focus/tone/depth.');
     }
+    if (isResearchAgent) {
+        const terms = userContext.profile?.preferred_terms;
+        const indicatorLabelRaw = terms && typeof terms === 'object' && typeof terms.indicators_label === 'string'
+            ? terms.indicators_label.trim()
+            : '';
+        const indicatorLabel = indicatorLabelRaw || 'Indicators';
+        const rawChoices = Array.isArray(userContext.profile?.indicator_choices)
+            ? userContext.profile?.indicator_choices
+            : [];
+        const indicatorChoices = rawChoices
+            .map(choice => (typeof choice === 'string' ? choice.trim() : ''))
+            .filter(choice => choice.length > 0);
+        if (indicatorLabelRaw || indicatorChoices.length > 0) {
+            const formattedChoices = indicatorChoices.map(choice => `- ${choice}`).join('\n');
+            extras.push([
+                'Terminology lock: Use the user\'s exact language for buying triggers.',
+                `- The section heading must be "${indicatorLabel}" exactly (no synonyms).`,
+                indicatorChoices.length
+                    ? `- Under "${indicatorLabel}", include bullets for the following items verbatim (even if not observed this week):\n${formattedChoices}`
+                    : '- If no custom bullets are stored yet, keep the section but do not invent new terminology.',
+                '- Retain casing/punctuation exactly as supplied.'
+            ].join('\n'));
+        }
+    }
     if (Array.isArray(userContext.canonicalEntities) && userContext.canonicalEntities.length) {
         extras.push('Canonical entities are specified; treat synonymous terms accordingly and avoid re-asking for confirmation unless conflicting evidence arises.');
     }

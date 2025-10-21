@@ -269,6 +269,68 @@ export function CompanyProfile() {
     }));
   }, [signalPreferenceItems, formatLabel]);
 
+  const conversationalPreferenceSummaries = useMemo(() => {
+    const savedSummaries = savedPreferences
+      .map(pref => {
+        const key = (pref.key || '').replace(/^focus\./, '').replace(/[_\.]/g, ' ').trim();
+        const value = pref.value;
+        const label = key.length > 0 ? key : pref.key || 'preference';
+        if (typeof value === 'string' && value.trim()) {
+          return `${label}: ${value.trim()}`;
+        }
+        if (Array.isArray(value)) {
+          const arr = value
+            .map(item => (typeof item === 'string' ? item.trim() : ''))
+            .filter(Boolean)
+            .join(', ');
+          return arr ? `${label}: ${arr}` : null;
+        }
+        if (value && typeof value === 'object') {
+          try {
+            return `${label}: ${JSON.stringify(value)}`;
+          } catch {
+            return `${label}: [object]`;
+          }
+        }
+        if (value !== undefined && value !== null) {
+          return `${label}: ${String(value)}`;
+        }
+        return null;
+      })
+      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+
+    if (savedSummaries.length > 0) {
+      return savedSummaries;
+    }
+
+    const fallback: string[] = [];
+    if (profileData?.company_name) fallback.push(`Company: ${profileData.company_name}`);
+    if (profileData?.industry) fallback.push(`Industry: ${profileData.industry}`);
+    if (profileData?.icp_definition) fallback.push(`ICP: ${profileData.icp_definition}`);
+    if (Array.isArray(targetTitles) && targetTitles.length > 0) {
+      fallback.push(`Target titles: ${targetTitles.join(', ')}`);
+    }
+    if (competitorList.length > 0) {
+      fallback.push(`Competitors to watch: ${competitorList.join(', ')}`);
+    }
+    if (researchFocusList.length > 0) {
+      fallback.push(`Research focus: ${researchFocusList.join(', ')}`);
+    }
+    if (Array.isArray(formattedSignals) && formattedSignals.length > 0) {
+      const signals = formattedSignals.map(item => item.label).join(', ');
+      if (signals) fallback.push(`Signals monitored: ${signals}`);
+    }
+    if (Array.isArray(formattedCriteria) && formattedCriteria.length > 0) {
+      const criteria = formattedCriteria.map(item => `${item.label} (${item.importance})`).join(', ');
+      if (criteria) fallback.push(`Custom criteria: ${criteria}`);
+    }
+    if (indicatorLabel) fallback.push(`Signals label: ${indicatorLabel}`);
+    if (indicatorChoices.length > 0) {
+      fallback.push(`Watchlist: ${indicatorChoices.join(', ')}`);
+    }
+    return fallback;
+  }, [savedPreferences, profileData, targetTitles, competitorList, researchFocusList, formattedSignals, formattedCriteria, indicatorLabel, indicatorChoices]);
+
   const hasSetupDetails = useMemo(() => {
     if (!profileData) return false;
     return Boolean(
@@ -651,10 +713,16 @@ Onboarding flow:
     try {
       let fullResponse = await streamAIResponse(systemPrompt, chatId, true);
       fullResponse = normalizeMarkdown(fullResponse, { enforceResearchSections: false });
-      const displayResponse = (() => {
+      const saveConfirmation = await processSaveCommands(fullResponse);
+      let displayResponse = (() => {
         const stripped = stripSaveProfileBlocks(fullResponse).trim();
         return stripped.length > 0 ? stripped : fullResponse;
       })();
+      if (saveConfirmation) {
+        displayResponse = displayResponse
+          ? `${displayResponse}\n\n${saveConfirmation}`
+          : saveConfirmation;
+      }
 
       // Persist streamed message after completion
       const { data: savedAssistantMsg } = await supabase
@@ -723,12 +791,18 @@ Onboarding flow:
       fullResponse = normalizeMarkdown(fullResponse, { enforceResearchSections: false });
 
       // Check if response contains profile save command
-      await processSaveCommands(fullResponse);
+      const saveConfirmation = await processSaveCommands(fullResponse);
 
-      const displayResponse = (() => {
+      let displayResponse = (() => {
         const stripped = stripSaveProfileBlocks(fullResponse).trim();
         return stripped.length > 0 ? stripped : fullResponse;
       })();
+
+      if (saveConfirmation) {
+        displayResponse = displayResponse
+          ? `${displayResponse}\n\n${saveConfirmation}`
+          : saveConfirmation;
+      }
 
       const { data: savedAssistantMsg } = await supabase
         .from('messages')
@@ -1005,10 +1079,11 @@ Onboarding flow:
     return 'there';
   };
 
-  const processSaveCommands = async (responseText: string) => {
+  const processSaveCommands = async (responseText: string): Promise<string | null> => {
     // Look for JSON code blocks with action: save_profile
     const jsonBlockRegex = /```json\s*\n?([\s\S]*?)\n?```/g;
     const matches = Array.from(responseText.matchAll(jsonBlockRegex));
+    const confirmations: string[] = [];
 
     for (const match of matches) {
       try {
@@ -1050,8 +1125,55 @@ Onboarding flow:
             const result = await response.json();
             console.log('Profile saved successfully:', result);
             await refreshProfileData();
+            await refreshPreferences();
             window.dispatchEvent(new CustomEvent('profile:updated', { detail: { userId: user?.id } }));
             addToast({ type: 'success', title: 'Profile updated', description: 'Your preferences were saved.' });
+
+            const savedBits: string[] = [];
+            if (data.profile?.company_name) {
+              savedBits.push(`Company → ${data.profile.company_name}`);
+            }
+            if (data.profile?.industry) {
+              savedBits.push(`Industry → ${data.profile.industry}`);
+            }
+            const indicatorLabel = data.profile?.preferred_terms?.indicators_label;
+            if (typeof indicatorLabel === 'string' && indicatorLabel.trim()) {
+              savedBits.push(`Signals label → ${indicatorLabel.trim()}`);
+            }
+            if (Array.isArray(data.profile?.indicator_choices) && data.profile.indicator_choices.length > 0) {
+              const list = data.profile.indicator_choices
+                .map((item: unknown) => (typeof item === 'string' ? item.trim() : ''))
+                .filter(Boolean)
+                .join(', ');
+              if (list) savedBits.push(`Watchlist → ${list}`);
+            }
+            if (Array.isArray(data.profile?.target_titles) && data.profile.target_titles.length > 0) {
+              const titles = data.profile.target_titles
+                .map((item: unknown) => (typeof item === 'string' ? item.trim() : ''))
+                .filter(Boolean)
+                .join(', ');
+              if (titles) savedBits.push(`Target titles → ${titles}`);
+            }
+            if (Array.isArray(data.signal_preferences) && data.signal_preferences.length > 0) {
+              const signals = data.signal_preferences
+                .map((pref: any) => pref?.signal_type)
+                .filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0)
+                .join(', ');
+              if (signals) savedBits.push(`Signal alerts → ${signals}`);
+            }
+            if (Array.isArray(data.custom_criteria) && data.custom_criteria.length > 0) {
+              const criteria = data.custom_criteria
+                .map((criterion: any) => criterion?.field_name)
+                .filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0)
+                .join(', ');
+              if (criteria) savedBits.push(`Custom criteria → ${criteria}`);
+            }
+
+            if (savedBits.length) {
+              confirmations.push(`All set — I captured: ${savedBits.join('; ')}.`);
+            } else {
+              confirmations.push('Saved your latest profile updates.');
+            }
           }
         }
       } catch (e) {
@@ -1059,6 +1181,11 @@ Onboarding flow:
         addToast({ type: 'error', title: 'Profile save failed', description: 'Invalid save instruction. Please try again.' });
       }
     }
+
+    if (confirmations.length > 0) {
+      return confirmations.join('\n');
+    }
+    return null;
   };
 
   return (
@@ -1495,11 +1622,9 @@ Onboarding flow:
                         </div>
                       )}
                       <ul className="mt-4 space-y-2">
-                        {prefsLoading && savedPreferences.length === 0 ? (
+                        {prefsLoading && savedPreferences.length === 0 && conversationalPreferenceSummaries.length === 0 ? (
                           <li className="text-sm text-emerald-700">Loading saved preferences…</li>
-                        ) : savedPreferences.length === 0 ? (
-                          <li className="text-sm text-emerald-700">No conversational preferences stored yet. The agent will add items as you correct or refine outputs.</li>
-                        ) : (
+                        ) : savedPreferences.length > 0 ? (
                           savedPreferences.map((pref) => {
                             const confidence = typeof pref.confidence === 'number' ? ` (confidence ${(pref.confidence * 100).toFixed(0)}%)` : '';
                             const formattedValue = (() => {
@@ -1525,6 +1650,14 @@ Onboarding flow:
                               </li>
                             );
                           })
+                        ) : conversationalPreferenceSummaries.length > 0 ? (
+                          conversationalPreferenceSummaries.map((summary, idx) => (
+                            <li key={`derived-pref-${idx}`} className="bg-white/70 border border-emerald-200 rounded-xl px-4 py-3 text-sm text-gray-800">
+                              {summary}
+                            </li>
+                          ))
+                        ) : (
+                          <li className="text-sm text-emerald-700">No conversational preferences stored yet. The agent will add items as you correct or refine outputs.</li>
                         )}
                       </ul>
                     </div>

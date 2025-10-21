@@ -30,15 +30,48 @@ export default async function handler(req, res) {
         };
         // Update profile
         if (updateData.profile) {
+            if (Array.isArray(updateData.profile.indicator_choices)) {
+                updateData.profile.indicator_choices = updateData.profile.indicator_choices
+                    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+                    .filter((item) => item.length > 0);
+            }
+            if (updateData.profile.preferred_terms && typeof updateData.profile.preferred_terms === 'object') {
+                const normalized = {};
+                Object.entries(updateData.profile.preferred_terms).forEach(([key, value]) => {
+                    if (typeof value === 'string' && value.trim()) {
+                        normalized[key] = value.trim();
+                    }
+                });
+                updateData.profile.preferred_terms = normalized;
+            }
             const { data: existingProfile } = await supabase
                 .from('company_profiles')
-                .select('id')
+                .select('id, indicator_choices, preferred_terms')
                 .eq('user_id', user.id)
                 .maybeSingle();
             if (existingProfile) {
+                const mergedProfile = {
+                    ...updateData.profile,
+                    updated_at: new Date().toISOString(),
+                };
+                if (Array.isArray(updateData.profile.indicator_choices)) {
+                    const existingChoices = Array.isArray(existingProfile.indicator_choices)
+                        ? existingProfile.indicator_choices
+                        : [];
+                    mergedProfile.indicator_choices = Array.from(new Set([
+                        ...existingChoices.map(choice => (typeof choice === 'string' ? choice.trim() : '')).filter(Boolean),
+                        ...updateData.profile.indicator_choices
+                    ]));
+                }
+                if (updateData.profile.preferred_terms && typeof updateData.profile.preferred_terms === 'object') {
+                    mergedProfile.preferred_terms = {
+                        ...(existingProfile.preferred_terms || {}),
+                        ...updateData.profile.preferred_terms,
+                    };
+                }
                 const { data, error } = await supabase
                     .from('company_profiles')
-                    .update({ ...updateData.profile, updated_at: new Date().toISOString() })
+                    .update(mergedProfile)
                     .eq('user_id', user.id)
                     .select()
                     .single();
