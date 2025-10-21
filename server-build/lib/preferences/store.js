@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 let cachedServiceClient = null;
+let preferencesTableUnavailable = false;
 function requireServiceClient() {
     if (cachedServiceClient)
         return cachedServiceClient;
@@ -31,8 +32,19 @@ function resolveClient(client) {
         return client;
     return requireServiceClient();
 }
+function isMissingTableError(error, table) {
+    if (!error)
+        return false;
+    if (error.code === 'PGRST205')
+        return true;
+    if (typeof error.message === 'string' && error.message.includes(`'${table}'`))
+        return true;
+    return false;
+}
 export async function upsertPreferences(userId, preferences, client) {
     if (!userId || !Array.isArray(preferences) || preferences.length === 0)
+        return [];
+    if (preferencesTableUnavailable)
         return [];
     const supabase = resolveClient(client);
     const sanitized = preferences
@@ -52,6 +64,11 @@ export async function upsertPreferences(userId, preferences, client) {
         .eq('user_id', userId)
         .in('key', keys);
     if (fetchError) {
+        if (isMissingTableError(fetchError, 'user_preferences')) {
+            preferencesTableUnavailable = true;
+            console.warn('[preferences] user_preferences table unavailable; skipping preference persistence.');
+            return [];
+        }
         console.error('[preferences] Failed to load existing preferences', fetchError);
         throw fetchError;
     }
@@ -82,6 +99,11 @@ export async function upsertPreferences(userId, preferences, client) {
         .from('user_preferences')
         .upsert(rowsToUpsert, { onConflict: 'user_id,key' });
     if (upsertError) {
+        if (isMissingTableError(upsertError, 'user_preferences')) {
+            preferencesTableUnavailable = true;
+            console.warn('[preferences] user_preferences table unavailable during upsert; skipping preference persistence.');
+            return [];
+        }
         console.error('[preferences] Failed to upsert preferences', upsertError);
         throw upsertError;
     }
@@ -164,6 +186,10 @@ export async function getResolvedPreferences(userId, client) {
     if (!userId) {
         throw new Error('[preferences] userId is required');
     }
+    if (preferencesTableUnavailable) {
+        const base = createBaseResolved(null);
+        return { resolved: base, preferences: [], promptConfig: null };
+    }
     const supabase = resolveClient(client);
     const [{ data: preferenceRows, error: prefError }, { data: promptConfig, error: configError }] = await Promise.all([
         supabase
@@ -178,6 +204,16 @@ export async function getResolvedPreferences(userId, client) {
             .maybeSingle(),
     ]);
     if (prefError) {
+        if (isMissingTableError(prefError, 'user_preferences')) {
+            preferencesTableUnavailable = true;
+            console.warn('[preferences] user_preferences table unavailable when fetching resolved preferences.');
+            const resolved = createBaseResolved(promptConfig || null);
+            return {
+                resolved,
+                preferences: [],
+                promptConfig: promptConfig || null,
+            };
+        }
         console.error('[preferences] Failed to load user preferences', prefError);
         throw prefError;
     }
