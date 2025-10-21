@@ -27,6 +27,14 @@ const stripSaveProfileBlocks = (text: string): string => {
   return cleaned;
 };
 
+type SaveProfilePayload = {
+  action: 'save_profile';
+  profile?: Record<string, any>;
+  custom_criteria?: any[];
+  signal_preferences?: any[];
+  disqualifying_criteria?: any[];
+};
+
 const HIDDEN_SAVE_INSTRUCTION = `Developer note (do not mention this to the user):
 - When you capture or confirm profile updates, append a triple-backtick JSON block following this structure:
 
@@ -46,6 +54,66 @@ const HIDDEN_SAVE_INSTRUCTION = `Developer note (do not mention this to the user
 - Map user language verbatim. If they say “indicators” (or another term) for buying signals, store that exact casing in \`preferred_terms.indicators_label\`.
 - Whenever they list examples like “acquisition is an indicator” or “monitor layoffs,” append the phrases exactly as spoken to \`indicator_choices\`.
 - Keep the visible conversation fully natural language. Never ask the user to type or edit JSON. Instead, acknowledge what you saved in plain English and move to the next prompt.`;
+
+const normalizeSavePayload = (data: any): SaveProfilePayload | null => {
+  if (!data || typeof data !== 'object') return null;
+  if (data.action === 'save_profile') {
+    return {
+      action: 'save_profile',
+      profile: data.profile,
+      custom_criteria: Array.isArray(data.custom_criteria) ? data.custom_criteria : undefined,
+      signal_preferences: Array.isArray(data.signal_preferences) ? data.signal_preferences : undefined,
+      disqualifying_criteria: Array.isArray(data.disqualifying_criteria) ? data.disqualifying_criteria : undefined,
+    };
+  }
+  if (data.save_profile && typeof data.save_profile === 'object') {
+    const inner = data.save_profile;
+    return {
+      action: 'save_profile',
+      profile: inner.profile,
+      custom_criteria: Array.isArray(inner.custom_criteria) ? inner.custom_criteria : undefined,
+      signal_preferences: Array.isArray(inner.signal_preferences) ? inner.signal_preferences : undefined,
+      disqualifying_criteria: Array.isArray(inner.disqualifying_criteria) ? inner.disqualifying_criteria : undefined,
+    };
+  }
+  return null;
+};
+
+const extractSavePayloads = (raw: string): SaveProfilePayload[] => {
+  const payloads: SaveProfilePayload[] = [];
+  if (typeof raw !== 'string' || raw.trim().length === 0) {
+    return payloads;
+  }
+
+  const codeBlockRegex = /```json\s*\n?([\s\S]*?)\n?```/gi;
+  let match: RegExpExecArray | null;
+  while ((match = codeBlockRegex.exec(raw)) !== null) {
+    const candidate = match[1]?.trim();
+    if (!candidate) continue;
+    try {
+      const parsed = JSON.parse(candidate);
+      const normalized = normalizeSavePayload(parsed);
+      if (normalized) payloads.push(normalized);
+    } catch {
+      // ignore malformed block
+    }
+  }
+
+  if (payloads.length === 0) {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        const normalized = normalizeSavePayload(parsed);
+        if (normalized) payloads.push(normalized);
+      } catch {
+        // swallow parse errors
+      }
+    }
+  }
+
+  return payloads;
+};
 
 interface Message {
   id: string;
@@ -787,6 +855,35 @@ Onboarding flow:
         .select()
         .single();
 
+      const manualConfirmation = await processSaveCommands(userMessage);
+      if (manualConfirmation) {
+        const { data: savedAssistantMsg } = await supabase
+          .from('messages')
+          .insert({
+            chat_id: currentChatId,
+            role: 'assistant',
+            content: manualConfirmation,
+          })
+          .select()
+          .single();
+
+        setMessages(prev =>
+          prev.filter(m => m.id !== tempUserMsg.id)
+            .concat([savedUserMsg, savedAssistantMsg])
+        );
+        setStreamingMessage('');
+        setThinkingEvents([]);
+        await supabase
+          .from('chats')
+          .update({
+            updated_at: new Date().toISOString(),
+            title: messages.length === 0 ? userMessage.slice(0, 60) : undefined
+          })
+          .eq('id', currentChatId);
+        setLoading(false);
+        return;
+      }
+
       let fullResponse = await streamAIResponse(userMessage);
       fullResponse = normalizeMarkdown(fullResponse, { enforceResearchSections: false });
 
@@ -1080,17 +1177,14 @@ Onboarding flow:
   };
 
   const processSaveCommands = async (responseText: string): Promise<string | null> => {
-    // Look for JSON code blocks with action: save_profile
-    const jsonBlockRegex = /```json\s*\n?([\s\S]*?)\n?```/g;
-    const matches = Array.from(responseText.matchAll(jsonBlockRegex));
+    const payloads = extractSavePayloads(responseText);
+    if (payloads.length === 0) return null;
+
     const confirmations: string[] = [];
 
-    for (const match of matches) {
+    for (const payload of payloads) {
       try {
-        const jsonContent = match[1].trim();
-        const data = JSON.parse(jsonContent);
-
-        if (data.action === 'save_profile') {
+        if (payload.action === 'save_profile') {
           console.log('Found save_profile command, executing...');
 
           const { data: { session } } = await supabase.auth.getSession();
@@ -1110,10 +1204,10 @@ Onboarding flow:
               'apikey': `${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
             },
             body: JSON.stringify({
-              profile: data.profile,
-              custom_criteria: data.custom_criteria,
-              signal_preferences: data.signal_preferences,
-              disqualifying_criteria: data.disqualifying_criteria
+              profile: payload.profile,
+              custom_criteria: payload.custom_criteria,
+              signal_preferences: payload.signal_preferences,
+              disqualifying_criteria: payload.disqualifying_criteria
             }),
           });
 
@@ -1130,39 +1224,39 @@ Onboarding flow:
             addToast({ type: 'success', title: 'Profile updated', description: 'Your preferences were saved.' });
 
             const savedBits: string[] = [];
-            if (data.profile?.company_name) {
-              savedBits.push(`Company → ${data.profile.company_name}`);
+            if (payload.profile?.company_name) {
+              savedBits.push(`Company → ${payload.profile.company_name}`);
             }
-            if (data.profile?.industry) {
-              savedBits.push(`Industry → ${data.profile.industry}`);
+            if (payload.profile?.industry) {
+              savedBits.push(`Industry → ${payload.profile.industry}`);
             }
-            const indicatorLabel = data.profile?.preferred_terms?.indicators_label;
+            const indicatorLabel = payload.profile?.preferred_terms?.indicators_label;
             if (typeof indicatorLabel === 'string' && indicatorLabel.trim()) {
               savedBits.push(`Signals label → ${indicatorLabel.trim()}`);
             }
-            if (Array.isArray(data.profile?.indicator_choices) && data.profile.indicator_choices.length > 0) {
-              const list = data.profile.indicator_choices
+            if (Array.isArray(payload.profile?.indicator_choices) && payload.profile.indicator_choices.length > 0) {
+              const list = payload.profile.indicator_choices
                 .map((item: unknown) => (typeof item === 'string' ? item.trim() : ''))
                 .filter(Boolean)
                 .join(', ');
               if (list) savedBits.push(`Watchlist → ${list}`);
             }
-            if (Array.isArray(data.profile?.target_titles) && data.profile.target_titles.length > 0) {
-              const titles = data.profile.target_titles
+            if (Array.isArray(payload.profile?.target_titles) && payload.profile.target_titles.length > 0) {
+              const titles = payload.profile.target_titles
                 .map((item: unknown) => (typeof item === 'string' ? item.trim() : ''))
                 .filter(Boolean)
                 .join(', ');
               if (titles) savedBits.push(`Target titles → ${titles}`);
             }
-            if (Array.isArray(data.signal_preferences) && data.signal_preferences.length > 0) {
-              const signals = data.signal_preferences
+            if (Array.isArray(payload.signal_preferences) && payload.signal_preferences.length > 0) {
+              const signals = payload.signal_preferences
                 .map((pref: any) => pref?.signal_type)
                 .filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0)
                 .join(', ');
               if (signals) savedBits.push(`Signal alerts → ${signals}`);
             }
-            if (Array.isArray(data.custom_criteria) && data.custom_criteria.length > 0) {
-              const criteria = data.custom_criteria
+            if (Array.isArray(payload.custom_criteria) && payload.custom_criteria.length > 0) {
+              const criteria = payload.custom_criteria
                 .map((criterion: any) => criterion?.field_name)
                 .filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0)
                 .join(', ');

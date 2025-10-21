@@ -18,6 +18,7 @@ import test from './test.ts';
 import recordSignal from './agent/signal.ts';
 import memoryBlock from './memory/block.ts';
 import memoryRollup from './memory/rollup.ts';
+import listPreferences from './preferences/list.ts';
 
 type Handler = (req: any, res: any) => unknown;
 
@@ -78,6 +79,8 @@ export const routeDefinitions: RouteDefinition[] = [
   { method: 'options', path: '/profiles/update', handler: updateProfile },
   { method: 'post', path: '/update-profile', handler: updateProfile },
   { method: 'options', path: '/update-profile', handler: updateProfile },
+  { method: 'get', path: '/preferences', handler: listPreferences },
+  { method: 'options', path: '/preferences', handler: listPreferences },
 
   { method: 'get', path: '/health', handler: health },
   { method: 'options', path: '/health', handler: health },

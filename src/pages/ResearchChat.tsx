@@ -32,6 +32,7 @@ import { getDefaultTemplate } from '../config/researchTemplates';
 import { SummarySchemaZ, type SummarySchema } from '../../shared/summarySchema.js';
 import type { ResolvedPrefs } from '../../shared/preferences.js';
 import { SummaryCard } from '../components/SummaryCard';
+import { SetupSummaryModal, type SetupSummaryData } from '../components/SetupSummaryModal';
 
 const ALL_REFINE_FACETS = ['leadership', 'funding', 'tech stack', 'news', 'competitors', 'hiring'] as const;
 
@@ -103,6 +104,15 @@ const extractCompanyNameFromQuery = (raw: string): string | null => {
     .filter(Boolean)
     .map(word => word[0].toUpperCase() + word.slice(1))
     .join(' ')
+    .trim();
+};
+
+const normalizeCompanyNameForTracking = (value: string | null | undefined): string => {
+  if (!value) return '';
+  return String(value)
+    .replace(/^(the\s+company|company)\s+/i, '')
+    .replace(/^the\s+/i, '')
+    .replace(/\s+/g, ' ')
     .trim();
 };
 
@@ -530,6 +540,9 @@ export function ResearchChat() {
   const [assumedDialogIndustry, setAssumedDialogIndustry] = useState<string | null>(null);
   const [assumedSuggestions, setAssumedSuggestions] = useState<Array<{ name: string; industry?: string | null }>>([]);
   const [assumedSuggestionsLoading, setAssumedSuggestionsLoading] = useState(false);
+  const [setupSummaryOpen, setSetupSummaryOpen] = useState(false);
+  const [setupSummaryLoading, setSetupSummaryLoading] = useState(false);
+  const [setupSummaryData, setSetupSummaryData] = useState<SetupSummaryData | null>(null);
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const [emailCandidates, setEmailCandidates] = useState<DraftEmailRecipient[]>([]);
   const [emailDialogLoading, setEmailDialogLoading] = useState(false);
@@ -972,10 +985,93 @@ export function ResearchChat() {
     }
   }, [user?.id]);
 
-  useEffect(() => {
-    if (!user?.id) return;
-    void fetchUserPreferences();
-  }, [user?.id, fetchUserPreferences]);
+useEffect(() => {
+  if (!user?.id) return;
+  void fetchUserPreferences();
+}, [user?.id, fetchUserPreferences]);
+
+  const loadSetupSummary = useCallback(async () => {
+    setSetupSummaryLoading(true);
+    try {
+      const indicatorLabel = typeof userProfile?.preferred_terms?.indicators_label === 'string'
+        ? userProfile.preferred_terms.indicators_label.trim()
+        : null;
+      const indicatorChoices = Array.isArray(userProfile?.indicator_choices)
+        ? userProfile!.indicator_choices
+            .map((item: any) => (typeof item === 'string' ? item.trim() : ''))
+            .filter((item: string) => item.length > 0)
+        : [];
+      const targetTitlesList = Array.isArray(userProfile?.target_titles)
+        ? userProfile!.target_titles
+            .map((item: any) => (typeof item === 'string' ? item.trim() : ''))
+            .filter((item: string) => item.length > 0)
+        : [];
+      const competitorsList = Array.isArray(userProfile?.competitors)
+        ? userProfile!.competitors
+            .map((item: any) => (typeof item === 'string' ? item.trim() : ''))
+            .filter((item: string) => item.length > 0)
+        : [];
+      const researchFocusList = Array.isArray(userProfile?.research_focus)
+        ? userProfile!.research_focus
+            .map((item: any) => (typeof item === 'string' ? item.trim() : ''))
+            .filter((item: string) => item.length > 0)
+        : [];
+      const criteriaSummary = (customCriteria || []).map((criterion: any) => ({
+        name: criterion?.name || criterion?.field_name || '',
+        importance: String(criterion?.importance || '').trim(),
+      })).filter(item => item.name.trim().length > 0);
+      const signalSummary = (signalPreferences || []).map((signal: any) => ({
+        signal_type: signal?.signal_type || '',
+        importance: signal?.importance || '',
+        lookback_days: signal?.lookback_days,
+      })).filter(item => item.signal_type.trim().length > 0);
+
+      let preferenceRows: Array<{ key: string; value: unknown; source?: string; confidence?: number; updated_at?: string }> = [];
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const response = await fetch('/api/preferences', {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json',
+            },
+          });
+          if (response.ok) {
+            const payload = await response.json();
+            preferenceRows = Array.isArray(payload?.preferences) ? payload.preferences : [];
+          }
+        }
+      } catch (err) {
+        console.warn('Unable to load conversational preferences summary', err);
+      }
+
+      setSetupSummaryData({
+        companyName: userProfile?.company_name ?? null,
+        companyUrl: userProfile?.company_url ?? null,
+        industry: userProfile?.industry ?? null,
+        icp: userProfile?.icp_definition ?? null,
+        role: userProfile?.user_role ?? null,
+        useCase: userProfile?.use_case ?? null,
+        targetTitles: targetTitlesList,
+        competitors: competitorsList,
+        researchFocus: researchFocusList,
+        indicatorLabel,
+        indicatorChoices,
+        customCriteria: criteriaSummary,
+        signalPreferences: signalSummary,
+        preferences: preferenceRows,
+      });
+    } catch (error: any) {
+      addToast({ type: 'error', title: 'Unable to load setup', description: error?.message || 'Something went wrong while loading your setup.' });
+    } finally {
+      setSetupSummaryLoading(false);
+    }
+  }, [userProfile, customCriteria, signalPreferences, supabase, addToast]);
+
+  const openSetupSummary = useCallback(() => {
+    setSetupSummaryOpen(true);
+    void loadSetupSummary();
+  }, [loadSetupSummary]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -1023,6 +1119,14 @@ export function ResearchChat() {
     window.addEventListener('chat:open', handler as EventListener);
     return () => window.removeEventListener('chat:open', handler as EventListener);
   }, []);
+
+  useEffect(() => {
+    const handler = () => {
+      openSetupSummary();
+    };
+    window.addEventListener('setup-summary:open', handler);
+    return () => window.removeEventListener('setup-summary:open', handler);
+  }, [openSetupSummary]);
 
 useEffect(() => {
   if (showRefine && refineFacets.length === 0) {
@@ -1269,24 +1373,56 @@ useEffect(() => {
   const syncTrackedAccountResearch = useCallback(async (rawSubject: string | null | undefined, summary?: string | null) => {
     if (!user?.id) return false;
     const subject = typeof rawSubject === 'string' ? rawSubject.trim() : '';
-    if (!subject) return false;
-    try {
-      const updates: Record<string, any> = {
-        last_researched_at: new Date().toISOString(),
-      };
-      if (typeof summary === 'string' && summary.trim()) {
-        updates.last_research_summary = summary.trim();
-      }
+    const normalizedSubject = normalizeCompanyNameForTracking(subject);
+    if (!normalizedSubject) return false;
+    const updates: Record<string, any> = {
+      last_researched_at: new Date().toISOString(),
+    };
+    if (typeof summary === 'string' && summary.trim()) {
+      updates.last_research_summary = summary.trim();
+    }
+
+    const tryUpdate = async (name: string) => {
+      if (!name) return null;
       const { data, error } = await supabase
         .from('tracked_accounts')
         .update(updates)
         .eq('user_id', user.id)
-        .eq('company_name', subject)
+        .eq('company_name', name)
         .select('id');
-      if (error) {
-        throw error;
+      if (error) throw error;
+      if (Array.isArray(data) && data.length > 0) {
+        return data[0];
       }
-      return Array.isArray(data) && data.length > 0;
+      return null;
+    };
+
+    try {
+      const triedNames = new Set<string>();
+      for (const name of [subject, normalizedSubject]) {
+        const trimmed = normalizeCompanyNameForTracking(name);
+        if (!trimmed || triedNames.has(trimmed.toLowerCase())) continue;
+        triedNames.add(trimmed.toLowerCase());
+        const result = await tryUpdate(name);
+        if (result) {
+          return true;
+        }
+      }
+
+      const { data: accounts } = await supabase
+        .from('tracked_accounts')
+        .select('id, company_name')
+        .eq('user_id', user.id);
+      const matched = (accounts || []).find(row => normalizeCompanyNameForTracking(row?.company_name)?.toLowerCase() === normalizedSubject.toLowerCase());
+      if (matched) {
+        const { error: fallbackError } = await supabase
+          .from('tracked_accounts')
+          .update(updates)
+          .eq('id', matched.id);
+        if (fallbackError) throw fallbackError;
+        return true;
+      }
+      return false;
     } catch (err) {
       console.warn('syncTrackedAccountResearch failed', err);
       return false;
@@ -1419,10 +1555,11 @@ useEffect(() => {
 
   const handleTrackAccount = async (rawCompanyName: string) => {
     if (!user) return;
-    const companyName = String(rawCompanyName || '')
+    const companyNameRaw = String(rawCompanyName || '')
       .replace(/^\s*\d+[).-]?\s*/, '') // drop leading list markers like "1)"
       .replace(/^[-*]\s*/, '')
       .trim();
+    const companyName = normalizeCompanyNameForTracking(companyNameRaw);
     if (!companyName) {
       addToast({ title: 'Invalid company name', description: 'Could not determine a company name to track.', type: 'error' });
       return;
@@ -1562,7 +1699,7 @@ useEffect(() => {
   // Ensure an account row exists; returns true if newly created
   const ensureTrackedAccount = async (rawCompanyName: string): Promise<boolean> => {
     if (!user) return false;
-    const companyName = String(rawCompanyName || '').trim();
+    const companyName = normalizeCompanyNameForTracking(String(rawCompanyName || ''));
     if (!companyName) return false;
     try {
       const { data: existing } = await supabase
@@ -1573,6 +1710,15 @@ useEffect(() => {
         .maybeSingle();
       if (existing) {
         await syncTrackedAccountResearch(companyName, lastResearchSummaryRef.current || null);
+        return false;
+      }
+      const { data: fallbackAccounts } = await supabase
+        .from('tracked_accounts')
+        .select('id, company_name')
+        .eq('user_id', user.id);
+      const fuzzyMatch = (fallbackAccounts || []).find(row => normalizeCompanyNameForTracking(row?.company_name)?.toLowerCase() === companyName.toLowerCase());
+      if (fuzzyMatch) {
+        await syncTrackedAccountResearch(fuzzyMatch.company_name || companyName, lastResearchSummaryRef.current || null);
         return false;
       }
       const { error } = await supabase
@@ -2238,59 +2384,6 @@ useEffect(() => {
     setFocusComposerTick(t => t + 1);
   };
 
-  const showSetupSummary = useCallback(() => {
-    const p: any = userProfile || {};
-    const bullets: string[] = [];
-    bullets.push('## Your Setup');
-    if (p.company_name || p.company_url) {
-      bullets.push(`- Organization: ${p.company_name || '—'}${p.company_url ? ` (${p.company_url})` : ''}`);
-    }
-    if (p.user_role || p.use_case) {
-      const roleParts = [p.user_role, p.use_case].filter(Boolean).join(' — ');
-      bullets.push(`- Role/Use case: ${roleParts || '—'}`);
-    }
-    if (p.icp_definition || p.industry) {
-      bullets.push(`- ICP: ${p.icp_definition || p.industry}`);
-    }
-    if (Array.isArray(signalPreferences) && signalPreferences.length) {
-      const sigs = signalPreferences
-        .map((s: any) => s.signal_type?.replace(/_/g, ' '))
-        .filter(Boolean)
-        .join(', ');
-      bullets.push(`- Signals: ${sigs}`);
-    }
-    if (Array.isArray(customCriteria) && customCriteria.length) {
-      const crit = customCriteria
-        .map((c: any) => `${c.name} (${(c.importance || '').toLowerCase() || 'optional'})`)
-        .join('; ');
-      bullets.push(`- Custom criteria: ${crit}`);
-    }
-    if (Array.isArray(p.research_focus) && p.research_focus.length) {
-      bullets.push(`- Research focus: ${p.research_focus.map((x: string) => x.replace(/_/g, ' ')).join(', ')}`);
-    }
-    const terms = p?.preferred_terms;
-    const indicatorLabel = terms && typeof terms === 'object' && typeof (terms as any)?.indicators_label === 'string'
-      ? (terms as any).indicators_label.trim()
-      : '';
-    if (indicatorLabel) {
-      bullets.push(`- Indicator section label: ${indicatorLabel}`);
-    }
-    const indicatorChoices = Array.isArray(p?.indicator_choices)
-      ? p.indicator_choices.map((entry: any) => (typeof entry === 'string' ? entry.trim() : '')).filter(Boolean)
-      : [];
-    if (indicatorChoices.length) {
-      bullets.push(`- Indicator watchlist: ${indicatorChoices.join(', ')}`);
-    }
-    bullets.push('\nShortcuts: type "Edit setup" to reopen onboarding, or go to Settings → Profile.');
-    const msg: Message = {
-      id: `setup-${Date.now()}`,
-      role: 'assistant',
-      content: bullets.join('\n'),
-      created_at: new Date().toISOString(),
-    };
-    setMessages(prev => [...prev, msg]);
-  }, [customCriteria, signalPreferences, userProfile]);
-
   const handleSendMessage = async () => {
     const content = inputValue.trim();
     if (!content) return;
@@ -2300,7 +2393,7 @@ useEffect(() => {
     // Allow user to view a summary of onboarding/setup without invoking the LLM
     if (/^\s*(view|show)\s+(my\s+)?(setup|setup\s+logic|profile|preferences)\b/i.test(content)) {
       setInputValue('');
-      showSetupSummary();
+      openSetupSummary();
       return;
     }
 
@@ -3349,6 +3442,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
         onAddAccount={handleAddAccount}
         onResearchAccount={handleResearchAccount}
         onHome={handleGoHome}
+        onViewSetup={openSetupSummary}
       />
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="bg-white border-b border-gray-200 px-6 py-4">
@@ -4212,7 +4306,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                 className="text-xs text-blue-700 hover:underline"
                 onClick={() => {
                   dismissContextTooltip();
-                  showSetupSummary();
+                  openSetupSummary();
                 }}
               >
                 View my setup
@@ -4331,6 +4425,13 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
         }
       }}
       onClose={() => { setAssumedDialogOpen(false); setAssumedDialogIndustry(null); }}
+    />
+
+    <SetupSummaryModal
+      open={setupSummaryOpen}
+      loading={setupSummaryLoading}
+      data={setupSummaryData}
+      onClose={() => setSetupSummaryOpen(false)}
     />
 
     <DraftEmailDialog

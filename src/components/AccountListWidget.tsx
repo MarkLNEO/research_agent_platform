@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Building2, TrendingUp, AlertCircle, Plus, Upload, Flame, Clock, RefreshCw, Maximize2, X } from 'lucide-react';
 import { listTrackedAccounts, type TrackedAccount } from '../services/accountService';
 import { useToast } from '../components/ToastProvider';
@@ -9,10 +8,11 @@ interface AccountListWidgetProps {
   onAccountClick: (account: TrackedAccount) => void;
   onAddAccount: () => void;
   onResearchAccount?: (account: TrackedAccount) => void;
+  onViewSetup?: () => void;
   showFooter?: boolean;
 }
 
-export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAccount, showFooter = true }: AccountListWidgetProps) {
+export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAccount, onViewSetup, showFooter = true }: AccountListWidgetProps) {
   const [accounts, setAccounts] = useState<TrackedAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,8 +31,6 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
   const notifiedRef = useRef<Set<string>>(new Set());
   const inFlightRef = useRef(false);
   const debounceTimer = useRef<number | null>(null);
-  const navigate = useNavigate();
-
   const loadAccounts = useCallback(async () => {
     try {
       if (inFlightRef.current) return;
@@ -168,7 +166,13 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => navigate(`/profile-coach`)}
+              onClick={() => {
+                if (typeof onViewSetup === 'function') {
+                  onViewSetup();
+                } else {
+                  try { window.dispatchEvent(new Event('setup-summary:open')); } catch {}
+                }
+              }}
               className="px-2 py-1 text-xs font-semibold text-blue-700 hover:text-blue-800 hover:underline transition-colors"
             >
               View my setup

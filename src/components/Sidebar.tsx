@@ -29,6 +29,7 @@ interface SidebarProps {
   onAddAccount?: () => void;
   onHome?: () => void;
   onResearchAccount?: (account: TrackedAccount) => void;
+  onViewSetup?: () => void;
 }
 
 export function Sidebar({
@@ -47,7 +48,8 @@ export function Sidebar({
   onAccountClick,
   onAddAccount,
   onHome,
-  onResearchAccount
+  onResearchAccount,
+  onViewSetup
 }: SidebarProps) {
   const { signOut } = useAuth();
   const [isExpanded, setIsExpanded] = useState(true);
@@ -162,6 +164,7 @@ export function Sidebar({
             onAccountClick={onAccountClick}
             onAddAccount={onAddAccount}
             onResearchAccount={onResearchAccount}
+            onViewSetup={onViewSetup}
             showFooter={false}
           />
         </div>

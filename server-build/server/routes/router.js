@@ -14,6 +14,7 @@ import draftOutreach from './outreach/draft.ts';
 import updateProfile from './profiles/update.ts';
 import health from './health.ts';
 import test from './test.ts';
+import listPreferences from './preferences/list.ts';
 export const routeDefinitions = [
     { method: 'post', path: '/ai/chat', handler: chat },
     { method: 'options', path: '/ai/chat', handler: chat },
@@ -45,6 +46,8 @@ export const routeDefinitions = [
     { method: 'options', path: '/profiles/update', handler: updateProfile },
     { method: 'post', path: '/update-profile', handler: updateProfile },
     { method: 'options', path: '/update-profile', handler: updateProfile },
+    { method: 'get', path: '/preferences', handler: listPreferences },
+    { method: 'options', path: '/preferences', handler: listPreferences },
     { method: 'get', path: '/health', handler: health },
     { method: 'options', path: '/health', handler: health },
     { method: 'post', path: '/test', handler: test },
