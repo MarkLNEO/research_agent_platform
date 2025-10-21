@@ -243,6 +243,7 @@ async function fetchUserContext(client, userId) {
     const resolvedPrefs = buildResolvedPreferences(ctx?.prompt_config || null, preferences);
     const openQuestions = Array.isArray(ctx?.open_questions) ? ctx.open_questions : [];
     ctx.recent_preference_confirmations = [];
+    ctx.recent_alias_confirmations = [];
     return {
         profile: ctx?.profile || null,
         customCriteria: ctx?.custom_criteria || [],
@@ -253,7 +254,9 @@ async function fetchUserContext(client, userId) {
         preferences,
         resolvedPrefs,
         openQuestions,
+        unresolvedEntities: [],
         recentPreferenceConfirmations: [],
+        recentAliasConfirmations: [],
     };
 }
 function classifyResearchIntent(raw) {
@@ -511,15 +514,19 @@ function extractAliasCandidates(text) {
     return Array.from(tokens).slice(0, 12);
 }
 async function resolveCanonicalEntities(text, additionalTerms = []) {
-    const candidates = [...new Set([...extractAliasCandidates(text), ...additionalTerms.filter(Boolean)])];
-    if (!candidates.length)
-        return [];
+    const rawCandidates = [...extractAliasCandidates(text), ...additionalTerms.filter(Boolean)];
+    const uniqueCandidates = Array.from(new Set(rawCandidates.map(candidate => candidate.trim()))).filter(Boolean);
+    if (!uniqueCandidates.length) {
+        return { resolved: [], unresolved: [] };
+    }
+    const remaining = new Set(uniqueCandidates.map(candidate => candidate.toLowerCase()));
     const results = [];
-    for (const term of candidates) {
+    for (const term of uniqueCandidates) {
         try {
             const resolved = await resolveEntity(term);
             if (resolved) {
-                const exists = results.find(r => r.canonical.toLowerCase() === resolved.canonical.toLowerCase());
+                const canonicalKey = resolved.canonical.toLowerCase();
+                const exists = results.find(r => r.canonical.toLowerCase() === canonicalKey);
                 if (!exists) {
                     results.push({
                         canonical: resolved.canonical,
@@ -528,13 +535,14 @@ async function resolveCanonicalEntities(text, additionalTerms = []) {
                         matched: term,
                     });
                 }
+                remaining.delete(term.toLowerCase());
             }
         }
         catch (error) {
             console.warn('[aliasResolver] resolve failed for term', term, error);
         }
     }
-    return results;
+    return { resolved: results, unresolved: Array.from(remaining) };
 }
 function selectRelevantOpenQuestions(openQuestions, request, limit = 2) {
     if (!Array.isArray(openQuestions) || openQuestions.length === 0)
@@ -883,16 +891,19 @@ export default async function handler(req, res) {
                 const aliasTerms = [];
                 if (activeContextCompany)
                     aliasTerms.push(activeContextCompany);
-                const resolved = await resolveCanonicalEntities(String(lastUserMessage.content || ''), aliasTerms);
-                if (resolved.length) {
-                    userContext.canonicalEntities = resolved;
-                    const canonicalSummary = resolved
+                const { resolved: resolvedEntities, unresolved } = await resolveCanonicalEntities(String(lastUserMessage.content || ''), aliasTerms);
+                if (resolvedEntities.length) {
+                    userContext.canonicalEntities = resolvedEntities;
+                    const canonicalSummary = resolvedEntities
                         .map(item => `${item.canonical}${item.matched ? ` (from “${item.matched}”)` : ''}`)
                         .join(', ');
                     effectiveRequest = `${effectiveRequest}\n\nCanonical entities resolved: ${canonicalSummary}.`;
                     if (typeof input === 'string' && input) {
                         input = `${input}\n\nCanonical entities resolved for context: ${canonicalSummary}`;
                     }
+                }
+                if (unresolved.length) {
+                    userContext.unresolvedEntities = unresolved;
                 }
             }
             catch (aliasErr) {
@@ -901,17 +912,42 @@ export default async function handler(req, res) {
             try {
                 if (PREFS_SUMMARY_ENABLED) {
                     const aliasPairs = detectAliasAffirmations(String(lastUserMessage.content || ''));
-                    for (const pair of aliasPairs) {
-                        await learnAlias(pair.canonical, pair.alias, { source: 'followup' });
-                        try {
-                            await logUsage(supabase, user.id, 'alias.learned', 0, {
-                                canonical: pair.canonical,
-                                alias: pair.alias,
-                                run_id: runId,
-                            });
+                    if (aliasPairs.length) {
+                        const aliasConfirmations = Array.isArray(userContext.recentAliasConfirmations)
+                            ? [...userContext.recentAliasConfirmations]
+                            : [];
+                        for (const pair of aliasPairs) {
+                            let alreadyKnown = false;
+                            try {
+                                const existing = await resolveEntity(pair.alias);
+                                if (existing && existing.canonical.toLowerCase() === pair.canonical.toLowerCase() && existing.confidence >= 0.95) {
+                                    alreadyKnown = true;
+                                }
+                            }
+                            catch (resolveErr) {
+                                console.warn('[aliasResolver] failed to check existing alias', resolveErr);
+                            }
+                            await learnAlias(pair.canonical, pair.alias, { source: 'followup' });
+                            try {
+                                await logUsage(supabase, user.id, 'alias.learned', 0, {
+                                    canonical: pair.canonical,
+                                    alias: pair.alias,
+                                    run_id: runId,
+                                });
+                            }
+                            catch (logErr) {
+                                console.warn('[telemetry] alias.learned log failed', logErr);
+                            }
+                            if (!alreadyKnown) {
+                                aliasConfirmations.push({ alias: pair.alias, canonical: pair.canonical });
+                            }
                         }
-                        catch (logErr) {
-                            console.warn('[telemetry] alias.learned log failed', logErr);
+                        if (aliasConfirmations.length) {
+                            userContext.recentAliasConfirmations = aliasConfirmations;
+                            if (Array.isArray(userContext.unresolvedEntities) && userContext.unresolvedEntities.length) {
+                                const lowered = aliasConfirmations.map(entry => entry.alias.toLowerCase());
+                                userContext.unresolvedEntities = userContext.unresolvedEntities.filter((term) => !lowered.includes(term.toLowerCase()));
+                            }
                         }
                     }
                 }

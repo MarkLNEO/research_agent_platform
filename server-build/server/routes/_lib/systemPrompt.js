@@ -369,6 +369,15 @@ export function buildSystemPrompt(userContext, agentType = 'company_research', r
             extras.push(`Preference update: The user just confirmed ${formattedList}. Thank them, acknowledge you'll keep that focus in future briefs, and avoid re-asking for the same preference in this response. If you offer more tweaks, suggest different angles.`);
         }
     }
+    const recentAliasConfirmations = Array.isArray(userContext.recentAliasConfirmations)
+        ? userContext.recentAliasConfirmations.filter((entry) => typeof entry?.alias === 'string' && typeof entry?.canonical === 'string')
+        : [];
+    if (isResearchAgent && recentAliasConfirmations.length) {
+        const formattedList = recentAliasConfirmations
+            .map((entry) => `"${entry.alias}" → ${entry.canonical}`)
+            .join(', ');
+        extras.push(`Alias update: Confirm back to the user that you've learned ${formattedList}. Let them know you'll use those canonical names automatically next time and invite corrections if needed.`);
+    }
     if (isResearchAgent && resolvedMode === 'deep') {
         extras.push(DEFAULT_CRITERIA_GUIDANCE);
     }
@@ -403,6 +412,22 @@ export function buildSystemPrompt(userContext, agentType = 'company_research', r
     }
     if (contextLens.length && signalNames.length) {
         extras.push('In "Signals" and "Why Now", prioritize activity that maps to the user’s preferred signal types.');
+    }
+    if (profile.icp_definition || profile.icp) {
+        extras.push(`Use the user's ICP phrasing verbatim in the Executive Summary (e.g., "${(profile.icp_definition || profile.icp)}"). Tie fit and timing back to that wording.`);
+    }
+    const researchFocusAreas = Array.isArray(profile.research_focus)
+        ? profile.research_focus.filter((item) => typeof item === 'string' && item.trim().length > 0)
+        : [];
+    if (researchFocusAreas.length) {
+        const focusLabels = researchFocusAreas.map((item) => item.replace(/_/g, ' '));
+        extras.push(`Highlight the user's research focus areas (${focusLabels.join(', ')}) in the Executive Summary and High Level sections using those exact labels.`);
+    }
+    if (isResearchAgent && Array.isArray(userContext.unresolvedEntities) && userContext.unresolvedEntities.length) {
+        const unresolvedList = formatList(userContext.unresolvedEntities.map((term) => term.trim()).filter(Boolean));
+        if (unresolvedList) {
+            extras.push(`Unresolved shorthand detected: ${unresolvedList}. Politely ask the user to clarify what each item stands for exactly once, offer to remember it for future research, and pause further alias assumptions until they confirm.`);
+        }
     }
     if (isResearchAgent) {
         extras.push(buildImmediateAckGuidance(resolvedMode));

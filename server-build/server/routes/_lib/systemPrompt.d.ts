@@ -18,9 +18,14 @@ export interface UserContext {
         confidence?: number;
         matched?: string;
     }>;
+    unresolvedEntities?: string[];
     recentPreferenceConfirmations?: Array<{
         key: string;
         label?: string;
+    }>;
+    recentAliasConfirmations?: Array<{
+        alias: string;
+        canonical: string;
     }>;
 }
 export declare function buildSystemPrompt(userContext: UserContext, agentType?: AgentType, researchMode?: ResearchMode): string;
