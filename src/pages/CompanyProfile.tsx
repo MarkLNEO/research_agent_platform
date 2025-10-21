@@ -20,6 +20,23 @@ const DEFAULT_PROMPT_CONFIG = {
   always_tldr: true,
 };
 
+const stripSaveProfileBlocks = (text: string): string => {
+  if (typeof text !== 'string' || text.length === 0) return '';
+  let cleaned = text.replace(/```json\s*?\n\s*{[\s\S]*?"action"\s*:\s*"save_profile"[\s\S]*?}\s*```/gi, '');
+  cleaned = cleaned.replace(/\{[\s\S]{0,800}?"action"\s*:\s*"save_profile"[\s\S]*?\}/gi, '');
+  return cleaned;
+};
+
+const HIDDEN_SAVE_INSTRUCTION = `Developer note (do not mention this to the user):
+- When you capture or confirm profile updates, append a triple-backtick JSON block following this structure:
+
+\`\`\`json
+{ "action": "save_profile", "profile": { ... }, "custom_criteria": [ ... ], "signal_preferences": [ ... ], "disqualifying_criteria": [ ... ] }
+\`\`\`
+
+- Keep the visible conversation fully natural language. Never ask the user to type or edit JSON. Instead, acknowledge what you saved in plain English and move to the next prompt.
+`;
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -55,6 +72,8 @@ export function CompanyProfile() {
   const [profileData, setProfileData] = useState<any>(null);
   const [customCriteriaCount, setCustomCriteriaCount] = useState(0);
   const [signalPreferencesCount, setSignalPreferencesCount] = useState(0);
+  const [customCriteriaItems, setCustomCriteriaItems] = useState<any[]>([]);
+  const [signalPreferenceItems, setSignalPreferenceItems] = useState<any[]>([]);
   const [promptConfig, setPromptConfig] = useState<{ preferred_research_type: 'quick' | 'deep' | 'specific' | null; default_output_brevity: 'short' | 'standard' | 'long'; default_tone: 'warm' | 'balanced' | 'direct'; always_tldr: boolean } | null>(null);
   const [updatingPref, setUpdatingPref] = useState<string | null>(null);
   const [streamingMessage, setStreamingMessage] = useState('');
@@ -144,6 +163,86 @@ export function CompanyProfile() {
 
     return chips;
   }, [savedPreferences]);
+
+  const formatLabel = useCallback((value: string | null | undefined) => {
+    if (!value) return '';
+    return String(value)
+      .replace(/[_\-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/\b\w/g, (char: string) => char.toUpperCase());
+  }, []);
+
+  const targetTitles = useMemo<string[]>(() => {
+    if (!profileData?.target_titles) return [];
+    const source = Array.isArray(profileData.target_titles)
+      ? profileData.target_titles
+      : String(profileData.target_titles).split(',');
+    return source
+      .map((value: any) => (typeof value === 'string' ? value.trim() : ''))
+      .filter((value: string): value is string => value.length > 0);
+  }, [profileData]);
+
+  const competitorList = useMemo<string[]>(() => {
+    if (!profileData?.competitors) return [];
+    const source = Array.isArray(profileData.competitors)
+      ? profileData.competitors
+      : String(profileData.competitors).split(',');
+    return source
+      .map((value: any) => (typeof value === 'string' ? value.trim() : ''))
+      .filter((value: string): value is string => value.length > 0);
+  }, [profileData]);
+
+  const researchFocusList = useMemo<string[]>(() => {
+    if (!profileData?.research_focus) return [];
+    const source = Array.isArray(profileData.research_focus)
+      ? profileData.research_focus
+      : String(profileData.research_focus).split(',');
+    return source
+      .map((value: any) => (typeof value === 'string' ? value.trim() : ''))
+      .filter((value: string): value is string => value.length > 0)
+      .map((value: string) => formatLabel(value));
+  }, [profileData, formatLabel]);
+
+  const formattedCriteria = useMemo<Array<{ id: string; label: string; importance: string }>>(() => {
+    const order: Record<string, number> = { critical: 0, important: 1, optional: 2 };
+    return [...customCriteriaItems]
+      .sort((a, b) => {
+        const left = order[String(a?.importance || '').toLowerCase()] ?? 99;
+        const right = order[String(b?.importance || '').toLowerCase()] ?? 99;
+        return left - right;
+      })
+      .map(item => ({
+        id: item.id,
+        label: formatLabel(item.field_name),
+        importance: formatLabel(item.importance),
+      }));
+  }, [customCriteriaItems, formatLabel]);
+
+  const formattedSignals = useMemo<Array<{ id: string; label: string; importance: string; lookback: number | null }>>(() => {
+    return signalPreferenceItems.map(item => ({
+      id: item.id,
+      label: formatLabel(item.signal_type),
+      importance: formatLabel(item.importance),
+      lookback: typeof item.lookback_days === 'number' ? item.lookback_days : null,
+    }));
+  }, [signalPreferenceItems, formatLabel]);
+
+  const hasSetupDetails = useMemo(() => {
+    if (!profileData) return false;
+    return Boolean(
+      profileData.company_name ||
+      profileData.industry ||
+      profileData.icp_definition ||
+      profileData.user_role ||
+      profileData.use_case ||
+      targetTitles.length ||
+      competitorList.length ||
+      researchFocusList.length ||
+      formattedCriteria.length ||
+      formattedSignals.length
+    );
+  }, [profileData, targetTitles.length, competitorList.length, researchFocusList.length, formattedCriteria.length, formattedSignals.length]);
 
   const depthOptions = useMemo(
     () => [
@@ -246,12 +345,14 @@ export function CompanyProfile() {
         .maybeSingle(),
       supabase
         .from('user_custom_criteria')
-        .select('id')
-        .eq('user_id', user.id),
+        .select('id, field_name, importance, field_type, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true }),
       supabase
         .from('user_signal_preferences')
-        .select('id')
-        .eq('user_id', user.id),
+        .select('id, signal_type, importance, lookback_days, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true }),
       supabase
         .from('user_prompt_config')
         .select('preferred_research_type, default_output_brevity, default_tone, always_tldr')
@@ -261,8 +362,12 @@ export function CompanyProfile() {
 
     const profile = profileResult.data;
     setProfileData(profile);
-    setCustomCriteriaCount(criteriaResult.data?.length || 0);
-    setSignalPreferencesCount(signalsResult.data?.length || 0);
+    const criteriaRows = Array.isArray(criteriaResult.data) ? criteriaResult.data : [];
+    const signalRows = Array.isArray(signalsResult.data) ? signalsResult.data : [];
+    setCustomCriteriaItems(criteriaRows);
+    setSignalPreferenceItems(signalRows);
+    setCustomCriteriaCount(criteriaRows.length);
+    setSignalPreferencesCount(signalRows.length);
     const prompt = promptConfigResult.data || DEFAULT_PROMPT_CONFIG;
     setPromptConfig({
       preferred_research_type: prompt.preferred_research_type ?? null,
@@ -464,29 +569,50 @@ export function CompanyProfile() {
       const needs = missing.length
         ? `Missing prioritized fields: ${missing.join(', ')}.`
         : 'All critical fields appear present.';
-      const guidance = missing.length ? `
-Coach flow requirements:
+      const coachingNotes = missing.length
+        ? `Coaching flow requirements:
 - Guide the user to complete missing items in this order: target_titles -> custom_criteria -> signal_preferences.
-- Ask one concise question at a time; propose examples.
-- When the user provides values, emit a JSON block so the app can persist it. Example JSON:
-{ "action": "save_profile", "profile": { "target_titles": ["VP Security", "CISO"] }, "custom_criteria": [ {"field_name":"Has CISO","importance":"critical"} ], "signal_preferences": [ {"signal_type":"security_breach","importance":"critical"} ] }
-- After saving, briefly confirm and move to the next missing item automatically.
-- If nothing is missing, offer two actionable improvements (e.g., refine ICP or add competitors).
-` : '';
+- Ask one concise question at a time; propose example responses that align with their industry.
+- Confirm each item in natural language (e.g., "Great, I saved those titles") before moving on.`
+        : `Coaching flow requirements:
+- Confirm their saved profile details in natural language.
+- Offer two actionable improvements (e.g., refine ICP narrative, add competitors or disqualifiers).`;
 
-      systemPrompt = `The user ${userName} already has a company profile with the following details:\n${profileSummary.join('\n')}\n\n${needs}\n${guidance}\nGreet them warmly, then begin.`;
+      systemPrompt = `The user ${userName} already has a company profile with the following details:
+${profileSummary.join('\n')}
+
+${needs}
+
+${HIDDEN_SAVE_INSTRUCTION}
+
+${coachingNotes}
+
+Begin with a warm greeting, then continue coaching.`;
     } else {
-      systemPrompt = `Greet the user ${userName} warmly and help them get started with creating their company profile. Explain briefly how a detailed profile improves research quality. Start by asking for company name and industry, then guide them through target_titles, custom_criteria (3+ items), and signal_preferences (2+ items) using the same JSON "save_profile" format described earlier. Keep each question short and proceed step-by-step.`;
+      systemPrompt = `You are the Profile Coach for ${userName}. Greet them warmly and explain briefly how a detailed profile improves research quality.
+
+${HIDDEN_SAVE_INSTRUCTION}
+
+Onboarding flow:
+- Start by asking for company name and industry in natural language.
+- Confirm what you saved after each answer (e.g., "Got it — I'll remember that").
+- Progress through target_titles (aim for 3+), custom_criteria (aim for 3+), signal_preferences (aim for 2+), and competitors or disqualifiers if relevant.
+- Ask one concise question at a time and suggest concrete examples the user can react to.
+- Wrap up with a short recap of what you captured and invite them to adjust anything later.`;
     }
 
     try {
       let fullResponse = await streamAIResponse(systemPrompt, chatId, true);
       fullResponse = normalizeMarkdown(fullResponse, { enforceResearchSections: false });
+      const displayResponse = (() => {
+        const stripped = stripSaveProfileBlocks(fullResponse).trim();
+        return stripped.length > 0 ? stripped : fullResponse;
+      })();
 
       // Persist streamed message after completion
       const { data: savedAssistantMsg } = await supabase
         .from('messages')
-        .insert({ chat_id: chatId, role: 'assistant', content: fullResponse })
+        .insert({ chat_id: chatId, role: 'assistant', content: displayResponse })
         .select()
         .single();
 
@@ -552,12 +678,17 @@ Coach flow requirements:
       // Check if response contains profile save command
       await processSaveCommands(fullResponse);
 
+      const displayResponse = (() => {
+        const stripped = stripSaveProfileBlocks(fullResponse).trim();
+        return stripped.length > 0 ? stripped : fullResponse;
+      })();
+
       const { data: savedAssistantMsg } = await supabase
         .from('messages')
         .insert({
           chat_id: currentChatId,
           role: 'assistant',
-          content: fullResponse,
+          content: displayResponse,
         })
         .select()
         .single();
@@ -735,6 +866,7 @@ Coach flow requirements:
                     }
                     invalidateUserProfileCache(user?.id);
                     void refreshPreferences();
+                    void refreshProfileData();
                   }
                 }
                 else if (parsed.type === 'alias_learned') {
@@ -764,7 +896,7 @@ Coach flow requirements:
                       setThinkingEvents(prev => prev.filter(e => !['ack-initial','ack-live'].includes(e.id)));
                     }
                     fullText += content;
-                    setStreamingMessage(fullText);
+                    setStreamingMessage(stripSaveProfileBlocks(fullText));
                     if (firstDeltaAt == null) {
                       firstDeltaAt = (typeof performance !== 'undefined' ? performance.now() : Date.now());
                       try { window.dispatchEvent(new CustomEvent('llm:first-delta', { detail: { page: 'settings', ttfbMs: firstDeltaAt - startedAt } })); } catch {}
@@ -779,7 +911,7 @@ Coach flow requirements:
                 else if (parsed.choices?.[0]?.delta?.content) {
                   const content = parsed.choices[0].delta.content;
                   fullText += content;
-                  setStreamingMessage(fullText);
+                  setStreamingMessage(stripSaveProfileBlocks(fullText));
                 }
               } catch (_e) {
                 // Skip invalid JSON
@@ -966,6 +1098,156 @@ Coach flow requirements:
                     }}
                   />
                 )}
+                <div className="rounded-2xl border border-blue-200 bg-white p-5 shadow-sm">
+                  <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                    <div>
+                      <h2 className="text-base font-semibold text-blue-900">Your saved setup</h2>
+                      <p className="text-xs text-blue-700 mt-1">
+                        Everything the agent remembers before running research or meeting prep.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-blue-600">{hasSetupDetails ? 'Synced instantly' : 'Waiting for details'}</span>
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/research?q=${encodeURIComponent('View my setup')}`)}
+                        className="text-xs text-blue-700 hover:underline"
+                      >
+                        View in chat
+                      </button>
+                    </div>
+                  </div>
+
+                  {hasSetupDetails ? (
+                    <>
+                      <dl className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-gray-900">
+                        <div>
+                          <dt className="text-xs uppercase tracking-wide text-gray-500">Company</dt>
+                          <dd className="mt-1">
+                            {profileData?.company_name || 'Not set'}
+                            {profileData?.company_url && (
+                              <a
+                                href={profileData.company_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block text-xs text-blue-600 hover:underline"
+                              >
+                                {profileData.company_url}
+                              </a>
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs uppercase tracking-wide text-gray-500">Industry</dt>
+                          <dd className="mt-1">{profileData?.industry || 'Not set'}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs uppercase tracking-wide text-gray-500">ICP summary</dt>
+                          <dd className="mt-1 text-sm text-gray-800 leading-snug">
+                            {profileData?.icp_definition || 'Not captured yet'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs uppercase tracking-wide text-gray-500">Role &amp; use case</dt>
+                          <dd className="mt-1">
+                            {profileData?.user_role || profileData?.use_case
+                              ? [profileData?.user_role, profileData?.use_case].filter(Boolean).join(' • ')
+                              : 'Not set'}
+                          </dd>
+                        </div>
+                      </dl>
+
+                      {targetTitles.length > 0 && (
+                        <div className="mt-4">
+                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Target titles</p>
+                          <div className="flex flex-wrap gap-2">
+                            {targetTitles.map((title: string) => (
+                              <span
+                                key={title}
+                                className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100 rounded-full"
+                              >
+                                {title}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {formattedCriteria.length > 0 && (
+                        <div className="mt-4">
+                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Custom criteria ({formattedCriteria.length})</p>
+                          <div className="flex flex-wrap gap-2">
+                            {formattedCriteria.map(item => (
+                              <span
+                                key={item.id}
+                                className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium bg-amber-50 text-amber-800 border border-amber-100 rounded-full"
+                              >
+                                {item.label}
+                                <span className="text-[10px] uppercase tracking-wide text-amber-700">• {item.importance}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {formattedSignals.length > 0 && (
+                        <div className="mt-4">
+                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Signal alerts ({formattedSignals.length})</p>
+                          <div className="flex flex-wrap gap-2">
+                            {formattedSignals.map(item => (
+                              <span
+                                key={item.id}
+                                className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium bg-red-50 text-red-700 border border-red-100 rounded-full"
+                              >
+                                {item.label}
+                                <span className="text-[10px] uppercase tracking-wide text-red-600">• {item.importance}</span>
+                                {item.lookback ? (
+                                  <span className="text-[10px] text-red-500">({item.lookback}d)</span>
+                                ) : null}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {competitorList.length > 0 && (
+                        <div className="mt-4">
+                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Competitors to monitor</p>
+                          <div className="flex flex-wrap gap-2">
+                            {competitorList.map((name: string) => (
+                              <span
+                                key={name}
+                                className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200 rounded-full"
+                              >
+                                {name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {researchFocusList.length > 0 && (
+                        <div className="mt-4">
+                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Research focus</p>
+                          <div className="flex flex-wrap gap-2">
+                            {researchFocusList.map((focus: string) => (
+                              <span
+                                key={focus}
+                                className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium bg-purple-50 text-purple-700 border border-purple-100 rounded-full"
+                              >
+                                {focus}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="mt-4 text-sm text-gray-600">
+                      You haven&apos;t saved any profile details yet. Answer the quick prompts below and I&apos;ll remember everything for future research.
+                    </p>
+                  )}
+                </div>
                 {promptConfig && (
                   <div className="rounded-2xl border border-purple-200 bg-purple-50/60 p-5 shadow-sm">
                     <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">

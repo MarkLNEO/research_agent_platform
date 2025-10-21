@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Building2, TrendingUp, AlertCircle, Plus, Upload, Flame, Clock, RefreshCw, Maximize2, X } from 'lucide-react';
 import { listTrackedAccounts, type TrackedAccount } from '../services/accountService';
 import { useToast } from '../components/ToastProvider';
@@ -30,6 +31,7 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
   const notifiedRef = useRef<Set<string>>(new Set());
   const inFlightRef = useRef(false);
   const debounceTimer = useRef<number | null>(null);
+  const navigate = useNavigate();
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -164,34 +166,42 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
               </>
             ) : null}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => { void loadAccounts(); }}
-              className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-100"
+              onClick={() => navigate(`/profile-coach`)}
+              className="px-2 py-1 text-xs font-semibold text-blue-700 hover:text-blue-800 hover:underline transition-colors"
             >
-              <RefreshCw className="w-3.5 h-3.5" /> Refresh
+              View my setup
             </button>
-            <button
-              onClick={() => setShowModal(true)}
-              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-              title="Open tracked accounts"
-            >
-              <Maximize2 className="w-4 h-4 text-gray-600" />
-            </button>
-            <button
-              onClick={() => setShowBulkUpload(true)}
-              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-              title="Bulk import accounts from CSV"
-            >
-              <Upload className="w-4 h-4 text-gray-600" />
-            </button>
-            <button
-              onClick={onAddAccount}
-              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-              title="Add account to track"
-            >
-              <Plus className="w-4 h-4 text-gray-600" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => { void loadAccounts(); }}
+                className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-100"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> Refresh
+              </button>
+              <button
+                onClick={() => setShowModal(true)}
+                className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Open tracked accounts"
+              >
+                <Maximize2 className="w-4 h-4 text-gray-600" />
+              </button>
+              <button
+                onClick={() => setShowBulkUpload(true)}
+                className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Bulk import accounts from CSV"
+              >
+                <Upload className="w-4 h-4 text-gray-600" />
+              </button>
+              <button
+                onClick={onAddAccount}
+                className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Add account to track"
+              >
+                <Plus className="w-4 h-4 text-gray-600" />
+              </button>
+            </div>
           </div>
         </div>
 

@@ -1265,6 +1265,33 @@ useEffect(() => {
 
   // Save dialog opens via onPromote in MessageBubble (last assistant message)
 
+  const syncTrackedAccountResearch = useCallback(async (rawSubject: string | null | undefined, summary?: string | null) => {
+    if (!user?.id) return false;
+    const subject = typeof rawSubject === 'string' ? rawSubject.trim() : '';
+    if (!subject) return false;
+    try {
+      const updates: Record<string, any> = {
+        last_researched_at: new Date().toISOString(),
+      };
+      if (typeof summary === 'string' && summary.trim()) {
+        updates.last_research_summary = summary.trim();
+      }
+      const { data, error } = await supabase
+        .from('tracked_accounts')
+        .update(updates)
+        .eq('user_id', user.id)
+        .eq('company_name', subject)
+        .select('id');
+      if (error) {
+        throw error;
+      }
+      return Array.isArray(data) && data.length > 0;
+    } catch (err) {
+      console.warn('syncTrackedAccountResearch failed', err);
+      return false;
+    }
+  }, [supabase, user?.id]);
+
   const persistResearchDraft = useCallback(async (draft: ResearchDraft) => {
     const dataPayload = {
       subject: draft.subject,
@@ -1381,10 +1408,13 @@ useEffect(() => {
     } catch (e) {
       console.warn('Criteria evaluation failed', e);
     }
+    if (draft.subject) {
+      await syncTrackedAccountResearch(draft.subject, draft.executive_summary || null);
+    }
     window.dispatchEvent(new CustomEvent('accounts-updated'));
     window.dispatchEvent(new CustomEvent('research-history-updated'));
     return inserted;
-  }, [supabase, user?.id]);
+  }, [supabase, user?.id, syncTrackedAccountResearch]);
 
   const handleTrackAccount = async (rawCompanyName: string) => {
     if (!user) return;
@@ -1540,11 +1570,15 @@ useEffect(() => {
         .eq('user_id', user.id)
         .eq('company_name', companyName)
         .maybeSingle();
-      if (existing) return false;
+      if (existing) {
+        await syncTrackedAccountResearch(companyName, lastResearchSummaryRef.current || null);
+        return false;
+      }
       const { error } = await supabase
         .from('tracked_accounts')
         .insert({ user_id: user.id, company_name: companyName, monitoring_enabled: true, priority: 'standard' });
       if (error) throw error;
+      await syncTrackedAccountResearch(companyName, lastResearchSummaryRef.current || null);
       // Notify listeners to refresh tracked lists
       window.dispatchEvent(new CustomEvent('accounts-updated'));
       return true;
@@ -2203,6 +2237,46 @@ useEffect(() => {
     setFocusComposerTick(t => t + 1);
   };
 
+  const showSetupSummary = useCallback(() => {
+    const p: any = userProfile || {};
+    const bullets: string[] = [];
+    bullets.push('## Your Setup');
+    if (p.company_name || p.company_url) {
+      bullets.push(`- Organization: ${p.company_name || '—'}${p.company_url ? ` (${p.company_url})` : ''}`);
+    }
+    if (p.user_role || p.use_case) {
+      const roleParts = [p.user_role, p.use_case].filter(Boolean).join(' — ');
+      bullets.push(`- Role/Use case: ${roleParts || '—'}`);
+    }
+    if (p.icp_definition || p.industry) {
+      bullets.push(`- ICP: ${p.icp_definition || p.industry}`);
+    }
+    if (Array.isArray(signalPreferences) && signalPreferences.length) {
+      const sigs = signalPreferences
+        .map((s: any) => s.signal_type?.replace(/_/g, ' '))
+        .filter(Boolean)
+        .join(', ');
+      bullets.push(`- Signals: ${sigs}`);
+    }
+    if (Array.isArray(customCriteria) && customCriteria.length) {
+      const crit = customCriteria
+        .map((c: any) => `${c.name} (${(c.importance || '').toLowerCase() || 'optional'})`)
+        .join('; ');
+      bullets.push(`- Custom criteria: ${crit}`);
+    }
+    if (Array.isArray(p.research_focus) && p.research_focus.length) {
+      bullets.push(`- Research focus: ${p.research_focus.map((x: string) => x.replace(/_/g, ' ')).join(', ')}`);
+    }
+    bullets.push('\nShortcuts: type "Edit setup" to reopen onboarding, or go to Settings → Profile.');
+    const msg: Message = {
+      id: `setup-${Date.now()}`,
+      role: 'assistant',
+      content: bullets.join('\n'),
+      created_at: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, msg]);
+  }, [customCriteria, signalPreferences, userProfile]);
+
   const handleSendMessage = async () => {
     const content = inputValue.trim();
     if (!content) return;
@@ -2212,30 +2286,7 @@ useEffect(() => {
     // Allow user to view a summary of onboarding/setup without invoking the LLM
     if (/^\s*(view|show)\s+(my\s+)?(setup|setup\s+logic|profile|preferences)\b/i.test(content)) {
       setInputValue('');
-      const p: any = userProfile || {};
-      const bullets: string[] = [];
-      bullets.push('## Your Setup');
-      if (p.company_name || p.company_url) {
-        bullets.push(`- Organization: ${p.company_name || '—'}${p.company_url ? ` (${p.company_url})` : ''}`);
-      }
-      if (p.user_role || p.use_case) {
-        bullets.push(`- Role/Use case: ${[p.user_role, p.use_case].filter(Boolean).join(' — ') || '—'}`);
-      }
-      if (p.icp_definition || p.industry) bullets.push(`- ICP: ${p.icp_definition || p.industry}`);
-      if (Array.isArray(signalPreferences) && signalPreferences.length) {
-        const sigs = signalPreferences.map((s: any) => s.signal_type?.replace(/_/g, ' ')).filter(Boolean).join(', ');
-        bullets.push(`- Signals: ${sigs}`);
-      }
-      if (Array.isArray(customCriteria) && customCriteria.length) {
-        const crit = customCriteria.map((c: any) => `${c.name} (${(c.importance || '').toLowerCase() || 'optional'})`).join('; ');
-        bullets.push(`- Custom criteria: ${crit}`);
-      }
-      if (Array.isArray(p.research_focus) && p.research_focus.length) {
-        bullets.push(`- Research focus: ${p.research_focus.map((x: string) => x.replace(/_/g, ' ')).join(', ')}`);
-      }
-      bullets.push('\nShortcuts: type "Edit setup" to reopen onboarding, or go to Settings → Profile.');
-      const msg: Message = { id: `setup-${Date.now()}`, role: 'assistant', content: bullets.join('\n'), created_at: new Date().toISOString() };
-      setMessages(prev => [...prev, msg]);
+      showSetupSummary();
       return;
     }
 
@@ -4112,7 +4163,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
       <div className="bg-gray-50">
         <div className="max-w-3xl mx-auto px-6 py-4">
           {/* Context crumb (above composer) */}
-          <div className="mb-2 flex items-center justify-between" data-testid="context-crumb">
+          <div className="mb-2 flex items-center justify-between gap-3" data-testid="context-crumb">
             <div className="text-xs text-gray-700 inline-flex items-center gap-2">
               <div className="relative inline-flex">
                 {showContextTooltip && (
@@ -4140,14 +4191,26 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
               )}
             </div>
             {/* Header metrics (right-aligned) */}
-            <div className="text-xs text-gray-600 hidden sm:flex items-center gap-2" data-testid="header-metrics">
-              {accountStats && (
-                <>
-                  <span className="inline-flex items-center gap-1 bg-gray-100 px-2 py-0.5 rounded">📊 {accountStats.total} tracked</span>
-                  <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 px-2 py-0.5 rounded">🔥 {accountStats.hot} hot</span>
-                  <span className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-2 py-0.5 rounded">⚡ {accountStats.with_signals} with signals</span>
-                </>
-              )}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="text-xs text-blue-700 hover:underline"
+                onClick={() => {
+                  dismissContextTooltip();
+                  showSetupSummary();
+                }}
+              >
+                View my setup
+              </button>
+              <div className="text-xs text-gray-600 hidden sm:flex items-center gap-2" data-testid="header-metrics">
+                {accountStats && (
+                  <>
+                    <span className="inline-flex items-center gap-1 bg-gray-100 px-2 py-0.5 rounded">📊 {accountStats.total} tracked</span>
+                    <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 px-2 py-0.5 rounded">🔥 {accountStats.hot} hot</span>
+                    <span className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-2 py-0.5 rounded">⚡ {accountStats.with_signals} with signals</span>
+                  </>
+                )}
+              </div>
             </div>
 
             {crumbOpen && (
