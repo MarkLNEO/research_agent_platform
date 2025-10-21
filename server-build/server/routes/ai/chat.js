@@ -723,6 +723,7 @@ export default async function handler(req, res) {
         const contextFetchMs = Date.now() - contextFetchStart;
         const pendingPreferenceEvents = [];
         const pendingAliasEvents = [];
+        const pendingAliasClarifications = [];
         // Subject recall: tiny snapshot of last saved research for active_subject
         let subjectSnapshot = '';
         try {
@@ -962,6 +963,11 @@ export default async function handler(req, res) {
                             if (created) {
                                 existingAliasQuestions.add(lowered);
                                 userContext.openQuestions = [...(userContext.openQuestions || []), created];
+                                pendingAliasClarifications.push({
+                                    alias: term,
+                                    suggestion: item.suggestion || undefined,
+                                    questionId: created.id,
+                                });
                             }
                         }
                     }
@@ -1192,6 +1198,16 @@ export default async function handler(req, res) {
             }
             catch { }
         });
+        if (pendingAliasClarifications.length) {
+            for (const clarification of pendingAliasClarifications) {
+                safeWrite(`data: ${JSON.stringify({
+                    type: 'alias_clarification',
+                    alias: clarification.alias,
+                    suggestion: clarification.suggestion || null,
+                    question_id: clarification.questionId || null,
+                })}\n\n`);
+            }
+        }
         if (pendingPreferenceEvents.length) {
             safeWrite(`data: ${JSON.stringify({ type: 'preference_saved', preferences: pendingPreferenceEvents })}\n\n`);
         }

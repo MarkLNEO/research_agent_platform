@@ -96,6 +96,55 @@ export function CompanyProfile() {
     return { depthLabel, lengthLabel, toneLabel, tldrLabel, focus };
   }, [promptConfig, customCriteriaCount, signalPreferencesCount]);
 
+  const preferenceChips = useMemo(() => {
+    const chips: Array<{ id: string; label: string; tone?: 'primary' | 'default' }> = [];
+    const seen = new Set<string>();
+
+    const normalizeLabel = (value: string) =>
+      value.replace(/^focus\./, '').replace(/[_\.]/g, ' ').trim();
+
+    for (const pref of savedPreferences) {
+      const key = pref.key || '';
+      if (!key) continue;
+
+      if (key.startsWith('focus.')) {
+        const label = typeof (pref.value as any)?.label === 'string'
+          ? (pref.value as any).label
+          : normalizeLabel(key);
+        const id = `focus-${label.toLowerCase()}`;
+        if (!seen.has(id)) {
+          seen.add(id);
+          chips.push({ id, label: `Focus · ${label}`, tone: 'primary' });
+        }
+        continue;
+      }
+
+      if (key === 'tone') {
+        const value = typeof pref.value === 'string' ? pref.value : (pref.value as any)?.label;
+        const label = value ? `Tone · ${normalizeLabel(String(value))}` : 'Tone preference';
+        const id = 'tone';
+        if (!seen.has(id)) {
+          seen.add(id);
+          chips.push({ id, label });
+        }
+        continue;
+      }
+
+      if (key === 'summary.brevity') {
+        const value = typeof pref.value === 'string' ? pref.value : (pref.value as any)?.level;
+        const label = value ? `Summary · ${normalizeLabel(String(value))}` : 'Summary preference';
+        const id = 'summary';
+        if (!seen.has(id)) {
+          seen.add(id);
+          chips.push({ id, label });
+        }
+        continue;
+      }
+    }
+
+    return chips;
+  }, [savedPreferences]);
+
   const depthOptions = useMemo(
     () => [
       {
@@ -1074,6 +1123,22 @@ Coach flow requirements:
                         </div>
                         <span className="text-xs text-emerald-600">{prefsLoading ? 'Refreshing…' : 'Synced instantly'}</span>
                       </div>
+                      {preferenceChips.length > 0 && (
+                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                          {preferenceChips.map(chip => (
+                            <span
+                              key={chip.id}
+                              className={`inline-flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded-full border ${
+                                chip.tone === 'primary'
+                                  ? 'bg-emerald-600/90 text-white border-emerald-600'
+                                  : 'bg-white/80 text-emerald-800 border-emerald-200'
+                              }`}
+                            >
+                              {chip.label}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       <ul className="mt-4 space-y-2">
                         {prefsLoading && savedPreferences.length === 0 ? (
                           <li className="text-sm text-emerald-700">Loading saved preferences…</li>

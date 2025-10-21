@@ -15,6 +15,12 @@ export function AccountSignalsDrawer({ open, accountId, companyName, onClose, on
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const latestDetected = signals.reduce<string | null>((acc, signal) => {
+    if (!signal?.detected_at) return acc;
+    if (!acc) return signal.detected_at;
+    return new Date(signal.detected_at) > new Date(acc) ? signal.detected_at : acc;
+  }, null);
+
   useEffect(() => {
     if (!open || !accountId) return;
     const load = async () => {
@@ -77,6 +83,11 @@ export function AccountSignalsDrawer({ open, accountId, companyName, onClose, on
           )}
           {error && (
             <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3">{error}</div>
+          )}
+          {!loading && !error && (
+            <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+              Monitoring saved signals. {latestDetected ? `Latest detection ${fmt(latestDetected)}.` : 'No signals detected yet — I’ll keep watch and alert you the moment something important happens.'}
+            </div>
           )}
           {!loading && !error && signals.length === 0 && (
             <div className="text-sm text-gray-600 flex items-center gap-2"><AlertTriangle className="w-4 h-4"/> No signals found for this account.</div>

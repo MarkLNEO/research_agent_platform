@@ -53,6 +53,15 @@ type DashboardAction = {
   value?: string;
 };
 
+type AliasPrompt = {
+  alias: string;
+  suggestion?: string | null;
+  questionId?: string | null;
+  stage: 'choice' | 'manual';
+  manualValue: string;
+  submitting?: boolean;
+};
+
 const extractCompanyNameFromQuery = (raw: string): string | null => {
   if (!raw) return null;
   let cleaned = raw.trim();
@@ -410,6 +419,96 @@ export function ResearchChat() {
   const [signalsDrawerOpen, setSignalsDrawerOpen] = useState(false);
   const [signalsAccountId, setSignalsAccountId] = useState<string | null>(null);
   const [signalsCompanyName, setSignalsCompanyName] = useState<string | undefined>(undefined);
+  const [aliasPrompts, setAliasPrompts] = useState<AliasPrompt[]>([]);
+
+  const updateAliasPrompt = useCallback((alias: string, updater: (prompt: AliasPrompt) => AliasPrompt) => {
+    setAliasPrompts(prev =>
+      prev.map(item =>
+        item.alias.toLowerCase() === alias.toLowerCase() ? updater(item) : item
+      )
+    );
+  }, []);
+
+  const removeAliasPrompt = useCallback((alias: string) => {
+    setAliasPrompts(prev => prev.filter(item => item.alias.toLowerCase() !== alias.toLowerCase()));
+  }, []);
+
+  const confirmAliasPrompt = useCallback(async (alias: string, canonical: string, questionId?: string | null) => {
+    const trimmedAlias = alias.trim();
+    const trimmedCanonical = canonical.trim();
+    if (!trimmedAlias || !trimmedCanonical) {
+      addToast({ type: 'error', title: 'Alias not saved', description: 'Provide a valid name for the shorthand.' });
+      return;
+    }
+    updateAliasPrompt(trimmedAlias, prompt => ({ ...prompt, submitting: true }));
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+      const response = await fetch('/api/aliases/confirm', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          alias: trimmedAlias,
+          canonical: trimmedCanonical,
+          question_id: questionId ?? null,
+          action: 'confirm',
+        }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err?.error || 'Failed to save alias');
+      }
+      addToast({
+        type: 'success',
+        title: 'Alias saved',
+        description: `I’ll treat ${trimmedAlias} as ${trimmedCanonical} from now on.`,
+      });
+      removeAliasPrompt(trimmedAlias);
+    } catch (error: any) {
+      const message = error?.message || 'Failed to save alias';
+      addToast({ type: 'error', title: 'Alias not saved', description: message });
+      updateAliasPrompt(trimmedAlias, prompt => ({ ...prompt, submitting: false }));
+    }
+  }, [addToast, supabase, updateAliasPrompt, removeAliasPrompt]);
+
+  const skipAliasPrompt = useCallback(async (alias: string, questionId?: string | null) => {
+    const trimmedAlias = alias.trim();
+    updateAliasPrompt(trimmedAlias, prompt => ({ ...prompt, submitting: true }));
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+      if (questionId) {
+        await fetch('/api/aliases/confirm', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            alias: trimmedAlias,
+            question_id: questionId,
+            action: 'reject',
+          }),
+        });
+      }
+      removeAliasPrompt(trimmedAlias);
+    } catch (error: any) {
+      const message = error?.message || 'Unable to skip alias';
+      addToast({ type: 'error', title: 'Could not skip alias', description: message });
+      updateAliasPrompt(trimmedAlias, prompt => ({ ...prompt, submitting: false }));
+    }
+  }, [addToast, supabase, updateAliasPrompt, removeAliasPrompt]);
+
+  const promptManualAlias = useCallback((alias: string) => {
+    updateAliasPrompt(alias, prompt => ({ ...prompt, stage: 'manual', manualValue: prompt.manualValue || '', submitting: false }));
+  }, [updateAliasPrompt]);
+
+  const setAliasManualValue = useCallback((alias: string, value: string) => {
+    updateAliasPrompt(alias, prompt => ({ ...prompt, manualValue: value }));
+  }, [updateAliasPrompt]);
   const [recentSignals, setRecentSignals] = useState<AccountSignalSummary[]>([]);
   const [greeting, setGreeting] = useState<{ time_of_day: string; user_name: string } | null>(null);
   const [greetingOpeningLine, setGreetingOpeningLine] = useState<string | null>(null);
@@ -1963,7 +2062,18 @@ useEffect(() => {
         setActionBarCompany(nextCompany);
         setActionBarVisible(true);
         if (nextCompany) {
-          void ensureTrackedAccount(nextCompany);
+          ensureTrackedAccount(nextCompany)
+            .then((newlyTracked) => {
+              if (newlyTracked) {
+                addToast({
+                  type: 'success',
+                  title: `${nextCompany} added to tracking`,
+                  description: 'I’ll keep monitoring signals for this account.',
+                });
+                try { window.dispatchEvent(new CustomEvent('show-tracked-accounts')); } catch {}
+              }
+            })
+            .catch((err) => console.warn('Auto-track failed', err));
         }
       }
 
@@ -2490,6 +2600,30 @@ useEffect(() => {
                   });
                   // Trigger sidebar refresh by dispatching custom event
                   window.dispatchEvent(new CustomEvent('accounts-updated'));
+                }
+                else if (parsed.type === 'alias_clarification') {
+                  const alias = typeof parsed.alias === 'string' ? parsed.alias.trim() : '';
+                  if (!alias) continue;
+                  const suggestion = typeof parsed.suggestion === 'string' ? parsed.suggestion : undefined;
+                  const questionId = typeof parsed.question_id === 'string' ? parsed.question_id : undefined;
+                  setAliasPrompts(prev => {
+                    if (prev.some(item => item.alias.toLowerCase() === alias.toLowerCase())) return prev;
+                    return [...prev, {
+                      alias,
+                      suggestion,
+                      questionId,
+                      stage: suggestion ? 'choice' : 'manual',
+                      manualValue: suggestion || '',
+                      submitting: false,
+                    }];
+                  });
+                  addToast({
+                    type: 'info',
+                    title: `Clarify ${alias}?`,
+                    description: suggestion
+                      ? `Let me know if ${alias} should map to ${suggestion}.`
+                      : `Tell me what ${alias} stands for so I can remember it.`,
+                  });
                 }
                 else if (parsed.type === 'preference_saved') {
                   if (Array.isArray(parsed.preferences) && parsed.preferences.length) {
@@ -3047,11 +3181,19 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
     setSignalsDrawerOpen(true);
   };
 
-  const handleResearchAccount = (account: TrackedAccount) => {
-    window.dispatchEvent(new CustomEvent('chat:prefill', {
-      detail: { prompt: `Research ${account.company_name}` }
-    }));
-  };
+  const handleResearchAccount = useCallback(async (account: TrackedAccount) => {
+    const prompt = `Research ${account.company_name}`;
+    try {
+      const chatId = await ensureActiveChat();
+      if (!chatId) return;
+      setActiveSubject(account.company_name);
+      addToast({ type: 'info', title: `Researching ${account.company_name}`, description: 'Kicking off a fresh brief using your saved profile.' });
+      await handleSendMessageWithChat(chatId, prompt, 'deep', { force: true });
+    } catch (error) {
+      console.error('Failed to re-run research from tracked account', error);
+      addToast({ type: 'error', title: 'Could not open research', description: 'Try again or run the command manually.' });
+    }
+  }, [ensureActiveChat, handleSendMessageWithChat, addToast]);
 
   const handleAddAccount = () => {
     // Open CSV upload dialog
@@ -3428,6 +3570,91 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
           )}
           {resolvedLoading && (
             <div className="mb-4 text-xs text-gray-400">Loading your saved preferences…</div>
+          )}
+          {aliasPrompts.length > 0 && (
+            <div className="mb-4 space-y-3" role="region" aria-label="Alias confirmations">
+              {aliasPrompts.map(prompt => {
+                const hasSuggestion = Boolean(prompt.suggestion);
+                return (
+                  <div
+                    key={prompt.alias}
+                    className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 shadow-sm"
+                  >
+                    <p className="text-sm text-amber-900">
+                      I noticed you mentioned <span className="font-semibold">{prompt.alias}</span>.{' '}
+                      {hasSuggestion
+                        ? <>Does that refer to <span className="font-semibold">{prompt.suggestion}</span>?</>
+                        : 'Tell me what it stands for so I can remember it.'}
+                    </p>
+                    {prompt.stage === 'choice' ? (
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        {hasSuggestion && (
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                            onClick={() => void confirmAliasPrompt(prompt.alias, prompt.suggestion || '', prompt.questionId)}
+                            disabled={prompt.submitting}
+                          >
+                            Yes, keep {prompt.suggestion}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 border border-amber-300 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+                          onClick={() => promptManualAlias(prompt.alias)}
+                          disabled={prompt.submitting}
+                        >
+                          {hasSuggestion ? 'No, use something else' : 'Define it'}
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 rounded-full bg-transparent px-3 py-1.5 text-xs font-medium text-amber-700 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200"
+                          onClick={() => void skipAliasPrompt(prompt.alias, prompt.questionId)}
+                          disabled={prompt.submitting}
+                        >
+                          Skip for now
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="mt-3 space-y-2">
+                        <label className="block text-xs font-semibold text-amber-800">
+                          What should “{prompt.alias}” map to?
+                        </label>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input
+                            type="text"
+                            value={prompt.manualValue}
+                            onChange={(e) => setAliasManualValue(prompt.alias, e.target.value)}
+                            className="flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                            placeholder="e.g., Microsoft 365"
+                            autoFocus
+                            disabled={prompt.submitting}
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-60"
+                              onClick={() => void confirmAliasPrompt(prompt.alias, prompt.manualValue, prompt.questionId)}
+                              disabled={prompt.submitting || !prompt.manualValue.trim()}
+                            >
+                              Save alias
+                            </button>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 rounded-lg border border-amber-300 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200"
+                              onClick={() => void skipAliasPrompt(prompt.alias, prompt.questionId)}
+                              disabled={prompt.submitting}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
           {messages.map((m, idx) => {
             const isLastAssistant = m.role === 'assistant' && idx === messages.length - 1 && !streamingMessage;
