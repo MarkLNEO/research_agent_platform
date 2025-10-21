@@ -14,6 +14,8 @@ export interface UserProfile {
   metadata?: {
     research_depth?: 'quick' | 'deep';
   };
+  preferred_terms?: Record<string, string | null | undefined> | null;
+  indicator_choices?: string[] | null;
 }
 
 export interface CustomCriteria {

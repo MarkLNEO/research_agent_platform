@@ -1,4 +1,4 @@
-import type { AgentType } from '../services/agents/types';
+import type { AgentType, UserProfile } from '../services/agents/types';
 
 export interface ResearchSource {
   url: string;
@@ -31,6 +31,7 @@ interface ResearchDraftInput {
   agentType?: AgentType | string;
   sources?: { query?: string; sources?: string[] }[] | ResearchSource[];
   activeSubject?: string | null;
+  userProfile?: Partial<UserProfile> | null;
 }
 
 const agentTypeToResearchType: Record<string, ResearchDraft['research_type']> = {
@@ -472,6 +473,7 @@ export function buildResearchDraft(input: ResearchDraftInput): ResearchDraft {
     return out;
   };
   const cleanedMarkdown = stripExecSection(markdown);
+  const adjustedMarkdown = applyIndicatorTerminology(cleanedMarkdown, input.userProfile || null);
   const companyData = extractCompanyData(markdown);
   const { icpFit, signalScore, composite, priority, confidence } = computeScores(markdown, normalizedSources.length);
 
@@ -479,7 +481,7 @@ export function buildResearchDraft(input: ResearchDraftInput): ResearchDraft {
     subject,
     research_type: researchType,
     executive_summary: executiveSummary,
-    markdown_report: cleanedMarkdown,
+    markdown_report: adjustedMarkdown,
     icp_fit_score: icpFit,
     signal_score: signalScore,
     composite_score: composite,
@@ -493,4 +495,87 @@ export function buildResearchDraft(input: ResearchDraftInput): ResearchDraft {
     personalization_points: [],
     recommended_actions: {},
   };
+}
+
+export function applyIndicatorTerminology(markdown: string, profile?: Partial<UserProfile> | null): string {
+  if (!markdown) return markdown;
+  const terms = profile?.preferred_terms as Record<string, any> | undefined | null;
+  const rawLabel =
+    terms && typeof terms === 'object' && typeof terms.indicators_label === 'string'
+      ? terms.indicators_label.trim()
+      : '';
+  const rawChoices = Array.isArray(profile?.indicator_choices) ? profile?.indicator_choices : [];
+  const indicatorChoices = rawChoices
+    .map(choice => (typeof choice === 'string' ? choice.trim() : ''))
+    .filter(choice => choice.length > 0);
+  if (!rawLabel && indicatorChoices.length === 0) {
+    return markdown;
+  }
+  const sectionLabel = rawLabel || 'Indicators';
+  const headingRegex = /^##\s+(.+?)\s*$/gim;
+  type SectionMeta = { title: string; start: number; end: number };
+  const sections: SectionMeta[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = headingRegex.exec(markdown)) !== null) {
+    const title = match[1];
+    const start = match.index;
+    const end = headingRegex.lastIndex;
+    sections.push({ title, start, end });
+  }
+
+  const normalizeTitle = (value: string) =>
+    value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const desired = normalizeTitle(sectionLabel);
+  const targetIndex = sections.findIndex(section => {
+    const normal = normalizeTitle(section.title);
+    if (normal === desired) return true;
+    if (normal.includes('signal')) return true;
+    if (normal.includes('indicator')) return true;
+    if (normal.includes('trigger')) return true;
+    return false;
+  });
+
+  if (targetIndex === -1) {
+    if (indicatorChoices.length === 0) return markdown;
+    const newSectionLines = [`## ${sectionLabel}`, ...indicatorChoices.map(choice => `- ${choice}`)];
+    const appendBlock = `${markdown.trim()}\n\n${newSectionLines.join('\n')}\n`;
+    return appendBlock;
+  }
+
+  const target = sections[targetIndex];
+  const nextSection = sections[targetIndex + 1];
+  const headingStart = target.start;
+  const headingEnd = target.end;
+  const contentStart = headingEnd;
+  const contentEnd = nextSection ? nextSection.start : markdown.length;
+
+  const beforeSection = markdown.slice(0, headingStart);
+  const afterSection = markdown.slice(contentEnd);
+  const originalContent = markdown.slice(contentStart, contentEnd);
+  const contentWithoutLead = originalContent.replace(/^\s+/, '');
+  const indicatorSet = new Set(indicatorChoices.map(choice => choice.toLowerCase()));
+  const filteredExisting = contentWithoutLead
+    .split('\n')
+    .filter(line => {
+      const matchLine = line.trim();
+      const bulletMatch = /^[-*]\s*(.+)$/.exec(matchLine);
+      if (!bulletMatch) return true;
+      const normalized = bulletMatch[1].trim().toLowerCase();
+      return !indicatorSet.has(normalized);
+    })
+    .join('\n')
+    .trim();
+
+  const parts: string[] = [];
+  if (indicatorChoices.length > 0) {
+    parts.push(indicatorChoices.map(choice => `- ${choice}`).join('\n'));
+  }
+  if (filteredExisting) {
+    parts.push(filteredExisting);
+  }
+
+  const sectionBody = parts.join('\n\n');
+  const rebuiltSection = `## ${sectionLabel}\n${sectionBody ? `${sectionBody}\n` : ''}`;
+
+  return `${beforeSection}${rebuiltSection}${afterSection.startsWith('\n') ? '' : '\n'}${afterSection}`;
 }

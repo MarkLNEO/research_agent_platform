@@ -64,6 +64,7 @@ interface ResponseMetadata {
 
 export function DashboardNew() {
   const { user } = useAuth();
+  const { profile: userProfile } = useUserProfile();
   const navigate = useNavigate();
   const location = useLocation();
   const [chats, setChats] = useState<Chat[]>([]);
@@ -338,6 +339,7 @@ export function DashboardNew() {
       agentType,
       sources: message.metadata?.sources,
       activeSubject: message.metadata?.subject || chat?.title || null,
+      userProfile,
     });
 
     const mergedDraft: ResearchDraft = {

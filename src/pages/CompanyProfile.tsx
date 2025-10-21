@@ -31,11 +31,21 @@ const HIDDEN_SAVE_INSTRUCTION = `Developer note (do not mention this to the user
 - When you capture or confirm profile updates, append a triple-backtick JSON block following this structure:
 
 \`\`\`json
-{ "action": "save_profile", "profile": { ... }, "custom_criteria": [ ... ], "signal_preferences": [ ... ], "disqualifying_criteria": [ ... ] }
+{
+  "action": "save_profile",
+  "profile": {
+    "preferred_terms": { "indicators_label": "Indicators" },
+    "indicator_choices": ["Acquisition", "Layoffs"]
+  },
+  "custom_criteria": [ ... ],
+  "signal_preferences": [ ... ],
+  "disqualifying_criteria": [ ... ]
+}
 \`\`\`
 
-- Keep the visible conversation fully natural language. Never ask the user to type or edit JSON. Instead, acknowledge what you saved in plain English and move to the next prompt.
-`;
+- Map user language verbatim. If they say “indicators” (or another term) for buying signals, store that exact casing in \`preferred_terms.indicators_label\`.
+- Whenever they list examples like “acquisition is an indicator” or “monitor layoffs,” append the phrases exactly as spoken to \`indicator_choices\`.
+- Keep the visible conversation fully natural language. Never ask the user to type or edit JSON. Instead, acknowledge what you saved in plain English and move to the next prompt.`;
 
 interface Message {
   id: string;
@@ -115,6 +125,21 @@ export function CompanyProfile() {
     return { depthLabel, lengthLabel, toneLabel, tldrLabel, focus };
   }, [promptConfig, customCriteriaCount, signalPreferencesCount]);
 
+  const indicatorLabel = useMemo(() => {
+    const terms = profileData?.preferred_terms;
+    if (!terms || typeof terms !== 'object') return null;
+    const raw = (terms as Record<string, any>).indicators_label;
+    if (typeof raw === 'string' && raw.trim()) return raw.trim();
+    return null;
+  }, [profileData?.preferred_terms]);
+
+  const indicatorChoices = useMemo(() => {
+    if (!Array.isArray(profileData?.indicator_choices)) return [] as string[];
+    return profileData.indicator_choices
+      .map((entry: any) => (typeof entry === 'string' ? entry.trim() : ''))
+      .filter((entry: string): entry is string => entry.length > 0);
+  }, [profileData?.indicator_choices]);
+
   const preferenceChips = useMemo(() => {
     const chips: Array<{ id: string; label: string; tone?: 'primary' | 'default' }> = [];
     const seen = new Set<string>();
@@ -161,8 +186,24 @@ export function CompanyProfile() {
       }
     }
 
+    if (indicatorLabel) {
+      const id = 'indicator-label';
+      if (!seen.has(id)) {
+        seen.add(id);
+        chips.push({ id, label: `Indicator section · ${indicatorLabel}`, tone: 'primary' });
+      }
+    }
+
+    if (indicatorChoices.length > 0) {
+      const id = 'indicator-choices';
+      if (!seen.has(id)) {
+        seen.add(id);
+        chips.push({ id, label: `Indicators tracked · ${indicatorChoices.length}` });
+      }
+    }
+
     return chips;
-  }, [savedPreferences]);
+  }, [savedPreferences, indicatorLabel, indicatorChoices.length]);
 
   const formatLabel = useCallback((value: string | null | undefined) => {
     if (!value) return '';
@@ -240,9 +281,11 @@ export function CompanyProfile() {
       competitorList.length ||
       researchFocusList.length ||
       formattedCriteria.length ||
-      formattedSignals.length
+      formattedSignals.length ||
+      indicatorLabel ||
+      indicatorChoices.length
     );
-  }, [profileData, targetTitles.length, competitorList.length, researchFocusList.length, formattedCriteria.length, formattedSignals.length]);
+  }, [profileData, targetTitles.length, competitorList.length, researchFocusList.length, formattedCriteria.length, formattedSignals.length, indicatorLabel, indicatorChoices.length]);
 
   const depthOptions = useMemo(
     () => [
@@ -571,11 +614,14 @@ export function CompanyProfile() {
         : 'All critical fields appear present.';
       const coachingNotes = missing.length
         ? `Coaching flow requirements:
-- Guide the user to complete missing items in this order: target_titles -> custom_criteria -> signal_preferences.
+- Guide the user to complete missing items in this order: target_titles -> custom_criteria -> signal_preferences -> indicator terminology.
 - Ask one concise question at a time; propose example responses that align with their industry.
-- Confirm each item in natural language (e.g., "Great, I saved those titles") before moving on.`
+- Confirm each item in natural language (e.g., "Great, I saved those titles") before moving on.
+- If they mention what they call buying signals (e.g., "Indicators" or "Buying Triggers"), save that under \`preferred_terms.indicators_label\`.
+- When they list concrete examples (e.g., "acquisitions", "leadership changes"), append them verbatim to \`indicator_choices\`.`
         : `Coaching flow requirements:
 - Confirm their saved profile details in natural language.
+- Double-check the terminology they want for buying signals; if they provide a new label or examples, update \`preferred_terms.indicators_label\` and \`indicator_choices\`.
 - Offer two actionable improvements (e.g., refine ICP narrative, add competitors or disqualifiers).`;
 
       systemPrompt = `The user ${userName} already has a company profile with the following details:
@@ -596,7 +642,8 @@ ${HIDDEN_SAVE_INSTRUCTION}
 Onboarding flow:
 - Start by asking for company name and industry in natural language.
 - Confirm what you saved after each answer (e.g., "Got it — I'll remember that").
-- Progress through target_titles (aim for 3+), custom_criteria (aim for 3+), signal_preferences (aim for 2+), and competitors or disqualifiers if relevant.
+- Progress through target_titles (aim for 3+), custom_criteria (aim for 3+), signal_preferences (aim for 2+), then ask how they label their buying signals and what examples they track. Record the label in preferred_terms.indicators_label and the examples in indicator_choices verbatim.
+- Capture competitors or disqualifiers if relevant.
 - Ask one concise question at a time and suggest concrete examples the user can react to.
 - Wrap up with a short recap of what you captured and invite them to adjust anything later.`;
     }
@@ -1207,6 +1254,32 @@ Onboarding flow:
                               </span>
                             ))}
                           </div>
+                        </div>
+                      )}
+
+                      {(indicatorLabel || indicatorChoices.length > 0) && (
+                        <div className="mt-4">
+                          {indicatorLabel && (
+                            <div className="mb-2">
+                              <p className="text-xs uppercase tracking-wide text-gray-500">Indicator section label</p>
+                              <p className="text-sm text-gray-900 mt-1">{indicatorLabel}</p>
+                            </div>
+                          )}
+                          {indicatorChoices.length > 0 && (
+                            <div>
+                              <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Indicator watchlist</p>
+                              <div className="flex flex-wrap gap-2">
+                                {indicatorChoices.map((choice: string, idx: number) => (
+                                  <span
+                                    key={`${choice}-${idx}`}
+                                    className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium bg-sky-50 text-sky-700 border border-sky-100 rounded-full"
+                                  >
+                                    {choice}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
 

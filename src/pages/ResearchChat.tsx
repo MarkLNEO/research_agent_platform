@@ -890,6 +890,7 @@ export function ResearchChat() {
       agentType: 'company_research',
       sources,
       activeSubject,
+      userProfile,
     });
 
     const normalizedDraft = (() => {
@@ -903,7 +904,7 @@ export function ResearchChat() {
     })();
 
     return normalizedDraft;
-  }, [findLatestResearchAssistant, messages, thinkingEvents, chats, currentChatId, activeSubject]);
+  }, [findLatestResearchAssistant, messages, thinkingEvents, chats, currentChatId, activeSubject, userProfile]);
 
   // Helper: get latest research assistant message id (skip Draft Email)
   const getLatestResearchMessageId = useCallback((): string | null => {
@@ -2266,6 +2267,19 @@ useEffect(() => {
     }
     if (Array.isArray(p.research_focus) && p.research_focus.length) {
       bullets.push(`- Research focus: ${p.research_focus.map((x: string) => x.replace(/_/g, ' ')).join(', ')}`);
+    }
+    const terms = p?.preferred_terms;
+    const indicatorLabel = terms && typeof terms === 'object' && typeof (terms as any)?.indicators_label === 'string'
+      ? (terms as any).indicators_label.trim()
+      : '';
+    if (indicatorLabel) {
+      bullets.push(`- Indicator section label: ${indicatorLabel}`);
+    }
+    const indicatorChoices = Array.isArray(p?.indicator_choices)
+      ? p.indicator_choices.map((entry: any) => (typeof entry === 'string' ? entry.trim() : '')).filter(Boolean)
+      : [];
+    if (indicatorChoices.length) {
+      bullets.push(`- Indicator watchlist: ${indicatorChoices.join(', ')}`);
     }
     bullets.push('\nShortcuts: type "Edit setup" to reopen onboarding, or go to Settings → Profile.');
     const msg: Message = {
@@ -3767,6 +3781,7 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                             agentType: 'company_research',
                             sources,
                             activeSubject,
+                            userProfile,
                           });
                           return draft;
                         }
