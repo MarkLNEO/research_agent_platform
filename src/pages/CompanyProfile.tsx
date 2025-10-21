@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -11,6 +11,7 @@ import { ProfileCompleteness } from '../components/ProfileCompleteness';
 import { ThinkingIndicator } from '../components/ThinkingIndicator';
 import { ArrowLeft, User, ChevronDown, ClipboardList } from 'lucide-react';
 import type { TrackedAccount } from '../services/accountService';
+import { invalidateUserProfileCache } from '../hooks/useUserProfile';
 
 const DEFAULT_PROMPT_CONFIG = {
   preferred_research_type: null as 'quick' | 'deep' | 'specific' | null,
@@ -61,8 +62,15 @@ export function CompanyProfile() {
   const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasInitialized = useRef(false);
+  const isMountedRef = useRef(true);
   const [savedPreferences, setSavedPreferences] = useState<Array<{ key: string; value: any; source?: string; confidence?: number; updated_at?: string }>>([]);
   const [prefsLoading, setPrefsLoading] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const preferenceSummary = useMemo(() => {
     const config = promptConfig ?? DEFAULT_PROMPT_CONFIG;
@@ -230,38 +238,38 @@ export function CompanyProfile() {
     }
   }, [currentChatId]);
 
-  useEffect(() => {
-    let canceled = false;
-    const loadPreferences = async () => {
-      try {
-        setPrefsLoading(true);
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
-        const response = await fetch('/api/preferences', {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-        if (!response.ok) throw new Error(`Failed to fetch preferences (${response.status})`);
-        const payload = await response.json();
-        if (!canceled) {
-          setSavedPreferences(payload?.preferences || []);
-        }
-      } catch (error) {
-        if (!canceled) {
-          console.error('Failed to load saved preferences', error);
-          setSavedPreferences([]);
-        }
-      } finally {
-        if (!canceled) setPrefsLoading(false);
+  const refreshPreferences = useCallback(async () => {
+    setPrefsLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        if (isMountedRef.current) setSavedPreferences([]);
+        return;
       }
-    };
-    void loadPreferences();
-    return () => {
-      canceled = true;
-    };
-  }, []);
+      const response = await fetch('/api/preferences', {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      if (!response.ok) throw new Error(`Failed to fetch preferences (${response.status})`);
+      const payload = await response.json();
+      if (isMountedRef.current) {
+        setSavedPreferences(payload?.preferences || []);
+      }
+    } catch (error) {
+      if (isMountedRef.current) {
+        console.error('Failed to load saved preferences', error);
+        setSavedPreferences([]);
+      }
+    } finally {
+      if (isMountedRef.current) setPrefsLoading(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    void refreshPreferences();
+  }, [refreshPreferences]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -523,6 +531,8 @@ Coach flow requirements:
       // Reload profile data to reflect changes
       hasInitialized.current = false;
       await initializeProfilePage(true);
+      invalidateUserProfileCache(user?.id);
+      void refreshPreferences();
 
       loadChats();
     } catch (error) {
@@ -657,6 +667,43 @@ Coach flow requirements:
                       sources: parsed.sources || []
                     }];
                   });
+                }
+                else if (parsed.type === 'preference_saved') {
+                  if (Array.isArray(parsed.preferences) && parsed.preferences.length) {
+                    const labels = parsed.preferences
+                      .map((pref: any) => (typeof pref?.label === 'string' && pref.label.trim())
+                        ? pref.label.trim()
+                        : typeof pref?.key === 'string'
+                          ? pref.key.split('.').pop()?.replace(/_/g, ' ') ?? pref.key
+                          : null)
+                      .filter((label: string | null): label is string => Boolean(label));
+                    if (labels.length) {
+                      addToast({
+                        type: 'success',
+                        title: 'Preference saved',
+                        description: `Noted — I’ll keep highlighting ${labels.join(', ')}.`,
+                      });
+                    }
+                    invalidateUserProfileCache(user?.id);
+                    void refreshPreferences();
+                  }
+                }
+                else if (parsed.type === 'alias_learned') {
+                  if (Array.isArray(parsed.aliases) && parsed.aliases.length) {
+                    const summaries = parsed.aliases
+                      .map((entry: any) => {
+                        if (!entry?.alias || !entry?.canonical) return null;
+                        return `${entry.alias} → ${entry.canonical}`;
+                      })
+                      .filter((item: string | null): item is string => Boolean(item));
+                    if (summaries.length) {
+                      addToast({
+                        type: 'info',
+                        title: summaries.length === 1 ? 'Alias remembered' : 'Aliases remembered',
+                        description: summaries.join(', '),
+                      });
+                    }
+                  }
                 }
                 // Responses API format (supports both canonical and simplified events)
                 else if (parsed.type === 'response.output_text.delta' || parsed.type === 'content') {

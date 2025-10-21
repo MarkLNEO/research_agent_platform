@@ -423,7 +423,25 @@ export function buildSystemPrompt(userContext, agentType = 'company_research', r
         const focusLabels = researchFocusAreas.map((item) => item.replace(/_/g, ' '));
         extras.push(`Highlight the user's research focus areas (${focusLabels.join(', ')}) in the Executive Summary and High Level sections using those exact labels.`);
     }
-    if (isResearchAgent && Array.isArray(userContext.unresolvedEntities) && userContext.unresolvedEntities.length) {
+    const unresolvedAliasHints = Array.isArray(userContext?.unresolvedAliasHints)
+        ? userContext.unresolvedAliasHints
+        : [];
+    if (isResearchAgent && unresolvedAliasHints.length) {
+        const formattedHints = unresolvedAliasHints
+            .map((hint) => {
+            const term = (hint?.term || '').trim();
+            if (!term)
+                return null;
+            if (hint?.suggestion)
+                return `"${term}" → maybe ${hint.suggestion}`;
+            return `"${term}"`;
+        })
+            .filter((value) => Boolean(value));
+        if (formattedHints.length) {
+            extras.push(`Unresolved shorthand detected: ${formattedHints.join(', ')}. Ask for confirmation exactly once (e.g., “Does "term" refer to suggestion?”). Remember the mapping after they confirm and avoid assuming meaning until then.`);
+        }
+    }
+    else if (isResearchAgent && Array.isArray(userContext.unresolvedEntities) && userContext.unresolvedEntities.length) {
         const unresolvedList = formatList(userContext.unresolvedEntities.map((term) => term.trim()).filter(Boolean));
         if (unresolvedList) {
             extras.push(`Unresolved shorthand detected: ${unresolvedList}. Politely ask the user to clarify what each item stands for exactly once, offer to remember it for future research, and pause further alias assumptions until they confirm.`);

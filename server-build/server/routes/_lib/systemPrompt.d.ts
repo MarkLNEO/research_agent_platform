@@ -19,6 +19,10 @@ export interface UserContext {
         matched?: string;
     }>;
     unresolvedEntities?: string[];
+    unresolvedAliasHints?: Array<{
+        term: string;
+        suggestion?: string;
+    }>;
     recentPreferenceConfirmations?: Array<{
         key: string;
         label?: string;

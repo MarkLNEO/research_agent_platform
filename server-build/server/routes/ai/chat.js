@@ -4,7 +4,7 @@ import { buildSystemPrompt } from '../_lib/systemPrompt.js';
 import { buildMemoryBlock } from '../_lib/memory.js';
 import { assertEmailAllowed } from '../_lib/access.js';
 import { buildResolvedPreferences, upsertPreferences, } from '../../../lib/preferences/store.js';
-import { resolveEntity, learnAlias } from '../../../lib/entities/aliasResolver.js';
+import { resolveEntity, learnAlias, learnUserAlias, getUserAliasMaps } from '../../../lib/entities/aliasResolver.js';
 import { addOpenQuestion, resolveOpenQuestion } from '../../../lib/followups/openQuestions.js';
 import { SummarySchemaZ } from '../../../shared/summarySchema.js';
 // Feature flag: preferences/aliases/structured summary
@@ -255,6 +255,7 @@ async function fetchUserContext(client, userId) {
         resolvedPrefs,
         openQuestions,
         unresolvedEntities: [],
+        unresolvedAliasHints: [],
         recentPreferenceConfirmations: [],
         recentAliasConfirmations: [],
     };
@@ -513,36 +514,57 @@ function extractAliasCandidates(text) {
     }
     return Array.from(tokens).slice(0, 12);
 }
-async function resolveCanonicalEntities(text, additionalTerms = []) {
+async function resolveCanonicalEntities(userId, text, additionalTerms = [], client) {
     const rawCandidates = [...extractAliasCandidates(text), ...additionalTerms.filter(Boolean)];
     const uniqueCandidates = Array.from(new Set(rawCandidates.map(candidate => candidate.trim()))).filter(Boolean);
     if (!uniqueCandidates.length) {
         return { resolved: [], unresolved: [] };
     }
-    const remaining = new Set(uniqueCandidates.map(candidate => candidate.toLowerCase()));
+    const additionalLookup = new Set(additionalTerms
+        .filter(Boolean)
+        .map(term => term.trim().toLowerCase()));
+    const { aliasMap: userAliasMap } = await getUserAliasMaps(userId, client);
     const results = [];
+    const unresolved = [];
     for (const term of uniqueCandidates) {
+        const trimmed = term.trim();
+        const normalized = trimmed.toLowerCase();
+        if (!trimmed)
+            continue;
+        if (additionalLookup.has(normalized)) {
+            results.push({
+                canonical: trimmed,
+                type: 'context',
+                confidence: 1,
+                matched: term,
+            });
+            continue;
+        }
+        const userAlias = userAliasMap.get(normalized);
+        if (userAlias) {
+            results.push({
+                canonical: userAlias.canonical,
+                type: userAlias.type || 'alias',
+                confidence: 1,
+                matched: term,
+            });
+            continue;
+        }
         try {
             const resolved = await resolveEntity(term);
             if (resolved) {
-                const canonicalKey = resolved.canonical.toLowerCase();
-                const exists = results.find(r => r.canonical.toLowerCase() === canonicalKey);
-                if (!exists) {
-                    results.push({
-                        canonical: resolved.canonical,
-                        type: resolved.type,
-                        confidence: resolved.confidence,
-                        matched: term,
-                    });
-                }
-                remaining.delete(term.toLowerCase());
+                unresolved.push({ term: trimmed, suggestion: resolved.canonical });
+            }
+            else {
+                unresolved.push({ term: trimmed });
             }
         }
         catch (error) {
             console.warn('[aliasResolver] resolve failed for term', term, error);
+            unresolved.push({ term: trimmed });
         }
     }
-    return { resolved: results, unresolved: Array.from(remaining) };
+    return { resolved: results, unresolved };
 }
 function selectRelevantOpenQuestions(openQuestions, request, limit = 2) {
     if (!Array.isArray(openQuestions) || openQuestions.length === 0)
@@ -896,7 +918,7 @@ export default async function handler(req, res) {
                 const aliasTerms = [];
                 if (activeContextCompany)
                     aliasTerms.push(activeContextCompany);
-                const { resolved: resolvedEntities, unresolved } = await resolveCanonicalEntities(String(lastUserMessage.content || ''), aliasTerms);
+                const { resolved: resolvedEntities, unresolved: unresolvedAliases, } = await resolveCanonicalEntities(user.id, String(lastUserMessage.content || ''), aliasTerms, supabase);
                 if (resolvedEntities.length) {
                     userContext.canonicalEntities = resolvedEntities;
                     const canonicalSummary = resolvedEntities
@@ -907,8 +929,9 @@ export default async function handler(req, res) {
                         input = `${input}\n\nCanonical entities resolved for context: ${canonicalSummary}`;
                     }
                 }
-                if (unresolved.length) {
-                    userContext.unresolvedEntities = unresolved;
+                if (unresolvedAliases.length) {
+                    userContext.unresolvedEntities = unresolvedAliases.map(item => item.term);
+                    userContext.unresolvedAliasHints = unresolvedAliases;
                     try {
                         const existingAliasQuestions = new Set();
                         if (Array.isArray(userContext.openQuestions)) {
@@ -920,15 +943,20 @@ export default async function handler(req, res) {
                                     existingAliasQuestions.add(aliasTerm);
                             }
                         }
-                        for (const term of unresolved) {
+                        for (const item of unresolvedAliases) {
+                            const term = item.term;
                             const lowered = term.toLowerCase();
                             if (!lowered || existingAliasQuestions.has(lowered))
                                 continue;
+                            const questionText = item.suggestion
+                                ? `Quick clarification: does "${term}" refer to ${item.suggestion}? If not, what does it stand for so I can remember it?`
+                                : `Quick clarification: what does "${term}" stand for so I can remember it for future research?`;
                             const created = await addOpenQuestion(user.id, {
-                                question: `Quick clarification: what does "${term}" stand for so I can remember it for future research?`,
+                                question: questionText,
                                 context: {
                                     topic: 'alias',
                                     alias_term: term,
+                                    suggestion: item.suggestion || null,
                                 },
                             }, supabase);
                             if (created) {
@@ -941,6 +969,9 @@ export default async function handler(req, res) {
                         console.error('[aliasResolver] failed to queue alias follow-up', aliasFollowErr);
                     }
                 }
+                else {
+                    userContext.unresolvedAliasHints = [];
+                }
             }
             catch (aliasErr) {
                 console.error('[aliasResolver] canonical resolution failed', aliasErr);
@@ -951,6 +982,7 @@ export default async function handler(req, res) {
                     const aliasConfirmations = Array.isArray(userContext.recentAliasConfirmations)
                         ? [...userContext.recentAliasConfirmations]
                         : [];
+                    const { aliasMap: snapshotUserAliasMap } = await getUserAliasMaps(user.id, supabase);
                     for (const pair of aliasPairs) {
                         let alreadyKnown = false;
                         try {
@@ -964,6 +996,12 @@ export default async function handler(req, res) {
                         }
                         await learnAlias(pair.canonical, pair.alias, { source: 'followup' });
                         try {
+                            await learnUserAlias(user.id, pair.canonical, pair.alias, { source: 'followup' });
+                        }
+                        catch (userAliasErr) {
+                            console.warn('[aliasResolver] failed to persist user alias', userAliasErr);
+                        }
+                        try {
                             await logUsage(supabase, user.id, 'alias.learned', 0, {
                                 canonical: pair.canonical,
                                 alias: pair.alias,
@@ -973,8 +1011,34 @@ export default async function handler(req, res) {
                         catch (logErr) {
                             console.warn('[telemetry] alias.learned log failed', logErr);
                         }
-                        if (!alreadyKnown) {
+                        const normalizedAlias = pair.alias.trim().toLowerCase();
+                        const userAlreadyKnew = snapshotUserAliasMap.has(normalizedAlias);
+                        if (!alreadyKnown || !userAlreadyKnew) {
                             aliasConfirmations.push({ alias: pair.alias, canonical: pair.canonical });
+                        }
+                        snapshotUserAliasMap.set(normalizedAlias, {
+                            id: `local-${normalizedAlias}`,
+                            user_id: user.id,
+                            alias: pair.alias,
+                            alias_normalized: normalizedAlias,
+                            canonical: pair.canonical,
+                            type: 'alias',
+                            metadata: null,
+                            source: 'followup',
+                            created_at: null,
+                            updated_at: null,
+                        });
+                        const canonicalEntitiesList = Array.isArray(userContext.canonicalEntities)
+                            ? userContext.canonicalEntities
+                            : (userContext.canonicalEntities = []);
+                        const hasCanonical = canonicalEntitiesList.some(entry => entry.canonical.toLowerCase() === pair.canonical.toLowerCase());
+                        if (!hasCanonical) {
+                            canonicalEntitiesList.push({
+                                canonical: pair.canonical,
+                                type: 'alias',
+                                confidence: 1,
+                                matched: pair.alias,
+                            });
                         }
                     }
                     if (aliasConfirmations.length) {

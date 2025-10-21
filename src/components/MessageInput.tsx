@@ -110,6 +110,7 @@ export function MessageInput({
       <div className="flex items-center justify-between mt-2">
         <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={safeOnAttach}
             className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             title="Upload CSV for bulk research"
@@ -119,6 +120,7 @@ export function MessageInput({
           </button>
 
           <button
+            type="button"
             onClick={safeOnSettings}
             className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             title="Bulk Research"
@@ -131,6 +133,7 @@ export function MessageInput({
         <div className="flex items-center gap-2">
           {guardrailProfileName && (
             <button
+              type="button"
               onClick={onGuardrailClick}
               className="hidden md:flex items-center gap-1.5 px-3 py-1.5 text-xs text-emerald-700 bg-emerald-50 rounded-lg border border-emerald-200 hover:bg-emerald-100"
               title="Guardrail profile"
@@ -141,6 +144,7 @@ export function MessageInput({
           )}
           <div className="relative">
             <button
+              type="button"
               onClick={() => setShowAgentDropdown(!showAgentDropdown)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
               aria-haspopup="listbox"
@@ -156,6 +160,7 @@ export function MessageInput({
                 {['Company Researcher', 'Profile Coach', 'Writing Partner'].map(option => (
                   <button
                     key={option}
+                    type="button"
                     className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${selectedAgent === option ? 'text-gray-900' : 'text-gray-500'}`}
                     role="option"
                     aria-selected={selectedAgent === option}
@@ -172,6 +177,7 @@ export function MessageInput({
 
           {isStreaming ? (
             <button
+              type="button"
               onClick={onStop}
               className="px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
               aria-label="Stop generation"
@@ -180,6 +186,7 @@ export function MessageInput({
             </button>
           ) : (
             <button
+              type="button"
               onClick={onSend}
               disabled={disabled || !value.trim()}
               className="p-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg transition-colors shadow-sm hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"

@@ -7,6 +7,7 @@ let cacheLoadedAt = 0;
 let aliasMap = new Map();
 let canonicalMap = new Map();
 const CACHE_TTL_MS = 5 * 60 * 1000; // refresh every 5 minutes
+const USER_CACHE_TTL_MS = 2 * 60 * 1000; // per-user alias cache
 function requireClient() {
     if (cachedClient)
         return cachedClient;
@@ -27,6 +28,7 @@ function ensureArrayAliases(aliases) {
         return [];
     return aliases.filter(a => typeof a === 'string' && a.trim().length > 0);
 }
+const userAliasCache = new Map();
 function populateCache(rows) {
     aliasMap = new Map();
     canonicalMap = new Map();
@@ -174,6 +176,108 @@ export async function resolveEntity(term, client) {
         metadata: (best.row.metadata ?? null),
         source: best.row.source ?? null,
     };
+}
+async function ensureUserAliasCache(userId, client) {
+    if (!userId) {
+        return {
+            aliasMap: new Map(),
+            canonicalMap: new Map(),
+            loadedAt: Date.now(),
+        };
+    }
+    const cached = userAliasCache.get(userId);
+    if (cached && Date.now() - cached.loadedAt < USER_CACHE_TTL_MS) {
+        return cached;
+    }
+    const supabase = resolveClient(client);
+    const { data, error } = await supabase
+        .from('user_entity_aliases')
+        .select('*')
+        .eq('user_id', userId);
+    if (error) {
+        console.error('[aliasResolver] Failed to load user alias cache', error);
+        return {
+            aliasMap: new Map(),
+            canonicalMap: new Map(),
+            loadedAt: Date.now(),
+        };
+    }
+    const aliasMap = new Map();
+    const canonicalMap = new Map();
+    for (const row of data || []) {
+        const aliasKey = normalise(row.alias_normalized || row.alias);
+        aliasMap.set(aliasKey, row);
+        canonicalMap.set(normalise(row.canonical), row);
+    }
+    const entry = { aliasMap, canonicalMap, loadedAt: Date.now() };
+    userAliasCache.set(userId, entry);
+    return entry;
+}
+export async function getUserAliasMaps(userId, client) {
+    const { aliasMap, canonicalMap } = await ensureUserAliasCache(userId, client);
+    return { aliasMap, canonicalMap };
+}
+export async function learnUserAlias(userId, canonical, alias, options = {}) {
+    if (!userId || !canonical || !alias)
+        return;
+    const supabase = resolveClient(options.client);
+    const trimmedCanonical = canonical.trim();
+    const trimmedAlias = alias.trim();
+    if (!trimmedCanonical || !trimmedAlias)
+        return;
+    const normalizedAlias = normalise(trimmedAlias);
+    const { data: existing, error: fetchError } = await supabase
+        .from('user_entity_aliases')
+        .select('id, type, metadata, source')
+        .eq('user_id', userId)
+        .eq('alias_normalized', normalizedAlias)
+        .maybeSingle();
+    if (fetchError) {
+        console.error('[aliasResolver] Failed to load user alias before learning', fetchError);
+        throw fetchError;
+    }
+    const now = new Date().toISOString();
+    if (existing) {
+        const { error: updateError } = await supabase
+            .from('user_entity_aliases')
+            .update({
+            canonical: trimmedCanonical,
+            type: options.type || existing.type || 'unknown',
+            metadata: options.metadata ?? existing.metadata ?? null,
+            source: options.source || existing.source || 'followup',
+            updated_at: now,
+        })
+            .eq('id', existing.id);
+        if (updateError) {
+            console.error('[aliasResolver] Failed to update user alias', updateError);
+            throw updateError;
+        }
+    }
+    else {
+        const { error: insertError } = await supabase
+            .from('user_entity_aliases')
+            .insert({
+            user_id: userId,
+            alias: trimmedAlias,
+            canonical: trimmedCanonical,
+            type: options.type || 'unknown',
+            metadata: options.metadata ?? null,
+            source: options.source || 'followup',
+        });
+        if (insertError) {
+            console.error('[aliasResolver] Failed to insert user alias', insertError);
+            throw insertError;
+        }
+    }
+    invalidateUserAliasCache(userId);
+}
+export function invalidateUserAliasCache(userId) {
+    if (typeof userId === 'string' && userId.length > 0) {
+        userAliasCache.delete(userId);
+    }
+    else {
+        userAliasCache.clear();
+    }
 }
 export async function learnAlias(canonical, alias, options = {}) {
     if (!canonical || !alias)

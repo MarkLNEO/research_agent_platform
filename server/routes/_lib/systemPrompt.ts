@@ -18,6 +18,7 @@ export interface UserContext {
   openQuestions?: any[];
   canonicalEntities?: Array<{ canonical: string; type: string; confidence?: number; matched?: string }>;
   unresolvedEntities?: string[];
+  unresolvedAliasHints?: Array<{ term: string; suggestion?: string }>;
   recentPreferenceConfirmations?: Array<{ key: string; label?: string }>;
   recentAliasConfirmations?: Array<{ alias: string; canonical: string }>;
 }
@@ -466,7 +467,22 @@ export function buildSystemPrompt(
     extras.push(`Highlight the user's research focus areas (${focusLabels.join(', ')}) in the Executive Summary and High Level sections using those exact labels.`);
   }
 
-  if (isResearchAgent && Array.isArray(userContext.unresolvedEntities) && userContext.unresolvedEntities.length) {
+  const unresolvedAliasHints: Array<{ term: string; suggestion?: string }> = Array.isArray((userContext as any)?.unresolvedAliasHints)
+    ? (userContext as any).unresolvedAliasHints
+    : [];
+  if (isResearchAgent && unresolvedAliasHints.length) {
+    const formattedHints = unresolvedAliasHints
+      .map((hint: { term: string; suggestion?: string }) => {
+        const term = (hint?.term || '').trim();
+        if (!term) return null;
+        if (hint?.suggestion) return `"${term}" → maybe ${hint.suggestion}`;
+        return `"${term}"`;
+      })
+      .filter((value: string | null): value is string => Boolean(value));
+    if (formattedHints.length) {
+      extras.push(`Unresolved shorthand detected: ${formattedHints.join(', ')}. Ask for confirmation exactly once (e.g., “Does "term" refer to suggestion?”). Remember the mapping after they confirm and avoid assuming meaning until then.`);
+    }
+  } else if (isResearchAgent && Array.isArray(userContext.unresolvedEntities) && userContext.unresolvedEntities.length) {
     const unresolvedList = formatList(userContext.unresolvedEntities.map((term: string) => term.trim()).filter(Boolean));
     if (unresolvedList) {
       extras.push(`Unresolved shorthand detected: ${unresolvedList}. Politely ask the user to clarify what each item stands for exactly once, offer to remember it for future research, and pause further alias assumptions until they confirm.`);

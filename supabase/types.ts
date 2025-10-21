@@ -94,6 +94,52 @@ type PublicTables = {
     };
     Relationships: [];
   };
+  user_entity_aliases: {
+    Row: {
+      id: string;
+      user_id: string;
+      alias: string;
+      alias_normalized: string;
+      canonical: string;
+      type: string;
+      metadata: Json | null;
+      source: string | null;
+      created_at: string | null;
+      updated_at: string | null;
+    };
+    Insert: {
+      id?: string;
+      user_id: string;
+      alias: string;
+      alias_normalized?: string;
+      canonical: string;
+      type?: string;
+      metadata?: Json | null;
+      source?: string | null;
+      created_at?: string | null;
+      updated_at?: string | null;
+    };
+    Update: {
+      id?: string;
+      user_id?: string;
+      alias?: string;
+      alias_normalized?: string;
+      canonical?: string;
+      type?: string;
+      metadata?: Json | null;
+      source?: string | null;
+      created_at?: string | null;
+      updated_at?: string | null;
+    };
+    Relationships: [
+      {
+        foreignKeyName: 'user_entity_aliases_user_id_fkey';
+        columns: ['user_id'];
+        referencedRelation: 'users';
+        referencedColumns: ['id'];
+      }
+    ];
+  };
   open_questions: {
     Row: {
       id: string;

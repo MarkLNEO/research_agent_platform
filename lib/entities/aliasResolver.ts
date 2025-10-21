@@ -3,6 +3,7 @@ import type { Database, Json } from '../../supabase/types.js';
 
 type ServiceClient = SupabaseClient<Database>;
 type AliasRow = Database['public']['Tables']['entity_aliases']['Row'];
+type UserAliasRow = Database['public']['Tables']['user_entity_aliases']['Row'];
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -14,6 +15,7 @@ let aliasMap = new Map<string, AliasRow>();
 let canonicalMap = new Map<string, AliasRow>();
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // refresh every 5 minutes
+const USER_CACHE_TTL_MS = 2 * 60 * 1000; // per-user alias cache
 
 function requireClient(): ServiceClient {
   if (cachedClient) return cachedClient;
@@ -36,6 +38,14 @@ function ensureArrayAliases(aliases: string[] | null | undefined): string[] {
   if (!Array.isArray(aliases)) return [];
   return aliases.filter(a => typeof a === 'string' && a.trim().length > 0);
 }
+
+type UserAliasCacheEntry = {
+  aliasMap: Map<string, UserAliasRow>;
+  canonicalMap: Map<string, UserAliasRow>;
+  loadedAt: number;
+};
+
+const userAliasCache = new Map<string, UserAliasCacheEntry>();
 
 function populateCache(rows: AliasRow[]) {
   aliasMap = new Map();
@@ -201,6 +211,126 @@ export async function resolveEntity(
     metadata: (best.row.metadata ?? null) as Json | null,
     source: best.row.source ?? null,
   };
+}
+
+async function ensureUserAliasCache(
+  userId: string,
+  client?: SupabaseClient<Database>
+): Promise<UserAliasCacheEntry> {
+  if (!userId) {
+    return {
+      aliasMap: new Map(),
+      canonicalMap: new Map(),
+      loadedAt: Date.now(),
+    };
+  }
+  const cached = userAliasCache.get(userId);
+  if (cached && Date.now() - cached.loadedAt < USER_CACHE_TTL_MS) {
+    return cached;
+  }
+  const supabase = resolveClient(client);
+  const { data, error } = await supabase
+    .from('user_entity_aliases')
+    .select('*')
+    .eq('user_id', userId);
+  if (error) {
+    console.error('[aliasResolver] Failed to load user alias cache', error);
+    return {
+      aliasMap: new Map(),
+      canonicalMap: new Map(),
+      loadedAt: Date.now(),
+    };
+  }
+  const aliasMap = new Map<string, UserAliasRow>();
+  const canonicalMap = new Map<string, UserAliasRow>();
+  for (const row of data || []) {
+    const aliasKey = normalise(row.alias_normalized || row.alias);
+    aliasMap.set(aliasKey, row);
+    canonicalMap.set(normalise(row.canonical), row);
+  }
+  const entry: UserAliasCacheEntry = { aliasMap, canonicalMap, loadedAt: Date.now() };
+  userAliasCache.set(userId, entry);
+  return entry;
+}
+
+export async function getUserAliasMaps(
+  userId: string,
+  client?: SupabaseClient<Database>
+): Promise<{ aliasMap: Map<string, UserAliasRow>; canonicalMap: Map<string, UserAliasRow> }> {
+  const { aliasMap, canonicalMap } = await ensureUserAliasCache(userId, client);
+  return { aliasMap, canonicalMap };
+}
+
+export interface LearnUserAliasOptions extends LearnAliasOptions {
+  client?: SupabaseClient<Database>;
+}
+
+export async function learnUserAlias(
+  userId: string,
+  canonical: string,
+  alias: string,
+  options: LearnUserAliasOptions = {}
+): Promise<void> {
+  if (!userId || !canonical || !alias) return;
+  const supabase = resolveClient(options.client);
+  const trimmedCanonical = canonical.trim();
+  const trimmedAlias = alias.trim();
+  if (!trimmedCanonical || !trimmedAlias) return;
+  const normalizedAlias = normalise(trimmedAlias);
+
+  const { data: existing, error: fetchError } = await supabase
+    .from('user_entity_aliases')
+    .select('id, type, metadata, source')
+    .eq('user_id', userId)
+    .eq('alias_normalized', normalizedAlias)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error('[aliasResolver] Failed to load user alias before learning', fetchError);
+    throw fetchError;
+  }
+
+  const now = new Date().toISOString();
+  if (existing) {
+    const { error: updateError } = await supabase
+      .from('user_entity_aliases')
+      .update({
+        canonical: trimmedCanonical,
+        type: options.type || existing.type || 'unknown',
+        metadata: options.metadata ?? existing.metadata ?? null,
+        source: options.source || existing.source || 'followup',
+        updated_at: now,
+      })
+      .eq('id', existing.id);
+    if (updateError) {
+      console.error('[aliasResolver] Failed to update user alias', updateError);
+      throw updateError;
+    }
+  } else {
+    const { error: insertError } = await supabase
+      .from('user_entity_aliases')
+      .insert({
+        user_id: userId,
+        alias: trimmedAlias,
+        canonical: trimmedCanonical,
+        type: options.type || 'unknown',
+        metadata: options.metadata ?? null,
+        source: options.source || 'followup',
+      });
+    if (insertError) {
+      console.error('[aliasResolver] Failed to insert user alias', insertError);
+      throw insertError;
+    }
+  }
+  invalidateUserAliasCache(userId);
+}
+
+export function invalidateUserAliasCache(userId?: string) {
+  if (typeof userId === 'string' && userId.length > 0) {
+    userAliasCache.delete(userId);
+  } else {
+    userAliasCache.clear();
+  }
 }
 
 export interface LearnAliasOptions {

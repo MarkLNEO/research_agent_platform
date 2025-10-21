@@ -1962,6 +1962,9 @@ useEffect(() => {
               : null;
         setActionBarCompany(nextCompany);
         setActionBarVisible(true);
+        if (nextCompany) {
+          void ensureTrackedAccount(nextCompany);
+        }
       }
 
       // JIT prompts based on usage milestones and profile state
