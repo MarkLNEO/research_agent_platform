@@ -168,12 +168,41 @@ async function runSql(sql, config) {
         headers: {
             ...config.headers,
             Accept: 'application/json',
+            Prefer: 'tx=commit',
         },
         body: JSON.stringify({ query: sql }),
     });
     if (!response.ok) {
         const body = await response.text();
         throw new Error(`[ensureTables] Failed to execute DDL: ${response.status} ${body}`);
+    }
+}
+async function refreshSchemaCache(config) {
+    const endpoints = [
+        { path: 'rpc/pgrst_reload_schema_cache', body: {} },
+        { path: 'rpc/reload_schema_cache', body: {} },
+    ];
+    for (const endpoint of endpoints) {
+        try {
+            const response = await fetch(`${config.supabaseUrl}/rest/v1/${endpoint.path}`, {
+                method: 'POST',
+                headers: {
+                    ...config.headers,
+                    Accept: 'application/json',
+                },
+                body: JSON.stringify(endpoint.body),
+            });
+            if (response.ok) {
+                return;
+            }
+            const text = await response.text();
+            if (response.status !== 404) {
+                console.warn(`[ensureTables] Schema cache refresh via ${endpoint.path} failed: ${response.status} ${text}`);
+            }
+        }
+        catch (error) {
+            console.warn('[ensureTables] Schema cache refresh error', error);
+        }
     }
 }
 export async function ensureTable(table) {
@@ -193,6 +222,7 @@ export async function ensureTable(table) {
             if (!sql)
                 return;
             await runSql(sql, config);
+            await refreshSchemaCache(config);
         })());
     }
     await ensurePromises.get(key);
