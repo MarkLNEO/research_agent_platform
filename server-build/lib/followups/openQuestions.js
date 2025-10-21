@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 let cachedClient = null;
+let tablesAvailable = true;
 function resolveClient(client) {
     if (client)
         return client;
@@ -13,8 +14,19 @@ function resolveClient(client) {
     }
     return cachedClient;
 }
+function isMissingTableError(error, table) {
+    if (!error)
+        return false;
+    if (error.code === 'PGRST205')
+        return true;
+    if (typeof error.message === 'string' && error.message.includes(`'${table}'`))
+        return true;
+    return false;
+}
 export async function listOpenQuestions(userId, options = {}, client) {
     if (!userId)
+        return [];
+    if (!tablesAvailable)
         return [];
     const supabase = resolveClient(client);
     const limit = Math.max(1, options.limit ?? 10);
@@ -26,6 +38,11 @@ export async function listOpenQuestions(userId, options = {}, client) {
         .order('asked_at', { ascending: true })
         .limit(limit);
     if (error) {
+        if (isMissingTableError(error, 'open_questions')) {
+            tablesAvailable = false;
+            console.warn('[openQuestions] open_questions table unavailable; disabling follow-up queue.');
+            return [];
+        }
         console.error('[openQuestions] Failed to list unresolved questions', error);
         throw error;
     }
@@ -33,6 +50,8 @@ export async function listOpenQuestions(userId, options = {}, client) {
 }
 export async function addOpenQuestion(userId, input, client) {
     if (!userId || !input?.question?.trim())
+        return null;
+    if (!tablesAvailable)
         return null;
     const supabase = resolveClient(client);
     const payload = {
@@ -47,6 +66,11 @@ export async function addOpenQuestion(userId, input, client) {
         .select()
         .single();
     if (error) {
+        if (isMissingTableError(error, 'open_questions')) {
+            tablesAvailable = false;
+            console.warn('[openQuestions] open_questions table unavailable; disabling follow-up queue.');
+            return null;
+        }
         console.error('[openQuestions] Failed to insert open question', error);
         throw error;
     }
@@ -54,6 +78,8 @@ export async function addOpenQuestion(userId, input, client) {
 }
 export async function resolveOpenQuestion(id, input = {}, client) {
     if (!id)
+        return null;
+    if (!tablesAvailable)
         return null;
     const supabase = resolveClient(client);
     const payload = {
@@ -72,6 +98,11 @@ export async function resolveOpenQuestion(id, input = {}, client) {
         .select()
         .single();
     if (error) {
+        if (isMissingTableError(error, 'open_questions')) {
+            tablesAvailable = false;
+            console.warn('[openQuestions] open_questions table unavailable; disabling follow-up queue.');
+            return null;
+        }
         console.error('[openQuestions] Failed to resolve question', error);
         throw error;
     }

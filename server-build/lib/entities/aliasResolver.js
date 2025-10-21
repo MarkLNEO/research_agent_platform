@@ -6,6 +6,7 @@ let loadPromise = null;
 let cacheLoadedAt = 0;
 let aliasMap = new Map();
 let canonicalMap = new Map();
+let aliasTablesUnavailable = false;
 const CACHE_TTL_MS = 5 * 60 * 1000; // refresh every 5 minutes
 const USER_CACHE_TTL_MS = 2 * 60 * 1000; // per-user alias cache
 function requireClient() {
@@ -27,6 +28,15 @@ function ensureArrayAliases(aliases) {
     if (!Array.isArray(aliases))
         return [];
     return aliases.filter(a => typeof a === 'string' && a.trim().length > 0);
+}
+function isMissingTableError(error, table) {
+    if (!error)
+        return false;
+    if (error.code === 'PGRST205')
+        return true;
+    if (typeof error.message === 'string' && error.message.includes(`'${table}'`))
+        return true;
+    return false;
 }
 const userAliasCache = new Map();
 function populateCache(rows) {
@@ -50,12 +60,24 @@ async function loadCache(client) {
     if (loadPromise)
         return loadPromise;
     loadPromise = (async () => {
+        if (aliasTablesUnavailable) {
+            populateCache([]);
+            return;
+        }
         const supabase = resolveClient(client);
         const { data, error } = await supabase
             .from('entity_aliases')
             .select('*');
         loadPromise = null;
         if (error) {
+            if (isMissingTableError(error, 'entity_aliases')) {
+                if (!aliasTablesUnavailable) {
+                    console.warn('[aliasResolver] entity_aliases table unavailable; disabling alias resolution.');
+                }
+                aliasTablesUnavailable = true;
+                populateCache([]);
+                return;
+            }
             console.error('[aliasResolver] Failed to load alias cache', error);
             throw error;
         }
@@ -195,6 +217,16 @@ async function ensureUserAliasCache(userId, client) {
         .select('*')
         .eq('user_id', userId);
     if (error) {
+        if (isMissingTableError(error, 'user_entity_aliases')) {
+            console.warn('[aliasResolver] user_entity_aliases table unavailable; skipping per-user alias cache.');
+            const entry = {
+                aliasMap: new Map(),
+                canonicalMap: new Map(),
+                loadedAt: Date.now(),
+            };
+            userAliasCache.set(userId, entry);
+            return entry;
+        }
         console.error('[aliasResolver] Failed to load user alias cache', error);
         return {
             aliasMap: new Map(),
@@ -233,6 +265,10 @@ export async function learnUserAlias(userId, canonical, alias, options = {}) {
         .eq('alias_normalized', normalizedAlias)
         .maybeSingle();
     if (fetchError) {
+        if (isMissingTableError(fetchError, 'user_entity_aliases')) {
+            console.warn('[aliasResolver] user_entity_aliases table unavailable; skipping alias learn.');
+            return;
+        }
         console.error('[aliasResolver] Failed to load user alias before learning', fetchError);
         throw fetchError;
     }
@@ -249,6 +285,10 @@ export async function learnUserAlias(userId, canonical, alias, options = {}) {
         })
             .eq('id', existing.id);
         if (updateError) {
+            if (isMissingTableError(updateError, 'user_entity_aliases')) {
+                console.warn('[aliasResolver] user_entity_aliases table unavailable during update; skipping alias learn.');
+                return;
+            }
             console.error('[aliasResolver] Failed to update user alias', updateError);
             throw updateError;
         }
@@ -265,6 +305,10 @@ export async function learnUserAlias(userId, canonical, alias, options = {}) {
             source: options.source || 'followup',
         });
         if (insertError) {
+            if (isMissingTableError(insertError, 'user_entity_aliases')) {
+                console.warn('[aliasResolver] user_entity_aliases table unavailable during insert; skipping alias learn.');
+                return;
+            }
             console.error('[aliasResolver] Failed to insert user alias', insertError);
             throw insertError;
         }

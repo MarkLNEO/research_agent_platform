@@ -418,7 +418,8 @@ async function extractPreferenceCandidates(openai, userId, lastUserMessage, mess
             model: 'gpt-5-mini',
             instructions,
             input: JSON.stringify(payload, null, 2),
-            text: { format: { type: 'text' }, verbosity: 'low', max_output_tokens: 200 },
+            text: { format: { type: 'text' }, verbosity: 'low' },
+            max_output_tokens: 200,
             store: false,
             metadata: { agent: 'preference_extractor', user_id: userId },
         });
@@ -1349,7 +1350,14 @@ export default async function handler(req, res) {
                         model: 'gpt-5-mini',
                         instructions,
                         input: baseInput,
-                        response_format: { type: 'json_schema', json_schema: SUMMARY_JSON_SCHEMA },
+                        text: {
+                            format: {
+                                type: 'json_schema',
+                                name: SUMMARY_JSON_SCHEMA.name,
+                                schema: SUMMARY_JSON_SCHEMA.schema,
+                            },
+                            verbosity: 'low',
+                        },
                         store: false,
                         metadata: {
                             agent: 'company_research',
