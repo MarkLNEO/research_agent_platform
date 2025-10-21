@@ -55,8 +55,8 @@ export async function upsertPreferences(
   userId: string,
   preferences: PreferenceUpsert[],
   client?: SupabaseClient<Database>
-): Promise<void> {
-  if (!userId || !Array.isArray(preferences) || preferences.length === 0) return;
+): Promise<string[]> {
+  if (!userId || !Array.isArray(preferences) || preferences.length === 0) return [];
   const supabase = resolveClient(client);
 
   const sanitized = preferences
@@ -67,7 +67,7 @@ export async function upsertPreferences(
       confidence: clampConfidence(pref.confidence),
       source: (pref.source || 'followup') as PreferenceSource,
     }));
-  if (!sanitized.length) return;
+  if (!sanitized.length) return [];
 
   const keys = sanitized.map(pref => pref.key);
 
@@ -104,7 +104,7 @@ export async function upsertPreferences(
     updated_at: toIsoTimestamp()
   }));
 
-  if (!rowsToUpsert.length) return;
+  if (!rowsToUpsert.length) return [];
 
   const { error: upsertError } = await supabase
     .from('user_preferences')
@@ -114,6 +114,8 @@ export async function upsertPreferences(
     console.error('[preferences] Failed to upsert preferences', upsertError);
     throw upsertError;
   }
+
+  return rowsToUpsert.map(row => row.key);
 }
 
 function applyNestedPreference(resolved: ResolvedPrefs, key: string, value: Json) {

@@ -17,6 +17,7 @@ export interface UserContext {
   resolvedPrefs?: ResolvedPrefs;
   openQuestions?: any[];
   canonicalEntities?: Array<{ canonical: string; type: string; confidence?: number; matched?: string }>;
+  recentPreferenceConfirmations?: Array<{ key: string; label?: string }>;
 }
 
 const AGENT_ROLE: Record<AgentType, string> = {
@@ -121,7 +122,8 @@ const FOLLOW_UP_MEMORY_GUIDANCE = `Preference memory:
 - When a follow-up highlights a recurring focus (e.g., "tell me more about leadership"), end with a conversational offer to remember that theme in future research. Make the invitation explicit ("Want me to track leadership moves going forward?").`;
 
 const CLOSING_CUSTOMIZATION_GUIDANCE = `Preference check-out:
-- Close every response with a short question inviting the user to tailor future briefs. Mention 2–3 relevant options (e.g., focus on leadership moves, supply-chain risks, tech stack) and remind them you can remember their choice.`;
+- Close every response with a short question inviting the user to tailor future briefs. Mention 2–3 relevant options (e.g., focus on leadership moves, supply-chain risks, tech stack) and remind them you can remember their choice.
+- If the user just confirmed a preference in this turn, thank them warmly, confirm it has been saved, and only offer additional options that are new (do not re-ask for the item they just confirmed).`;
 
 const CLARIFIER_GUARDRAILS = `Clarifier Guardrails:
 - Never ask the user to choose research scope, topics, formats, or time ranges unless they explicitly asked you to present options.
@@ -164,6 +166,14 @@ const SETTINGS_RESPONSE_SHAPE = `Response Shape:
 function formatSection(title: string, body: string | undefined): string | null {
   if (!body || !body.trim()) return null;
   return `${title.toUpperCase()}\n${body.trim()}`;
+}
+
+function formatList(items: string[]): string {
+  if (items.length === 0) return '';
+  if (items.length === 1) return items[0];
+  const head = items.slice(0, -1).join(', ');
+  const tail = items[items.length - 1];
+  return `${head} and ${tail}`;
 }
 
 const normalizeTargetTitles = (raw: unknown): string[] => {
@@ -375,6 +385,23 @@ export function buildSystemPrompt(
   }
   if (isResearchAgent && userContext.promptConfig?.summary_preference_set) {
     extras.push('The user already chose their summary length preference. Do not re-ask; just use the saved default unless they change it.');
+  }
+
+  const recentPreferenceConfirmations = Array.isArray(userContext.recentPreferenceConfirmations)
+    ? userContext.recentPreferenceConfirmations.filter((entry: any) => typeof entry?.key === 'string')
+    : [];
+  if (isResearchAgent && recentPreferenceConfirmations.length) {
+    const confirmationLabels = recentPreferenceConfirmations
+      .map((entry: any) => {
+        if (typeof entry?.label === 'string' && entry.label.trim()) return entry.label.trim();
+        const key = typeof entry?.key === 'string' ? entry.key : '';
+        return key ? key.split('.').pop()?.replace(/_/g, ' ') || key : '';
+      })
+      .filter((label: string | undefined): label is string => Boolean(label));
+    if (confirmationLabels.length) {
+      const formattedList = formatList(confirmationLabels);
+      extras.push(`Preference update: The user just confirmed ${formattedList}. Thank them, acknowledge you'll keep that focus in future briefs, and avoid re-asking for the same preference in this response. If you offer more tweaks, suggest different angles.`);
+    }
   }
 
   if (isResearchAgent && resolvedMode === 'deep') {

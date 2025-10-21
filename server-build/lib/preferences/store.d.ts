@@ -10,7 +10,7 @@ export interface PreferenceUpsert {
     source?: PreferenceSource;
 }
 export type PreferenceRow = Database['public']['Tables']['user_preferences']['Row'];
-export declare function upsertPreferences(userId: string, preferences: PreferenceUpsert[], client?: SupabaseClient<Database>): Promise<void>;
+export declare function upsertPreferences(userId: string, preferences: PreferenceUpsert[], client?: SupabaseClient<Database>): Promise<string[]>;
 export declare function buildResolvedPreferences(promptConfig: Record<string, any> | null | undefined, preferenceRows: PreferenceRow[] | null | undefined): ResolvedPrefs;
 export declare function getResolvedPreferences(userId: string, client?: SupabaseClient<Database>): Promise<{
     resolved: ResolvedPrefs;

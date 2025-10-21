@@ -50,6 +50,108 @@ const SUMMARY_JSON_SCHEMA = {
         required: ['company_overview', 'value_drivers', 'risks', 'tech_stack', 'buying_centers', 'next_actions'],
     },
 };
+const AFFIRMATIVE_RE = /\b(yes|yep|yeah|yup|sure|absolutely|definitely|of course|sounds good|please do|do it|go ahead|let's do it|make it so|confirmed|that's right|sure thing|ok|okay|k|roger|yessir)\b/i;
+const NEGATIVE_RE = /\b(no|nope|nah|not now|maybe later|don't|do not|not really|pass)\b/i;
+function normalizePreferenceKey(key) {
+    if (typeof key !== 'string')
+        return '';
+    return key.trim().toLowerCase();
+}
+function slugifyPreferenceTerm(term) {
+    return term
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 80);
+}
+function labelFromPreferenceKey(key) {
+    if (!key)
+        return '';
+    const segments = key.split('.');
+    const last = segments[segments.length - 1] || key;
+    return last.replace(/_/g, ' ');
+}
+function extractExplicitPreferencePhrases(text) {
+    const phrases = new Set();
+    const pattern = /\b(remember|keep|include|focus on|prioritize|highlight|emphasize|spotlight|track|monitor)\b([\s\S]*?)(?=[.!?\n]|$)/gi;
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+        let fragment = (match[2] || '').trim();
+        fragment = fragment.replace(/^[:\-\s]+/, '');
+        fragment = fragment.replace(/^(?:on|the|all|any|about)\s+/i, '');
+        fragment = fragment.replace(/(?:for|in)\s+(?:future|all|every)\s+(?:briefs?|reports?|research|responses|writeups)(?:\s+(?:going|moving)\s+forward)?[^.?!]*$/i, '');
+        fragment = fragment.replace(/(?:going forward|moving forward|next time|from now on)[^.?!]*$/i, '');
+        fragment = fragment.replace(/^(?:to|that)\s+/i, '');
+        fragment = fragment.replace(/^["'`]+|["'`]+$/g, '');
+        fragment = fragment.replace(/\s+/g, ' ').trim();
+        if (!fragment)
+            continue;
+        const wordCount = fragment.split(/\s+/).filter(Boolean).length;
+        if (wordCount === 0 || wordCount > 12)
+            continue;
+        phrases.add(fragment);
+    }
+    const savePattern = /(?:save|remember)\s+(?:preference\s*)?:?\s*["'`]?(?<phrase>[a-z0-9][^"'`\n]{2,80})["'`]?\s*(?:for\s+(?:future|all)\s+(?:briefs?|reports?|research|responses))?(?=[.!?\n]|$)/gi;
+    let saveMatch;
+    while ((saveMatch = savePattern.exec(text)) !== null) {
+        const fragment = (saveMatch.groups?.phrase || '').trim();
+        if (!fragment)
+            continue;
+        const wordCount = fragment.split(/\s+/).filter(Boolean).length;
+        if (wordCount === 0 || wordCount > 12)
+            continue;
+        phrases.add(fragment.replace(/\s+/g, ' '));
+    }
+    return Array.from(phrases);
+}
+function detectPreferenceAffirmations(message, openQuestions) {
+    const trimmed = (message || '').trim();
+    if (!trimmed)
+        return [];
+    const lower = trimmed.toLowerCase();
+    const results = [];
+    const seen = new Set();
+    const addPreference = (key, label, value, confidence = 0.95) => {
+        const normalized = normalizePreferenceKey(key);
+        if (!normalized || seen.has(normalized))
+            return;
+        seen.add(normalized);
+        results.push({
+            pref: {
+                key: normalized,
+                value: value ?? { on: true, label: label || labelFromPreferenceKey(normalized) },
+                confidence,
+                source: 'followup',
+            },
+            label: label || labelFromPreferenceKey(normalized),
+        });
+    };
+    const explicitPhrases = extractExplicitPreferencePhrases(trimmed);
+    for (const phrase of explicitPhrases) {
+        const slug = slugifyPreferenceTerm(phrase);
+        if (!slug)
+            continue;
+        addPreference(`focus.${slug}`, phrase);
+    }
+    if (results.length === 0) {
+        if (NEGATIVE_RE.test(lower) && !AFFIRMATIVE_RE.test(lower)) {
+            return [];
+        }
+        if (AFFIRMATIVE_RE.test(lower)) {
+            for (const question of openQuestions || []) {
+                const prefKey = normalizePreferenceKey(question?.context?.preference_key);
+                if (!prefKey)
+                    continue;
+                const label = typeof question?.context?.label === 'string'
+                    ? question.context.label
+                    : labelFromPreferenceKey(prefKey);
+                const fallbackValue = question?.context?.preference_value ?? { on: true, label };
+                addPreference(prefKey, label, fallbackValue, 0.9);
+            }
+        }
+    }
+    return results;
+}
 // Helper function to estimate tokens
 function estimateTokens(text = '') {
     return Math.ceil((text || '').length / 4);
@@ -140,6 +242,7 @@ async function fetchUserContext(client, userId) {
     const preferences = Array.isArray(ctx?.preferences) ? ctx.preferences : [];
     const resolvedPrefs = buildResolvedPreferences(ctx?.prompt_config || null, preferences);
     const openQuestions = Array.isArray(ctx?.open_questions) ? ctx.open_questions : [];
+    ctx.recent_preference_confirmations = [];
     return {
         profile: ctx?.profile || null,
         customCriteria: ctx?.custom_criteria || [],
@@ -150,6 +253,7 @@ async function fetchUserContext(client, userId) {
         preferences,
         resolvedPrefs,
         openQuestions,
+        recentPreferenceConfirmations: [],
     };
 }
 function classifyResearchIntent(raw) {
@@ -583,6 +687,9 @@ export default async function handler(req, res) {
         const requestedMode = research_type;
         const contextFetchStart = Date.now();
         const userContext = await fetchUserContext(supabase, user.id);
+        const originalOpenQuestions = Array.isArray(userContext.openQuestions)
+            ? [...userContext.openQuestions]
+            : [];
         const contextFetchMs = Date.now() - contextFetchStart;
         // Subject recall: tiny snapshot of last saved research for active_subject
         let subjectSnapshot = '';
@@ -688,44 +795,84 @@ export default async function handler(req, res) {
         if (lastUserMessage) {
             try {
                 if (PREFS_SUMMARY_ENABLED) {
+                    const labelMap = new Map();
+                    const preferenceMap = new Map();
+                    const affirmed = detectPreferenceAffirmations(String(lastUserMessage.content || ''), originalOpenQuestions);
+                    for (const detection of affirmed) {
+                        const normalizedKey = normalizePreferenceKey(detection.pref?.key);
+                        if (!normalizedKey)
+                            continue;
+                        const existing = preferenceMap.get(normalizedKey);
+                        if (!existing || (detection.pref.confidence ?? 0) >= (existing.confidence ?? 0)) {
+                            preferenceMap.set(normalizedKey, { ...detection.pref, key: normalizedKey });
+                        }
+                        if (!labelMap.has(normalizedKey)) {
+                            labelMap.set(normalizedKey, detection.label || labelFromPreferenceKey(normalizedKey));
+                        }
+                    }
                     const extracted = await extractPreferenceCandidates(openai, user.id, lastUserMessage, messages, userContext.resolvedPrefs);
-                    if (extracted.length) {
-                        await upsertPreferences(user.id, extracted, supabase);
-                        userContext.preferences = mergePreferenceRows(userContext.preferences || [], extracted, user.id);
-                        userContext.resolvedPrefs = buildResolvedPreferences(userContext.promptConfig, userContext.preferences);
-                        try {
-                            await logUsage(supabase, user.id, 'preference.upsert', 0, {
-                                keys: extracted.map(pref => pref.key),
-                                source: extracted.map(pref => pref.source || 'followup'),
-                                run_id: runId,
-                            });
+                    for (const pref of extracted) {
+                        const normalizedKey = normalizePreferenceKey(pref.key);
+                        if (!normalizedKey)
+                            continue;
+                        const existing = preferenceMap.get(normalizedKey);
+                        if (!existing || (pref.confidence ?? 0) >= (existing.confidence ?? 0)) {
+                            preferenceMap.set(normalizedKey, { ...pref, key: normalizedKey });
                         }
-                        catch (logErr) {
-                            console.warn('[telemetry] preference.upsert log failed', logErr);
+                        if (!labelMap.has(normalizedKey)) {
+                            labelMap.set(normalizedKey, labelFromPreferenceKey(normalizedKey));
                         }
-                        const remainingQuestions = [];
-                        for (const question of userContext.openQuestions || []) {
-                            const prefMatch = extracted.find(pref => question?.context?.preference_key && pref.key === question.context.preference_key);
-                            if (prefMatch && question?.id) {
+                    }
+                    const combinedPreferences = Array.from(preferenceMap.values());
+                    if (combinedPreferences.length) {
+                        const savedKeys = await upsertPreferences(user.id, combinedPreferences, supabase);
+                        if (savedKeys.length) {
+                            const savedSet = new Set(savedKeys.map(normalizePreferenceKey));
+                            const savedEntries = combinedPreferences.filter(pref => savedSet.has(normalizePreferenceKey(pref.key)));
+                            if (savedEntries.length) {
+                                userContext.preferences = mergePreferenceRows(userContext.preferences || [], savedEntries, user.id);
+                                userContext.resolvedPrefs = buildResolvedPreferences(userContext.promptConfig, userContext.preferences);
+                                const savedConfirmations = savedEntries.map(pref => ({
+                                    key: pref.key,
+                                    label: labelMap.get(pref.key) || labelFromPreferenceKey(pref.key),
+                                }));
+                                userContext.recentPreferenceConfirmations = savedConfirmations;
                                 try {
-                                    await resolveOpenQuestion(question.id, { resolution: `Preference ${prefMatch.key} captured.` }, supabase);
-                                    try {
-                                        await logUsage(supabase, user.id, 'followup.resolved', 0, { question_id: question.id, preference_key: prefMatch.key, run_id: runId });
+                                    await logUsage(supabase, user.id, 'preference.upsert', 0, {
+                                        keys: savedEntries.map(pref => pref.key),
+                                        source: savedEntries.map(pref => pref.source || 'followup'),
+                                        run_id: runId,
+                                    });
+                                }
+                                catch (logErr) {
+                                    console.warn('[telemetry] preference.upsert log failed', logErr);
+                                }
+                                const remainingQuestions = [];
+                                for (const question of userContext.openQuestions || []) {
+                                    const targetKey = normalizePreferenceKey(question?.context?.preference_key);
+                                    const prefMatch = savedEntries.find(pref => targetKey && pref.key === targetKey);
+                                    if (prefMatch && question?.id) {
+                                        try {
+                                            await resolveOpenQuestion(question.id, { resolution: `Preference ${prefMatch.key} captured.` }, supabase);
+                                            try {
+                                                await logUsage(supabase, user.id, 'followup.resolved', 0, { question_id: question.id, preference_key: prefMatch.key, run_id: runId });
+                                            }
+                                            catch (logErr) {
+                                                console.warn('[telemetry] followup.resolved log failed', logErr);
+                                            }
+                                        }
+                                        catch (resolveErr) {
+                                            console.error('[openQuestions] failed to resolve question', resolveErr);
+                                            remainingQuestions.push(question);
+                                        }
                                     }
-                                    catch (logErr) {
-                                        console.warn('[telemetry] followup.resolved log failed', logErr);
+                                    else {
+                                        remainingQuestions.push(question);
                                     }
                                 }
-                                catch (resolveErr) {
-                                    console.error('[openQuestions] failed to resolve question', resolveErr);
-                                    remainingQuestions.push(question);
-                                }
-                            }
-                            else {
-                                remainingQuestions.push(question);
+                                userContext.openQuestions = remainingQuestions;
                             }
                         }
-                        userContext.openQuestions = remainingQuestions;
                     }
                 }
             }

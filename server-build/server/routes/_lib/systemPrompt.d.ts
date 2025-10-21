@@ -18,6 +18,10 @@ export interface UserContext {
         confidence?: number;
         matched?: string;
     }>;
+    recentPreferenceConfirmations?: Array<{
+        key: string;
+        label?: string;
+    }>;
 }
 export declare function buildSystemPrompt(userContext: UserContext, agentType?: AgentType, researchMode?: ResearchMode): string;
 export {};

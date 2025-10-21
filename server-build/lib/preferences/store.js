@@ -33,7 +33,7 @@ function resolveClient(client) {
 }
 export async function upsertPreferences(userId, preferences, client) {
     if (!userId || !Array.isArray(preferences) || preferences.length === 0)
-        return;
+        return [];
     const supabase = resolveClient(client);
     const sanitized = preferences
         .filter(pref => pref && typeof pref.key === 'string' && pref.key.trim().length > 0)
@@ -44,7 +44,7 @@ export async function upsertPreferences(userId, preferences, client) {
         source: (pref.source || 'followup'),
     }));
     if (!sanitized.length)
-        return;
+        return [];
     const keys = sanitized.map(pref => pref.key);
     const { data: existingRows, error: fetchError } = await supabase
         .from('user_preferences')
@@ -77,7 +77,7 @@ export async function upsertPreferences(userId, preferences, client) {
         updated_at: toIsoTimestamp()
     }));
     if (!rowsToUpsert.length)
-        return;
+        return [];
     const { error: upsertError } = await supabase
         .from('user_preferences')
         .upsert(rowsToUpsert, { onConflict: 'user_id,key' });
@@ -85,6 +85,7 @@ export async function upsertPreferences(userId, preferences, client) {
         console.error('[preferences] Failed to upsert preferences', upsertError);
         throw upsertError;
     }
+    return rowsToUpsert.map(row => row.key);
 }
 function applyNestedPreference(resolved, key, value) {
     const segments = key.split('.').map(segment => segment.trim()).filter(Boolean);
