@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import { buildSystemPrompt } from '../_lib/systemPrompt.js';
 import { buildMemoryBlock } from '../_lib/memory.js';
+import { applySaveProfilePayloads, extractSaveProfilePayloads } from '../_lib/profileSave.js';
 import { assertEmailAllowed } from '../_lib/access.js';
 import { buildResolvedPreferences, upsertPreferences, } from '../../../lib/preferences/store.js';
 import { resolveEntity, learnAlias, learnUserAlias, getUserAliasMaps } from '../../../lib/entities/aliasResolver.js';
@@ -756,6 +757,88 @@ export default async function handler(req, res) {
             lastUserMessage = messages
                 .filter(msg => msg.role === 'user')
                 .pop();
+            if (lastUserMessage && typeof lastUserMessage.content === 'string') {
+                const manualSavePayloads = extractSaveProfilePayloads(String(lastUserMessage.content), 3);
+                if (manualSavePayloads.length > 0) {
+                    const streamHeaders = {
+                        'Content-Type': 'text/event-stream; charset=utf-8',
+                        'Cache-Control': 'no-cache, no-transform',
+                        'Connection': 'keep-alive',
+                        'Transfer-Encoding': 'chunked',
+                        'Access-Control-Allow-Origin': '*',
+                        'X-Accel-Buffering': 'no',
+                    };
+                    const emit = (payload) => {
+                        try {
+                            res.write(`data: ${JSON.stringify(payload)}\n\n`);
+                        }
+                        catch (emitErr) {
+                            console.error('[profile] SSE emit failed', emitErr);
+                        }
+                    };
+                    try {
+                        const saveStart = Date.now();
+                        const result = await applySaveProfilePayloads(supabase, user.id, manualSavePayloads);
+                        res.writeHead(200, streamHeaders);
+                        try {
+                            if (typeof res.flushHeaders === 'function')
+                                res.flushHeaders();
+                        }
+                        catch { }
+                        emit({ type: 'meta', stage: 'profile_save', event: 'start' });
+                        if (result.summary.length) {
+                            emit({
+                                type: 'preference_saved',
+                                preferences: result.summary.map(label => ({ label })),
+                            });
+                        }
+                        emit({
+                            type: 'profile_saved',
+                            summary: result.summary,
+                            profile: result.profile,
+                            custom_criteria: result.customCriteria,
+                            signal_preferences: result.signalPreferences,
+                            disqualifying_criteria: result.disqualifyingCriteria,
+                            prompt_config: result.promptConfig,
+                        });
+                        const confirmation = result.summary.length
+                            ? `All set — I captured: ${result.summary.join('; ')}.`
+                            : 'Saved your latest profile updates.';
+                        emit({ type: 'content', content: confirmation });
+                        res.write('data: [DONE]\n\n');
+                        res.end();
+                        try {
+                            await logUsage(supabase, user.id, 'profile.update', 0, {
+                                keys: result.summary,
+                                run_id: runId,
+                                duration_ms: Date.now() - saveStart,
+                                source: 'manual_json',
+                            });
+                        }
+                        catch (logErr) {
+                            console.warn('[telemetry] profile.update log failed', logErr);
+                        }
+                    }
+                    catch (saveErr) {
+                        console.error('[profile] save_profile handling failed', saveErr);
+                        if (!res.headersSent) {
+                            res.writeHead(200, streamHeaders);
+                            try {
+                                if (typeof res.flushHeaders === 'function')
+                                    res.flushHeaders();
+                            }
+                            catch { }
+                        }
+                        emit({
+                            type: 'error',
+                            error: saveErr?.message || 'Failed to save profile preferences. Please try again.',
+                        });
+                        res.write('data: [DONE]\n\n');
+                        res.end();
+                    }
+                    return;
+                }
+            }
             if (lastUserMessage) {
                 // Intent classification: decide whether to perform research or just reply briefly
                 const _text = String(lastUserMessage.content || '').trim();

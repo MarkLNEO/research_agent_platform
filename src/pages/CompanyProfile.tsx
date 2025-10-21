@@ -1087,6 +1087,21 @@ Onboarding flow:
                     void refreshProfileData();
                   }
                 }
+                else if (parsed.type === 'profile_saved') {
+                  if (parsed.profile && typeof parsed.profile === 'object') {
+                    setProfileData(parsed.profile);
+                  }
+                  if (Array.isArray(parsed.custom_criteria)) {
+                    setCustomCriteriaItems(parsed.custom_criteria);
+                    setCustomCriteriaCount(parsed.custom_criteria.length);
+                  }
+                  if (Array.isArray(parsed.signal_preferences)) {
+                    setSignalPreferenceItems(parsed.signal_preferences);
+                    setSignalPreferencesCount(parsed.signal_preferences.length);
+                  }
+                  void refreshPreferences();
+                  invalidateUserProfileCache(user?.id);
+                }
                 else if (parsed.type === 'alias_learned') {
                   if (Array.isArray(parsed.aliases) && parsed.aliases.length) {
                     const summaries = parsed.aliases

@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { applySaveProfilePayloads } from '../_lib/profileSave.js';
 export default async function handler(req, res) {
     if (req.method === 'OPTIONS') {
         return res.status(200).json({ ok: true });
@@ -22,155 +23,26 @@ export default async function handler(req, res) {
         }
         const user = authData.user;
         const updateData = req.body || {};
-        const results = {
-            profile: null,
-            custom_criteria: [],
-            signal_preferences: [],
-            disqualifying_criteria: []
+        const payload = {
+            action: 'save_profile',
+            profile: updateData.profile ?? null,
+            custom_criteria: updateData.custom_criteria ?? null,
+            signal_preferences: updateData.signal_preferences ?? null,
+            disqualifying_criteria: updateData.disqualifying_criteria ?? null,
+            prompt_config: updateData.prompt_config ?? null,
         };
-        // Update profile
-        if (updateData.profile) {
-            if (Array.isArray(updateData.profile.indicator_choices)) {
-                updateData.profile.indicator_choices = updateData.profile.indicator_choices
-                    .map((item) => (typeof item === 'string' ? item.trim() : ''))
-                    .filter((item) => item.length > 0);
-            }
-            if (updateData.profile.preferred_terms && typeof updateData.profile.preferred_terms === 'object') {
-                const normalized = {};
-                Object.entries(updateData.profile.preferred_terms).forEach(([key, value]) => {
-                    if (typeof value === 'string' && value.trim()) {
-                        normalized[key] = value.trim();
-                    }
-                });
-                updateData.profile.preferred_terms = normalized;
-            }
-            const { data: existingProfile } = await supabase
-                .from('company_profiles')
-                .select('id, indicator_choices, preferred_terms')
-                .eq('user_id', user.id)
-                .maybeSingle();
-            if (existingProfile) {
-                const mergedProfile = {
-                    ...updateData.profile,
-                    updated_at: new Date().toISOString(),
-                };
-                if (Array.isArray(updateData.profile.indicator_choices)) {
-                    const existingChoices = Array.isArray(existingProfile.indicator_choices)
-                        ? existingProfile.indicator_choices
-                        : [];
-                    mergedProfile.indicator_choices = Array.from(new Set([
-                        ...existingChoices.map(choice => (typeof choice === 'string' ? choice.trim() : '')).filter(Boolean),
-                        ...updateData.profile.indicator_choices
-                    ]));
-                }
-                if (updateData.profile.preferred_terms && typeof updateData.profile.preferred_terms === 'object') {
-                    mergedProfile.preferred_terms = {
-                        ...(existingProfile.preferred_terms || {}),
-                        ...updateData.profile.preferred_terms,
-                    };
-                }
-                const { data, error } = await supabase
-                    .from('company_profiles')
-                    .update(mergedProfile)
-                    .eq('user_id', user.id)
-                    .select()
-                    .single();
-                if (error)
-                    throw error;
-                results.profile = data;
-            }
-            else {
-                const { data, error } = await supabase
-                    .from('company_profiles')
-                    .insert({ user_id: user.id, ...updateData.profile })
-                    .select()
-                    .single();
-                if (error)
-                    throw error;
-                results.profile = data;
-            }
-        }
-        // Update custom criteria
-        if (Array.isArray(updateData.custom_criteria) && updateData.custom_criteria.length > 0) {
-            await supabase.from('user_custom_criteria').delete().eq('user_id', user.id);
-            const criteriaToInsert = updateData.custom_criteria.map((c, idx) => ({
-                user_id: user.id,
-                field_name: c.field_name,
-                field_type: c.field_type,
-                importance: c.importance,
-                hints: c.hints || [],
-                display_order: idx + 1,
-            }));
-            const { data, error } = await supabase
-                .from('user_custom_criteria')
-                .insert(criteriaToInsert)
-                .select();
-            if (error)
-                throw error;
-            results.custom_criteria = data;
-        }
-        // Update signal preferences
-        if (Array.isArray(updateData.signal_preferences) && updateData.signal_preferences.length > 0) {
-            await supabase.from('user_signal_preferences').delete().eq('user_id', user.id);
-            const signalsToInsert = updateData.signal_preferences.map((s) => ({
-                user_id: user.id,
-                signal_type: s.signal_type,
-                importance: s.importance,
-                lookback_days: s.lookback_days || 90,
-                config: s.config || {},
-            }));
-            const { data, error } = await supabase
-                .from('user_signal_preferences')
-                .insert(signalsToInsert)
-                .select();
-            if (error)
-                throw error;
-            results.signal_preferences = data;
-        }
-        // Update disqualifying criteria
-        if (Array.isArray(updateData.disqualifying_criteria) && updateData.disqualifying_criteria.length > 0) {
-            await supabase.from('user_disqualifying_criteria').delete().eq('user_id', user.id);
-            const disqualifiersToInsert = updateData.disqualifying_criteria.map((d) => ({
-                user_id: user.id,
-                criterion: d.criterion
-            }));
-            const { data, error } = await supabase
-                .from('user_disqualifying_criteria')
-                .insert(disqualifiersToInsert)
-                .select();
-            if (error)
-                throw error;
-            results.disqualifying_criteria = data;
-        }
-        // Update prompt config (best-effort; ignore unknown columns)
-        if (updateData.prompt_config && typeof updateData.prompt_config === 'object') {
-            try {
-                const { data: existingCfg } = await supabase
-                    .from('user_prompt_config')
-                    .select('id')
-                    .eq('user_id', user.id)
-                    .maybeSingle();
-                if (existingCfg) {
-                    const { error } = await supabase
-                        .from('user_prompt_config')
-                        .update({ ...updateData.prompt_config, updated_at: new Date().toISOString() })
-                        .eq('user_id', user.id);
-                    if (error)
-                        throw error;
-                }
-                else {
-                    const { error } = await supabase
-                        .from('user_prompt_config')
-                        .insert({ user_id: user.id, ...updateData.prompt_config });
-                    if (error)
-                        throw error;
-                }
-            }
-            catch (e) {
-                console.warn('[update-profile] prompt_config update skipped:', e?.message || e);
-            }
-        }
-        return res.json({ success: true, data: results });
+        const result = await applySaveProfilePayloads(supabase, user.id, [payload]);
+        return res.json({
+            success: true,
+            data: {
+                profile: result.profile,
+                custom_criteria: result.customCriteria,
+                signal_preferences: result.signalPreferences,
+                disqualifying_criteria: result.disqualifyingCriteria,
+                prompt_config: result.promptConfig,
+                summary: result.summary,
+            },
+        });
     }
     catch (error) {
         console.error('Error in update-profile:', error);

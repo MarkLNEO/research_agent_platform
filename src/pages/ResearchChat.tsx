@@ -2803,6 +2803,21 @@ useEffect(() => {
                     invalidateUserProfileCache(user?.id);
                   }
                 }
+                else if (parsed.type === 'profile_saved') {
+                  invalidateUserProfileCache(user?.id);
+                  if (Array.isArray(parsed.custom_criteria)) {
+                    setCustomCriteria(
+                      parsed.custom_criteria.map((item: any) => ({
+                        ...item,
+                        name: item.field_name ?? item.name ?? '',
+                      }))
+                    );
+                  }
+                  if (Array.isArray(parsed.signal_preferences)) {
+                    setSignalPreferences(parsed.signal_preferences);
+                  }
+                  void fetchUserPreferences();
+                }
                 else if (parsed.type === 'alias_learned') {
                   if (Array.isArray(parsed.aliases) && parsed.aliases.length) {
                     const summaries = parsed.aliases
