@@ -28,6 +28,7 @@ import { useUserProfile, invalidateUserProfileCache } from '../hooks/useUserProf
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { OptimizeICPModal } from '../components/OptimizeICPModal';
 import { useResearchEngine } from '../contexts/ResearchEngineContext';
+import { getDefaultTemplate } from '../config/researchTemplates';
 import { SummarySchemaZ, type SummarySchema } from '../../shared/summarySchema.js';
 import type { ResolvedPrefs } from '../../shared/preferences.js';
 import { SummaryCard } from '../components/SummaryCard';
@@ -380,8 +381,6 @@ export function ResearchChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const autoSentRef = useRef(false);
-  const [showClarify, setShowClarify] = useState(false);
-  const [pendingQuery, setPendingQuery] = useState<string | null>(null);
   const [focusComposerTick, setFocusComposerTick] = useState(0);
   const [preferredResearchType, setPreferredResearchType] = useState<'deep' | 'quick' | 'specific' | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
@@ -438,7 +437,6 @@ export function ResearchChat() {
   const [refineTimeframe, setRefineTimeframe] = useState<string>('last 12 months');
   const [crumbOpen, setCrumbOpen] = useState(false);
   const [switchInput, setSwitchInput] = useState('');
-  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const lastSubjectRef = useRef<{ prev: string | null; at: number | null }>({ prev: null, at: null });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [lastRunMode, setLastRunMode] = useState<'deep'|'quick'|'specific'|'auto'|null>(null);
@@ -2005,8 +2003,6 @@ useEffect(() => {
   const startSuggestion = (prompt: string) => {
     if (!prompt) return;
     setInputValue(prompt);
-    setShowClarify(false);
-    setPendingQuery(null);
     setFocusComposerTick(t => t + 1);
   };
 
@@ -2048,13 +2044,6 @@ useEffect(() => {
 
     const inferredMode = isResearch ? inferResearchMode(content) : undefined;
 
-    if (!preferredResearchType && isResearch) {
-      setPendingQuery(content);
-      setShowClarify(true);
-      setInputValue('');
-      return;
-    }
-
     const runMode = preferredResearchType ?? inferredMode;
 
     setInputValue('');
@@ -2086,29 +2075,6 @@ useEffect(() => {
     } catch (err) {
       console.error('Failed to persist preference:', err);
     }
-  };
-
-  const chooseResearchType = async (type: 'deep' | 'quick' | 'specific') => {
-    await persistPreference(type);
-    const lengthChoice: Record<'deep' | 'quick' | 'specific', 'long' | 'brief' | 'standard'> = {
-      deep: 'long',
-      quick: 'brief',
-      specific: 'standard',
-    };
-    void sendPreferenceSignal('length', { kind: 'categorical', choice: lengthChoice[type] }, {
-      weight: type === 'quick' ? 1.5 : type === 'deep' ? 1.2 : 1,
-    });
-    setShowClarify(false);
-    const content = (pendingQuery || inputValue.trim());
-    setPendingQuery(null);
-    if (!content) return;
-    setInputValue('');
-    if (!currentChatId) {
-      const id = await createNewChat();
-      if (id) await handleSendMessageWithChat(id, content);
-      return;
-    }
-    await handleSendMessageWithChat(currentChatId, content);
   };
 
   const streamAIResponse = async (
@@ -2198,20 +2164,25 @@ useEffect(() => {
       const controller = new AbortController();
       streamingAbortRef.current = controller;
 
+      const defaultTemplateId = getDefaultTemplate().id;
+      const includeTemplate = depth !== 'specific' && selectedTemplate && selectedTemplateId && selectedTemplateId !== defaultTemplateId;
+
       const requestPayload = JSON.stringify({
         messages: history,
         stream: true,
         chatId: chatId ?? currentChatId,
         config: {
           ...cfg,
-          template: selectedTemplate ? {
-            id: selectedTemplateId,
-            version: selectedTemplate.version,
-            sections: (selectedTemplate.sections || []).map(s => ({ id: s.id, label: s.label, required: Boolean((s as any).required) })),
-            inputs: templateInputs || {},
-            guardrail_profile_id: selectedGuardrailProfile?.id,
-            signal_set_id: selectedSignalSet?.id,
-          } : undefined
+          ...(includeTemplate ? {
+            template: {
+              id: selectedTemplateId,
+              version: selectedTemplate.version,
+              sections: (selectedTemplate.sections || []).map(s => ({ id: s.id, label: s.label, required: Boolean((s as any).required) })),
+              inputs: templateInputs || {},
+              guardrail_profile_id: selectedGuardrailProfile?.id,
+              signal_set_id: selectedSignalSet?.id,
+            }
+          } : {})
         },
         research_type: depth,
         active_subject: activeSubject || null
@@ -2568,8 +2539,6 @@ useEffect(() => {
     setActiveSubject(null);
     setActionBarCompany(null);
     setInputValue('Research ');
-    setShowClarify(false);
-    setPendingQuery(null);
     setFocusComposerTick(t => t + 1);
     lastResearchSummaryRef.current = '';
   }, [createNewChat]);
@@ -2802,8 +2771,6 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
         return;
       case 'follow_up': {
         addToast({ type: 'info', title: 'Ask a follow-up', description: 'Type your question and I’ll keep context from this report.' });
-        setShowClarify(false);
-        setPendingQuery(null);
         setInputValue(currentActionCompany ? `What follow-up questions should I ask ${currentActionCompany}? ` : 'What follow-up question should I ask? ');
         setFocusComposerTick(t => t + 1);
         return;
@@ -3021,8 +2988,6 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
     setStreamingMessage('');
     setThinkingEvents([]);
     assistantInsertedRef.current = false;
-    setShowClarify(false);
-    setPendingQuery(null);
     navigate('/');
     try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {}
   };
@@ -3324,28 +3289,6 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
               <div ref={bulkStatusRef} />
               <BulkResearchStatus />
               
-              {/* Clarification panel */}
-              {showClarify && (
-                <div className="border border-blue-200 bg-blue-50 rounded-2xl p-4">
-                  <div className="text-sm font-semibold text-blue-900 mb-2">Quick question before I start</div>
-                  <div className="text-sm text-blue-900 mb-3">What type of research would be most helpful?</div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                    <button onClick={() => void chooseResearchType('deep')} className="text-left border border-blue-200 rounded-xl p-3 bg-white hover:border-blue-400">
-                      <div className="font-semibold">📊 Deep Account Research</div>
-                      <div className="text-xs text-gray-600">Full report • ~25-35 credits • ~2 min</div>
-                    </button>
-                    <button onClick={() => void chooseResearchType('quick')} className="text-left border border-blue-200 rounded-xl p-3 bg-white hover:border-blue-400">
-                      <div className="font-semibold">⚡ Quick Facts</div>
-                      <div className="text-xs text-gray-600">Basics • ~5-10 credits • ~20 sec</div>
-                    </button>
-                    <button onClick={() => void chooseResearchType('specific')} className="text-left border border-blue-200 rounded-xl p-3 bg-white hover:border-blue-400">
-                      <div className="font-semibold">🔍 Specific Question</div>
-                      <div className="text-xs text-gray-600">Targeted answer • Varies</div>
-                    </button>
-              </div>
-              <div className="text-xs text-blue-900 mt-2">💡 I'll remember your preference for next time.</div>
-            </div>
-          )}
           {resolvedPrefs && !resolvedLoading && preferenceBadges.length > 0 && (
             <div className="mb-4 flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -3814,17 +3757,6 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
             </div>
           </div>
         </div>
-        {/* Inline clarify choices: always visible near composer for clarity */}
-        {showClarify && (
-          <div className="px-6 py-2 border-t border-blue-200 bg-blue-50">
-            <div className="max-w-3xl mx-auto flex flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold text-blue-900">Choose research type:</span>
-              <button onClick={() => void chooseResearchType('deep')} className="text-xs px-2 py-1 rounded bg-white border border-blue-200 hover:border-blue-400">📊 Deep</button>
-              <button onClick={() => void chooseResearchType('quick')} className="text-xs px-2 py-1 rounded bg-white border border-blue-200 hover:border-blue-400">⚡ Quick</button>
-              <button onClick={() => void chooseResearchType('specific')} className="text-xs px-2 py-1 rounded bg-white border border-blue-200 hover:border-blue-400">🔍 Specific</button>
-            </div>
-          </div>
-        )}
       <div className="bg-gray-50">
         <div className="max-w-3xl mx-auto px-6 py-4">
           {/* Context crumb (above composer) */}
@@ -3861,54 +3793,6 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                   <span className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-2 py-0.5 rounded">⚡ {accountStats.with_signals} with signals</span>
                 </>
               )}
-              {/* Research mode selector (persists preference) */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setModeMenuOpen(v => !v)}
-                  className="ml-2 inline-flex items-center gap-1 bg-white border border-gray-200 px-2 py-0.5 rounded hover:bg-gray-50"
-                  aria-expanded={modeMenuOpen}
-                  title="Preferred research mode"
-                >
-                  <span className="text-gray-700">Mode:</span>
-                  <span className="font-semibold text-gray-900">
-                    {preferredResearchType ? (preferredResearchType === 'deep' ? 'Deep' : preferredResearchType === 'quick' ? 'Quick' : 'Specific') : 'Auto'}
-                  </span>
-                  ▾
-                </button>
-                {modeMenuOpen && (
-                  <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-20">
-                    {([
-                      { id: 'deep', label: 'Deep' },
-                      { id: 'quick', label: 'Quick' },
-                      { id: 'specific', label: 'Specific' },
-                      { id: 'auto', label: 'Auto (ask/decide)' },
-                    ] as Array<{id: 'deep'|'quick'|'specific'|'auto', label: string}>).map(opt => (
-                      <button
-                        key={opt.id}
-                        className={`w-full text-left text-xs px-3 py-2 hover:bg-gray-50 ${
-                          (preferredResearchType || 'auto') === opt.id ? 'font-semibold text-gray-900' : 'text-gray-700'
-                        }`}
-                        onClick={async () => {
-                          setModeMenuOpen(false);
-                          if (opt.id === 'auto') {
-                            try {
-                              localStorage.removeItem('preferred_research_type');
-                            } catch {}
-                            setPreferredResearchType(null);
-                            addToast({ type: 'success', title: 'Mode set to Auto', description: 'I will clarify or infer per request.' });
-                            return;
-                          }
-                          await persistPreference(opt.id);
-                          addToast({ type: 'success', title: `Mode set to ${opt.label}` });
-                        }}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
             </div>
 
             {crumbOpen && (

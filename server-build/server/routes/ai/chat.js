@@ -580,6 +580,7 @@ export default async function handler(req, res) {
         const fastMode = false;
         const activeContextCompany = typeof active_subject === 'string' ? active_subject.trim() : '';
         const runId = `${chatId || chat_id || 'chat'}:${Date.now()}`;
+        const requestedMode = research_type;
         const contextFetchStart = Date.now();
         const userContext = await fetchUserContext(supabase, user.id);
         const contextFetchMs = Date.now() - contextFetchStart;
@@ -606,6 +607,7 @@ export default async function handler(req, res) {
         let lastUserMessage = null;
         let effectiveRequest = '';
         let fallbackInstructions = null;
+        let effectiveMode;
         // If we have messages array, convert it to the Responses API format
         if (messages && messages.length > 0) {
             // For Responses API, we need to convert messages to a string format
@@ -820,7 +822,7 @@ export default async function handler(req, res) {
         catch { }
         try {
             const tpl = userConfig?.template;
-            if (tpl && Array.isArray(tpl.sections) && tpl.sections.length > 0) {
+            if (requestedMode !== 'specific' && tpl && Array.isArray(tpl.sections) && tpl.sections.length > 0) {
                 const sectionList = tpl.sections.map((s) => `## ${s.label || s.id}`).join(`\n`);
                 const tplBlock = `\n\n<output_sections>Use the following sections in this exact order. Do not add placeholders and do not invent extra headings.\n${sectionList}\n</output_sections>`;
                 instructions += tplBlock;
@@ -889,7 +891,7 @@ export default async function handler(req, res) {
             // Auto-detect mode for short follow-ups when active subject exists
             const shortQ = /^(who|what|when|where|which|how|do|does|did|is|are|was|were)\b/i.test((lastUserMessage?.content || '').trim()) && ((lastUserMessage?.content || '').trim().length <= 120);
             const autoMode = (activeContextCompany && shortQ) ? 'specific' : undefined;
-            const effectiveMode = (autoMode || research_type);
+            effectiveMode = (autoMode || research_type);
             // Deep runs demand richer reasoning; quick/specific stay lightweight
             const reasoningEffort = (effectiveMode === 'deep') ? 'medium' : 'low';
             const isQuick = effectiveMode === 'quick';

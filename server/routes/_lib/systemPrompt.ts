@@ -57,22 +57,19 @@ const STRUCTURED_OUTPUT = `Output format (strict):
 - When saved follow-up questions exist, add "## Saved Follow-up Answers" after the core sections and answer each saved question in 1-2 concise bullets.`;
 
 // Deep-only enhanced structure: adds Why Now and Deal Strategy sections, and encourages synthesis over bullet dumps
-const DEEP_OUTPUT = `Deep Research format (strict):
+const DEEP_OUTPUT = `Deep Research format:
 - Start with a brief, friendly acknowledgement line (e.g., "On it — deep dive (~2 min).") that states research depth and ETA, then proceed.
 - ${EXEC_SUMMARY_GUIDANCE}
-- After the Executive Summary, continue with the sections, in this order:
-  "## Why Now" (2–3 short mini-paragraphs synthesizing timing and urgency through the user's ICP and signal preferences),
-  "## Deal Strategy" (tailor to saved target_titles; include 3–5 moves with who to contact and why),
-  "## Key Findings" (keep to the sharpest 5–7; avoid duplicating Why Now),
-  "## Custom Criteria" (if applicable),
-  "## Signals",
-  "## Tech/Footprint" (or "## Operating Footprint"),
-  "## Decision Makers" (with personalization),
-  "## Risks & Gaps" (optional),
-  "## Sources",
-  "## Proactive Follow-ups".
-- If prior context about a previous report is provided, insert "## What Changed" with 3–5 bullets after "Why Now".
-- Use short evidence-backed statements with inline source notes. Favor 2–3 short mini‑paragraphs where synthesis adds value; avoid long bullet sprawl.`;
+- After the Executive Summary, build the brief around the sections that best serve the user. Recommended flow:
+  • "## Why Now" — synthesize timing and urgency through the user's ICP and preferred signals.
+  • "## Deal Strategy" — 3–5 moves with who to contact and why (tie to saved target_titles when available).
+  • "## Key Findings" — the sharpest 5–7 insights (avoid repeating Why Now verbatim).
+  • "## Custom Criteria" — if applicable, call status (Met / Not met / Unknown) with rationale.
+  • "## Signals" and "## Tech/Footprint" / "## Operating Footprint" — highlight the most relevant developments.
+  • "## Decision Makers" — personalize why each contact matters.
+  • "## Risks & Gaps", "## Sources", "## Proactive Follow-ups".
+- It's OK to merge, omit, or rename sections when data is thin or a different framing better serves the brief. Add new headings when they create clearer storytelling.
+- Keep every section insight-led with inline citations. Replace boilerplate with analysis tailored to the user's goals.`;
 
 const QUICK_OUTPUT = `Quick Facts format (strict):
 - Output exactly two sections and nothing else:
@@ -82,14 +79,11 @@ const QUICK_OUTPUT = `Quick Facts format (strict):
 - Do not add additional headings, tables, or filler.
 - Cite sources in parentheses when helpful (e.g., "(WSJ, Sep 2025)").`;
 
-const SPECIFIC_OUTPUT = `Specific Answer format (strict):
-- Start with the acknowledgement line, then answer the user’s question directly in ≤ 120 words.
-- Follow with exactly two sections:
-  ## Key Facts
-  - 3–5 evidence-backed bullets that justify the answer
-  ## Proactive Follow-ups
-  - 2 tailored suggestions grounded in the findings (one must offer proactive help such as drafting outreach)
-- Do not add other sections. Cite sources inline in parentheses when useful.`;
+const SPECIFIC_OUTPUT = `Specific follow-up format:
+- Start with the acknowledgement line, then deliver a direct answer (paragraph or short bullet stack) in ≤ 120 words.
+- Surface 3–5 supporting facts with inline citations. Use lightweight headings or bold labels only when they aid clarity—no need to reuse the full research section list.
+- Offer up to two tailored next-step suggestions (e.g., "Next Moves" with 1–2 bullets) tied to the question.
+- Close with a friendly yes/no question offering to remember this focus for future briefs (e.g., "Want me to keep spotlighting leadership moves next time?").`;
 
 const DEFAULT_CRITERIA_GUIDANCE = `Default Qualifying Criteria (assume when none supplied):
 1. Recent security or operational incidents (breach, ransomware, downtime).
@@ -118,10 +112,16 @@ const PROACTIVE_FOLLOW_UP_GUIDANCE = `Proactive Follow-up Requirements:
 - Phrase bullets as offers starting with a verb (Draft, Monitor, Compare, Capture, etc.).
 - End the final bullet with a direct yes/no invitation (e.g., "Start a draft email to Dana Deasy?").`;
 
-const SPECIFIC_FOLLOW_UP_GUIDANCE = `Proactive Follow-up Requirements (specific mode):
-- After your concise answer, include "## Proactive Follow-ups" with exactly two bullets.
-- Keep the tone warm, collaborative, and action-oriented—each bullet should sound like a helpful teammate taking initiative.
-- At least one bullet must explicitly offer hands-on help (e.g., drafting outreach, prepping a quick brief, monitoring for updates) and end with a yes/no invitation.`;
+const SPECIFIC_FOLLOW_UP_GUIDANCE = `Follow-up wrap-up (specific mode):
+- Keep the entire response focused on the user’s question—skip the large research template unless it meaningfully adds value.
+- Suggest no more than two concrete next steps, phrased like a helpful teammate taking initiative.
+- Always end with a direct yes/no invitation to remember the highlighted topic for future briefs.`;
+
+const FOLLOW_UP_MEMORY_GUIDANCE = `Preference memory:
+- When a follow-up highlights a recurring focus (e.g., "tell me more about leadership"), end with a conversational offer to remember that theme in future research. Make the invitation explicit ("Want me to track leadership moves going forward?").`;
+
+const CLOSING_CUSTOMIZATION_GUIDANCE = `Preference check-out:
+- Close every response with a short question inviting the user to tailor future briefs. Mention 2–3 relevant options (e.g., focus on leadership moves, supply-chain risks, tech stack) and remind them you can remember their choice.`;
 
 const CLARIFIER_GUARDRAILS = `Clarifier Guardrails:
 - Never ask the user to choose research scope, topics, formats, or time ranges unless they explicitly asked you to present options.
@@ -417,7 +417,13 @@ export function buildSystemPrompt(
 
   if (isResearchAgent) {
     extras.push(buildImmediateAckGuidance(resolvedMode));
-    extras.push(resolvedMode === 'specific' ? SPECIFIC_FOLLOW_UP_GUIDANCE : PROACTIVE_FOLLOW_UP_GUIDANCE);
+    if (resolvedMode === 'specific') {
+      extras.push(SPECIFIC_FOLLOW_UP_GUIDANCE);
+      extras.push(FOLLOW_UP_MEMORY_GUIDANCE);
+    } else {
+      extras.push(PROACTIVE_FOLLOW_UP_GUIDANCE);
+    }
+    extras.push(CLOSING_CUSTOMIZATION_GUIDANCE);
   }
   if (isResearchAgent && followups.length) {
     extras.push(`Saved follow-up questions:
