@@ -13,14 +13,19 @@ const INDICATOR_LABEL_KEYS = [
 const INDICATOR_CHOICE_KEYS = [
     'indicator_choices',
     'indicatorChoices',
+    'indicator_watchlist',
+    'indicatorWatchlist',
     'watch_list',
     'watchList',
     'watchlist',
     'watch_items',
     'watchItems',
     'watchlist_items',
+    'watchers',
     'buying_signals',
     'buyingSignals',
+    'signals_watchlist',
+    'signalsWatchlist',
 ];
 const TARGET_TITLE_KEYS = [
     'target_titles',

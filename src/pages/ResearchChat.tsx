@@ -1611,6 +1611,7 @@ useEffect(() => {
           company_name: companyName,
           monitoring_enabled: true,
           priority: 'standard',
+          last_researched_at: new Date().toISOString(),
         });
 
       if (error) throw error;
@@ -1723,7 +1724,13 @@ useEffect(() => {
       }
       const { error } = await supabase
         .from('tracked_accounts')
-        .insert({ user_id: user.id, company_name: companyName, monitoring_enabled: true, priority: 'standard' });
+        .insert({
+          user_id: user.id,
+          company_name: companyName,
+          monitoring_enabled: true,
+          priority: 'standard',
+          last_researched_at: new Date().toISOString(),
+        });
       if (error) throw error;
       await syncTrackedAccountResearch(companyName, lastResearchSummaryRef.current || null);
       // Notify listeners to refresh tracked lists
@@ -2817,6 +2824,7 @@ useEffect(() => {
                     setSignalPreferences(parsed.signal_preferences);
                   }
                   void fetchUserPreferences();
+                  void loadSetupSummary();
                 }
                 else if (parsed.type === 'alias_learned') {
                   if (Array.isArray(parsed.aliases) && parsed.aliases.length) {

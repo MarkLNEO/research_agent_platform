@@ -313,14 +313,25 @@ export function buildSystemPrompt(userContext, agentType = 'company_research', r
             .filter(choice => choice.length > 0);
         if (indicatorLabelRaw || indicatorChoices.length > 0) {
             const formattedChoices = indicatorChoices.map(choice => `- ${choice}`).join('\n');
+            const emptyChoiceGuidance = indicatorChoices.length
+                ? indicatorChoices
+                    .map(choice => `• If no current intel for "${choice}", state "No recent ${choice} developments detected yet — continue monitoring."`)
+                    .join('\n')
+                : null;
             extras.push([
                 'Terminology lock: Use the user\'s exact language for buying triggers.',
-                `- The section heading must be "${indicatorLabel}" exactly (no synonyms).`,
+                `- Add a dedicated section titled "${indicatorLabel}" immediately after the Signals section.`,
                 indicatorChoices.length
-                    ? `- Under "${indicatorLabel}", include bullets for the following items verbatim (even if not observed this week):\n${formattedChoices}`
-                    : '- If no custom bullets are stored yet, keep the section but do not invent new terminology.',
-                '- Retain casing/punctuation exactly as supplied.'
+                    ? `- Under "${indicatorLabel}", include bullets for every saved watch-list item verbatim (even if nothing new was found):\n${formattedChoices}`
+                    : '- If no custom bullets are stored yet, keep the section but note that no watch-list has been configured.',
+                emptyChoiceGuidance ?? '- Retain casing/punctuation exactly as supplied.'
             ].join('\n'));
+            if (indicatorChoices.length) {
+                extras.push('- Retain casing/punctuation exactly as supplied.');
+            }
+            else {
+                // When no choices exist, casing guidance already included via fallback.
+            }
         }
     }
     if (Array.isArray(userContext.canonicalEntities) && userContext.canonicalEntities.length) {

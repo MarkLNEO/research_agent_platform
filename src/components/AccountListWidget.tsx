@@ -4,6 +4,25 @@ import { listTrackedAccounts, type TrackedAccount } from '../services/accountSer
 import { useToast } from '../components/ToastProvider';
 import { BulkAccountUpload } from './BulkAccountUpload';
 
+const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
+const FRESH_ACCOUNT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+const isAccountStale = (account: TrackedAccount): boolean => {
+  if (account.last_researched_at) {
+    const last = new Date(account.last_researched_at).getTime();
+    if (!Number.isNaN(last)) {
+      return (Date.now() - last) > FOURTEEN_DAYS_MS;
+    }
+  }
+  if (account.added_at) {
+    const added = new Date(account.added_at).getTime();
+    if (!Number.isNaN(added)) {
+      return (Date.now() - added) > FRESH_ACCOUNT_WINDOW_MS;
+    }
+  }
+  return true;
+};
+
 interface AccountListWidgetProps {
   onAccountClick: (account: TrackedAccount) => void;
   onAddAccount: () => void;
@@ -266,9 +285,7 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
         ) : (
           <div className="p-2 space-y-2">
             {accounts.map(account => {
-              const isStale = account.last_researched_at
-                ? Math.floor((Date.now() - new Date(account.last_researched_at).getTime()) / (1000 * 60 * 60 * 24)) > 14
-                : true;
+              const isStale = isAccountStale(account);
               const latestResearch = account.research_history?.[0];
 
               return (
@@ -499,9 +516,7 @@ function TrackedAccountsModal({
           ) : (
             <div className="divide-y divide-gray-100">
               {accounts.map(account => {
-                const isStale = account.last_researched_at
-                  ? Math.floor((Date.now() - new Date(account.last_researched_at).getTime()) / (1000 * 60 * 60 * 24)) > 14
-                  : true;
+                const isStale = isAccountStale(account);
                 return (
                   <div key={`modal-${account.id}`} className="px-6 py-4">
                     <div className="flex items-start justify-between gap-3">

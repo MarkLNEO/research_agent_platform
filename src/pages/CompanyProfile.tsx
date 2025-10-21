@@ -1100,6 +1100,7 @@ Onboarding flow:
                     setSignalPreferencesCount(parsed.signal_preferences.length);
                   }
                   void refreshPreferences();
+                  void refreshProfileData();
                   invalidateUserProfileCache(user?.id);
                 }
                 else if (parsed.type === 'alias_learned') {
