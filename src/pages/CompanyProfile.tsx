@@ -61,6 +61,8 @@ export function CompanyProfile() {
   const [thinkingEvents, setThinkingEvents] = useState<ThinkingEvent[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasInitialized = useRef(false);
+  const [savedPreferences, setSavedPreferences] = useState<Array<{ key: string; value: any; source?: string; confidence?: number; updated_at?: string }>>([]);
+  const [prefsLoading, setPrefsLoading] = useState(false);
 
   const preferenceSummary = useMemo(() => {
     const config = promptConfig ?? DEFAULT_PROMPT_CONFIG;
@@ -227,6 +229,39 @@ export function CompanyProfile() {
       setMessages([]);
     }
   }, [currentChatId]);
+
+  useEffect(() => {
+    let canceled = false;
+    const loadPreferences = async () => {
+      try {
+        setPrefsLoading(true);
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+        const response = await fetch('/api/preferences', {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        if (!response.ok) throw new Error(`Failed to fetch preferences (${response.status})`);
+        const payload = await response.json();
+        if (!canceled) {
+          setSavedPreferences(payload?.preferences || []);
+        }
+      } catch (error) {
+        if (!canceled) {
+          console.error('Failed to load saved preferences', error);
+          setSavedPreferences([]);
+        }
+      } finally {
+        if (!canceled) setPrefsLoading(false);
+      }
+    };
+    void loadPreferences();
+    return () => {
+      canceled = true;
+    };
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -977,6 +1012,57 @@ Coach flow requirements:
                     </div>
                   </div>
                 )}
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5 shadow-sm">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 text-emerald-600">
+                      <User className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                        <div>
+                          <h2 className="text-base font-semibold text-emerald-900">Saved conversational preferences</h2>
+                          <p className="text-sm text-emerald-800 mt-1">
+                            When you clarify something in chat, I store it here so future research aligns automatically.
+                          </p>
+                        </div>
+                        <span className="text-xs text-emerald-600">{prefsLoading ? 'Refreshing…' : 'Synced instantly'}</span>
+                      </div>
+                      <ul className="mt-4 space-y-2">
+                        {prefsLoading && savedPreferences.length === 0 ? (
+                          <li className="text-sm text-emerald-700">Loading saved preferences…</li>
+                        ) : savedPreferences.length === 0 ? (
+                          <li className="text-sm text-emerald-700">No conversational preferences stored yet. The agent will add items as you correct or refine outputs.</li>
+                        ) : (
+                          savedPreferences.map((pref) => {
+                            const confidence = typeof pref.confidence === 'number' ? ` (confidence ${(pref.confidence * 100).toFixed(0)}%)` : '';
+                            const formattedValue = (() => {
+                              if (pref.value === null || pref.value === undefined) return '—';
+                              if (typeof pref.value === 'object') {
+                                try {
+                                  return JSON.stringify(pref.value);
+                                } catch {
+                                  return String(pref.value);
+                                }
+                              }
+                              return String(pref.value);
+                            })();
+                            return (
+                              <li key={`${pref.key}-${pref.updated_at || ''}`} className="bg-white/70 border border-emerald-200 rounded-xl px-4 py-3">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <p className="text-xs font-semibold text-emerald-800 uppercase tracking-wide">{pref.key}</p>
+                                    <p className="text-sm text-gray-800 mt-1">{formattedValue}</p>
+                                  </div>
+                                  <span className="text-[10px] uppercase text-emerald-700 font-semibold">{pref.source || 'followup'}{confidence}</span>
+                                </div>
+                              </li>
+                            );
+                          })
+                        )}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
                 <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-5 shadow-sm">
                   <div className="flex items-start gap-3">
                     <div className="mt-1 text-blue-600">

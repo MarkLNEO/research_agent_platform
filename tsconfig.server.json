@@ -14,6 +14,6 @@
     "sourceMap": false,
     "noEmitOnError": false
   },
-  "include": ["server/routes/**/*.ts", "server/routes/**/*.tsx"],
+  "include": ["server/routes/**/*.ts", "server/routes/**/*.tsx", "lib/**/*.ts", "shared/**/*.ts"],
   "exclude": ["node_modules", "dist", "dist-ssr", "server-build", "server/routes/router.ts", "server/dev-api.ts"]
 }

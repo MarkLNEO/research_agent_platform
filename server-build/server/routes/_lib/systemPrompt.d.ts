@@ -1,3 +1,4 @@
+import type { ResolvedPrefs, PreferenceRow } from '../../../lib/preferences/store.js';
 export type AgentType = 'company_research' | 'settings_agent' | 'company_profiler';
 type ResearchMode = 'quick' | 'deep' | 'specific' | undefined;
 type NullableRecord = Record<string, any> | null | undefined;
@@ -8,6 +9,15 @@ export interface UserContext {
     disqualifiers?: any[];
     promptConfig?: NullableRecord;
     reportPreferences?: any[];
+    preferences?: PreferenceRow[];
+    resolvedPrefs?: ResolvedPrefs;
+    openQuestions?: any[];
+    canonicalEntities?: Array<{
+        canonical: string;
+        type: string;
+        confidence?: number;
+        matched?: string;
+    }>;
 }
 export declare function buildSystemPrompt(userContext: UserContext, agentType?: AgentType, researchMode?: ResearchMode): string;
 export {};

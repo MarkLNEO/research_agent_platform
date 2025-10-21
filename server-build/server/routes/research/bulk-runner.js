@@ -4,20 +4,20 @@ export default async function handler(req, res) {
     if (req.method === 'OPTIONS')
         return res.status(200).end();
     if (req.method !== 'POST')
-        return res.status(405).json({ code: 'method_not_allowed', message: 'Method not allowed', error: 'Method not allowed' });
+        return res.status(405).json({ error: 'Method not allowed' });
     try {
         const SUPABASE_URL = process.env.SUPABASE_URL;
         const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
         const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
         if (!SUPABASE_URL || !SERVICE_KEY || !OPENAI_API_KEY)
-            return res.status(500).json({ code: 'server_config_error', message: 'Server not configured', error: 'Server not configured' });
+            return res.status(500).json({ error: 'Server not configured' });
         const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
         const { job_id, concurrency } = req.body || {};
         if (!job_id)
-            return res.status(400).json({ code: 'bad_request', message: 'job_id is required', error: 'job_id is required' });
+            return res.status(400).json({ error: 'job_id is required' });
         const { data: job, error: loadErr } = await supabase.from('bulk_research_jobs').select('*').eq('id', job_id).single();
         if (loadErr || !job)
-            return res.status(404).json({ code: 'not_found', message: 'job not found', error: 'job not found' });
+            return res.status(404).json({ error: 'job not found' });
         if (job.status === 'pending') {
             await supabase.from('bulk_research_jobs').update({ status: 'running', started_at: new Date().toISOString() }).eq('id', job_id);
         }
@@ -102,7 +102,7 @@ export default async function handler(req, res) {
     }
     catch (error) {
         console.error('bulk-runner error', error);
-        return res.status(500).json({ code: 'internal_error', message: 'Internal server error', error: 'Internal server error' });
+        return res.status(500).json({ error: 'Internal server error' });
     }
 }
 async function runCompanyResearch(company, depth, key) {

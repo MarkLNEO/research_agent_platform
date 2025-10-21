@@ -28,6 +28,9 @@ import { useUserProfile, invalidateUserProfileCache } from '../hooks/useUserProf
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { OptimizeICPModal } from '../components/OptimizeICPModal';
 import { useResearchEngine } from '../contexts/ResearchEngineContext';
+import { SummarySchemaZ, type SummarySchema } from '../../shared/summarySchema.js';
+import type { ResolvedPrefs } from '../../shared/preferences.js';
+import { SummaryCard } from '../components/SummaryCard';
 
 const ALL_REFINE_FACETS = ['leadership', 'funding', 'tech stack', 'news', 'competitors', 'hiring'] as const;
 
@@ -390,7 +393,11 @@ export function ResearchChat() {
   const [lastUsage, setLastUsage] = useState<{ tokens: number; credits: number } | null>(null);
   const [draftEmailPending, setDraftEmailPending] = useState(false);
   // Cache for background-generated summaries keyed by assistant message id
-  const [summaryCache, setSummaryCache] = useState<Record<string, string>>({});
+  const [summaryCache, setSummaryCache] = useState<Record<string, SummarySchema>>({});
+  const [activeSummary, setActiveSummary] = useState<{ data: SummarySchema; messageId: string } | null>(null);
+  const PREFS_SUMMARY_ENABLED = import.meta.env.VITE_PREFS_SUMMARY_ENABLED === 'true';
+  const [resolvedPrefs, setResolvedPrefs] = useState<ResolvedPrefs | null>(null);
+  const [resolvedLoading, setResolvedLoading] = useState(false);
   const [csvUploadOpen, setCSVUploadOpen] = useState(false);
   const [bulkResearchOpen, setBulkResearchOpen] = useState(false);
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
@@ -647,6 +654,77 @@ export function ResearchChat() {
       signals,
     };
   }, [userProfile, customCriteria, signalPreferences]);
+  useEffect(() => {
+    let canceled = false;
+    const loadResolvedPreferences = async () => {
+      try {
+        setResolvedLoading(true);
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+        const response = await fetch('/api/preferences', {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        if (!response.ok) throw new Error(`Failed to load preferences (${response.status})`);
+        const payload = await response.json();
+        if (!canceled) {
+          setResolvedPrefs(payload?.resolved ?? null);
+        }
+      } catch (error) {
+        if (!canceled) {
+          console.error('Failed to load resolved preferences', error);
+          setResolvedPrefs(null);
+        }
+      } finally {
+        if (!canceled) setResolvedLoading(false);
+      }
+    };
+    void loadResolvedPreferences();
+    return () => {
+      canceled = true;
+    };
+  }, []);
+  const focusHighlights = useMemo(() => {
+    if (!resolvedPrefs) return [] as Array<{ key: string; weight: number | null }>;
+    const entries = Object.entries(resolvedPrefs.focus || {});
+    return entries
+      .map(([key, raw]) => {
+        const value = typeof raw === 'object' && raw !== null ? raw as any : { on: Boolean(raw) };
+        if (value?.on === false) return null;
+        const weight = typeof value?.weight === 'number' ? value.weight as number : null;
+        return { key, weight };
+      })
+      .filter((entry): entry is { key: string; weight: number | null } => Boolean(entry))
+      .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
+      .slice(0, 3);
+  }, [resolvedPrefs]);
+
+  const preferenceBadges = useMemo(() => {
+    if (!resolvedPrefs) return [] as string[];
+    const badges: string[] = [];
+    focusHighlights.forEach(({ key, weight }) => {
+      const label = key.replace(/[_\.]/g, ' ');
+      const arrow = typeof weight === 'number' && weight >= 0.8 ? '↑' : typeof weight === 'number' && weight <= 0.4 ? '↓' : '';
+      badges.push(`Focus: ${label}${arrow}`);
+    });
+    if (resolvedPrefs.coverage?.depth) {
+      const depthLabel = resolvedPrefs.coverage.depth === 'shallow' ? 'Quick' : resolvedPrefs.coverage.depth === 'deep' ? 'Deep' : 'Standard';
+      badges.push(`Depth: ${depthLabel}`);
+    }
+    if (resolvedPrefs.summary?.brevity) {
+      const brevity = resolvedPrefs.summary.brevity;
+      badges.push(`Summary: ${brevity.charAt(0).toUpperCase()}${brevity.slice(1)}`);
+    }
+    if (resolvedPrefs.tone) {
+      badges.push(`Tone: ${resolvedPrefs.tone.charAt(0).toUpperCase()}${resolvedPrefs.tone.slice(1)}`);
+    }
+    if (Array.isArray(resolvedPrefs.industry?.filters) && resolvedPrefs.industry!.filters!.length) {
+      badges.push(`Industry: ${resolvedPrefs.industry!.filters!.slice(0, 2).join(', ')}`);
+    }
+    return badges;
+  }, [resolvedPrefs, focusHighlights]);
   const dismissContextTooltip = () => {
     setShowContextTooltip(false);
     if (typeof window !== 'undefined') {
@@ -1522,6 +1600,76 @@ useEffect(() => {
     }
   };
 
+  const fetchSummaryFromSource = useCallback(async (source: string): Promise<SummarySchema> => {
+    if (!PREFS_SUMMARY_ENABLED) {
+      throw new Error('Structured summary is disabled.');
+    }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    const payload = {
+      messages: [{ role: 'user', content: 'Summarize the previous research findings.' }],
+      stream: true,
+      chatId: currentChatId,
+      config: { summarize_source: source },
+    };
+
+    const response = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(text || `Summary request failed (${response.status})`);
+    }
+    if (!response.body) {
+      throw new Error('Summary stream unavailable');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let summary: SummarySchema | null = null;
+    let summaryError: string | null = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        if (!raw || raw === '[DONE]') continue;
+        try {
+          const evt = JSON.parse(raw);
+          if (evt?.type === 'summary_json' && evt?.content) {
+            const parsed = SummarySchemaZ.safeParse(evt.content);
+            if (parsed.success) {
+              summary = parsed.data;
+            } else {
+              summaryError = parsed.error.message;
+            }
+          } else if (evt?.type === 'summary_error') {
+            summaryError = typeof evt?.message === 'string' ? evt.message : 'Summary generation failed';
+          }
+        } catch (err) {
+          console.error('Failed to parse summary event', err, raw);
+        }
+      }
+    }
+
+    if (!summary) {
+      throw new Error(summaryError || 'Summary was not returned by the model');
+    }
+    return summary;
+  }, [supabase, currentChatId, PREFS_SUMMARY_ENABLED]);
+
   const handleSendMessageWithChat = async (
     chatId: string,
     text: string,
@@ -1714,48 +1862,8 @@ useEffect(() => {
         if (msgId && assistant && assistant.trim().length > 0) {
           (async () => {
             try {
-              const { data: { session } } = await supabase.auth.getSession();
-              const token = session?.access_token;
-              const chatUrl = '/api/ai/chat';
-              const payload = {
-                messages: [
-                  { role: 'user', content: 'Summarize the previous research for executive consumption.' }
-                ],
-                stream: true,
-                chatId,
-                config: { summarize_source: assistant }
-              } as any;
-              const resp = await fetch(chatUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-                body: JSON.stringify(payload)
-              });
-              if (!resp.ok || !resp.body) return;
-              const reader = resp.body.getReader();
-              const decoder = new TextDecoder();
-              let buffer = '';
-              let summary = '';
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-                for (const line of lines) {
-                  if (!line.startsWith('data: ')) continue;
-                  const data = line.slice(6).trim();
-                  if (!data || data === '[DONE]') continue;
-                  try {
-                    const evt = JSON.parse(data);
-                    if (evt.type === 'content' && typeof evt.content === 'string') {
-                      summary += evt.content;
-                    }
-                  } catch {}
-                }
-              }
-              if (summary && summary.trim().length > 0) {
-                setSummaryCache(prev => ({ ...prev, [msgId]: normalizeMarkdown(summary) }));
-              }
+              const summary = await fetchSummaryFromSource(assistant);
+              setSummaryCache(prev => ({ ...prev, [msgId]: summary }));
             } catch {}
           })();
         }
@@ -3234,15 +3342,30 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                       <div className="font-semibold">🔍 Specific Question</div>
                       <div className="text-xs text-gray-600">Targeted answer • Varies</div>
                     </button>
-                  </div>
-                  <div className="text-xs text-blue-900 mt-2">💡 I'll remember your preference for next time.</div>
-                </div>
-              )}
-              {messages.map((m, idx) => {
-                const isLastAssistant = m.role === 'assistant' && idx === messages.length - 1 && !streamingMessage;
-                const summarizeReady = (() => {
-                  const rid = getLatestResearchMessageId();
-                  return !!(rid && summaryCache[rid]);
+              </div>
+              <div className="text-xs text-blue-900 mt-2">💡 I'll remember your preference for next time.</div>
+            </div>
+          )}
+          {resolvedPrefs && !resolvedLoading && preferenceBadges.length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                Using your saved preferences
+              </span>
+              {preferenceBadges.map((badge) => (
+                <span key={badge} className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                  {badge}
+                </span>
+              ))}
+            </div>
+          )}
+          {resolvedLoading && (
+            <div className="mb-4 text-xs text-gray-400">Loading your saved preferences…</div>
+          )}
+          {messages.map((m, idx) => {
+            const isLastAssistant = m.role === 'assistant' && idx === messages.length - 1 && !streamingMessage;
+            const summarizeReady = (() => {
+              const rid = getLatestResearchMessageId();
+              return !!(rid && summaryCache[rid]);
                 })();
                 const thisIsDraft = /^##\s*Draft Email\b/i.test((m.content || '').trim());
                 // Fallback: derive assumed label if server didn't emit it but the query was a bare name
@@ -3273,8 +3396,8 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                     collapseThresholdWords={150}
                     onTrackAccount={handleTrackAccount}
                     agentType="company_research"
-                    summarizeReady={isLastAssistant && !thisIsDraft ? summarizeReady : false}
-                    isSummarizing={isLastAssistant && !thisIsDraft ? summaryPending : false}
+                    summarizeReady={PREFS_SUMMARY_ENABLED && isLastAssistant && !thisIsDraft ? summarizeReady : false}
+                    isSummarizing={PREFS_SUMMARY_ENABLED && isLastAssistant && !thisIsDraft ? summaryPending : false}
                     assumed={isLastAssistant ? (assumedForUi as any) : undefined}
                     onAssumedChange={isLastAssistant ? handleAssumedChangeRequest : undefined}
                     contextSummary={isLastAssistant ? appliedContext : null}
@@ -3322,70 +3445,34 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                         addToast({ type: 'error', title: 'Nothing to save', description: 'No recent research found to save.' });
                       }
                     } : undefined}
-                    onSummarize={isLastAssistant && !thisIsDraft ? async () => {
+                    onSummarize={PREFS_SUMMARY_ENABLED && isLastAssistant && !thisIsDraft ? async () => {
                       setPostSummarizeNudge(false);
                       try {
-                        // Summarize the latest research message (not a draft email)
                         let targetMsg: Message | null = null;
                         for (let j = messages.length - 1; j >= 0; j--) {
                           const mm = messages[j];
                           if (mm?.role !== 'assistant') continue;
                           const text = (mm.content || '').trim();
                           if (/^##\s*Draft Email\b/i.test(text)) continue;
-                          targetMsg = mm; break;
+                          targetMsg = mm;
+                          break;
                         }
                         const targetId = targetMsg?.id || m.id;
                         const cached = summaryCache[targetId];
-                        if (cached && currentChatId) {
-                          // Insert cached summary instantly
-                          let savedAssistant: Message | null = null;
-                          if (currentChatId) {
-                            try {
-                              const { data } = await supabase
-                                .from('messages')
-                                .insert({ chat_id: currentChatId, role: 'assistant', content: cached })
-                                .select()
-                                .single();
-                              if (data) savedAssistant = data;
-                            } catch {}
-                          }
-                          if (!savedAssistant) {
-                            savedAssistant = { id: `summary-${Date.now()}`, role: 'assistant', content: cached, created_at: new Date().toISOString() } as Message;
-                          }
-                          setMessages(prev => [...prev, savedAssistant!]);
-                        } else {
-                          setSummaryPending(true);
-                          const raw = await streamAIResponse('Summarize the previous research for executive consumption.', currentChatId!, { config: { summarize_source: (targetMsg?.content || m.content) } });
-                          const summaryText = normalizeMarkdown(raw || '');
-                          // Persist as assistant message
-                          let savedAssistant: Message | null = null;
-                          try {
-                            const { data } = await supabase
-                              .from('messages')
-                              .insert({ chat_id: currentChatId!, role: 'assistant', content: summaryText })
-                              .select()
-                              .single();
-                            if (data) savedAssistant = data;
-                          } catch {}
-                          if (!savedAssistant) {
-                            savedAssistant = { id: `summary-${Date.now()}`, role: 'assistant', content: summaryText, created_at: new Date().toISOString() } as Message;
-                          }
-                          setMessages(prev => [...prev, savedAssistant!]);
-                          setStreamingMessage('');
-                          // Cache for instant access next time
-                          setSummaryCache(prev => ({ ...prev, [targetId]: summaryText }));
-                          // Update chat timestamp best-effort
-                          try {
-                            const updatedAt = new Date().toISOString();
-                            await supabase.from('chats').update({ updated_at: updatedAt }).eq('id', currentChatId!);
-                            setChats(prev => prev.map(chat => chat.id === currentChatId ? { ...chat, updated_at: updatedAt } : chat));
-                          } catch {}
-                          setSummaryPending(false);
+                        if (cached) {
+                          setActiveSummary({ data: cached, messageId: targetId });
+                          setPostSummarizeNudge(true);
+                          return;
                         }
+                        setSummaryPending(true);
+                        const summary = await fetchSummaryFromSource(targetMsg?.content || m.content);
+                        setSummaryCache(prev => ({ ...prev, [targetId]: summary }));
+                        setActiveSummary({ data: summary, messageId: targetId });
                         void sendPreferenceSignal('length', { kind: 'categorical', choice: 'brief' }, { weight: 1.5 });
                         setPostSummarizeNudge(true);
-                      } catch (e: any) {
-                        addToast({ type: 'error', title: 'Summarize failed', description: e?.message || 'Please try again.' });
+                      } catch (error: any) {
+                        addToast({ type: 'error', title: 'Summarize failed', description: error?.message || 'Please try again.' });
+                      } finally {
                         setSummaryPending(false);
                       }
                     } : undefined}
@@ -3461,6 +3548,15 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
                   </div>
                 );
               })()}
+
+              {PREFS_SUMMARY_ENABLED && activeSummary && (
+                <div className="mt-4">
+                  <SummaryCard
+                    summary={activeSummary.data}
+                    onClose={() => setActiveSummary(null)}
+                  />
+                </div>
+              )}
 
               {/* Show a timer indicator in the chat while drafting an email */}
               {draftEmailPending && (

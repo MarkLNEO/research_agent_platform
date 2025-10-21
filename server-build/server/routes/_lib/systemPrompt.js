@@ -186,6 +186,63 @@ function serializeDisqualifiers(disqualifiers) {
         .map((d, idx) => `- ${d?.criterion || `Disqualifier ${idx + 1}`}`)
         .join('\n');
 }
+function serializeResolvedPrefs(resolved) {
+    if (!resolved)
+        return '';
+    const lines = [];
+    if (resolved.coverage?.mode || resolved.coverage?.depth) {
+        const depth = resolved.coverage?.depth ? `depth=${resolved.coverage.depth}` : '';
+        const mode = resolved.coverage?.mode ? `mode=${resolved.coverage.mode}` : '';
+        lines.push(`Coverage → ${[mode, depth].filter(Boolean).join(' ')}`.trim());
+    }
+    if (resolved.summary?.brevity) {
+        lines.push(`Summary brevity → ${resolved.summary.brevity}`);
+    }
+    if (resolved.tone) {
+        lines.push(`Tone → ${resolved.tone}`);
+    }
+    const focus = resolved.focus || {};
+    const focusEntries = Object.entries(focus);
+    if (focusEntries.length) {
+        for (const [key, value] of focusEntries) {
+            if (value && typeof value === 'object') {
+                const on = value.on === false ? 'off' : 'on';
+                const weight = typeof value.weight === 'number' ? ` weight=${value.weight}` : '';
+                lines.push(`Focus.${key} → ${on}${weight}`.trim());
+            }
+            else {
+                lines.push(`Focus.${key} → ${JSON.stringify(value)}`);
+            }
+        }
+    }
+    const industryFilters = Array.isArray(resolved.industry?.filters) ? resolved.industry?.filters : [];
+    if (industryFilters && industryFilters.length) {
+        lines.push(`Industry filters → ${industryFilters.join(', ')}`);
+    }
+    return lines.join('\n');
+}
+function serializeCanonicalEntities(entities) {
+    if (!Array.isArray(entities) || entities.length === 0)
+        return '';
+    return entities
+        .map(entity => {
+        const matched = entity.matched ? ` ← "${entity.matched}"` : '';
+        const conf = typeof entity.confidence === 'number' ? ` (confidence ${entity.confidence.toFixed(2)})` : '';
+        return `- ${entity.canonical} [${entity.type}]${matched}${conf}`;
+    })
+        .join('\n');
+}
+function serializeOpenQuestions(openQuestions, limit = 3) {
+    if (!Array.isArray(openQuestions) || openQuestions.length === 0)
+        return '';
+    return openQuestions
+        .slice(0, limit)
+        .map((q, idx) => {
+        const topic = q?.context?.topic ? ` (topic: ${q.context.topic})` : '';
+        return `${idx + 1}. ${q?.question || 'Clarify preference'}${topic}`;
+    })
+        .join('\n');
+}
 export function buildSystemPrompt(userContext, agentType = 'company_research', researchMode = undefined) {
     const isResearchAgent = agentType === 'company_research';
     const isSettingsAgent = agentType === 'settings_agent';
@@ -202,7 +259,21 @@ export function buildSystemPrompt(userContext, agentType = 'company_research', r
         formatSection('Profile', serializeProfile(userContext.profile)),
         formatSection('Custom Criteria', serializeCriteria(userContext.customCriteria)),
         formatSection('Signal Preferences', serializeSignals(userContext.signals)),
-        formatSection('Disqualifying Criteria', serializeDisqualifiers(userContext.disqualifiers))
+        formatSection('Disqualifying Criteria', serializeDisqualifiers(userContext.disqualifiers)),
+        formatSection('Resolved Preference Summary', serializeResolvedPrefs(userContext.resolvedPrefs)),
+        (() => {
+            if (!userContext?.resolvedPrefs)
+                return null;
+            try {
+                const json = JSON.stringify(userContext.resolvedPrefs, null, 2);
+                return formatSection('Resolved Preferences JSON', json);
+            }
+            catch {
+                return null;
+            }
+        })(),
+        formatSection('Canonical Entities', serializeCanonicalEntities(userContext.canonicalEntities)),
+        formatSection('Open Questions', serializeOpenQuestions(userContext.openQuestions))
     ].filter(Boolean);
     const contextBlock = contextSections.length > 0
         ? `CONTEXT\n${contextSections.join('\n\n')}`
@@ -213,6 +284,15 @@ export function buildSystemPrompt(userContext, agentType = 'company_research', r
     }
     else if (contextSections.length === 0 && isSettingsAgent) {
         extras.push('Context fallback: No profile stored yet. Guide the user through defining ICP, key signals, and disqualifiers step by step.');
+    }
+    if (userContext.resolvedPrefs) {
+        extras.push('Resolved preferences provided above. Honor them strictly—bias retrieval, synthesis, and recommendations toward stated focus/tone/depth.');
+    }
+    if (Array.isArray(userContext.canonicalEntities) && userContext.canonicalEntities.length) {
+        extras.push('Canonical entities are specified; treat synonymous terms accordingly and avoid re-asking for confirmation unless conflicting evidence arises.');
+    }
+    if (Array.isArray(userContext.openQuestions) && userContext.openQuestions.length) {
+        extras.push('Saved open questions exist. Surface at most two relevant clarifiers proactively and mark them resolved once answered within the response.');
     }
     if (isResearchAgent) {
         extras.push(CLARIFIER_GUARDRAILS);

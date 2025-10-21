@@ -3,10 +3,53 @@ import OpenAI from 'openai';
 import { buildSystemPrompt } from '../_lib/systemPrompt.js';
 import { buildMemoryBlock } from '../_lib/memory.js';
 import { assertEmailAllowed } from '../_lib/access.js';
+import { buildResolvedPreferences, upsertPreferences, } from '../../../lib/preferences/store.js';
+import { resolveEntity, learnAlias } from '../../../lib/entities/aliasResolver.js';
+import { resolveOpenQuestion } from '../../../lib/followups/openQuestions.js';
+import { SummarySchemaZ } from '../../../shared/summarySchema.js';
+// Feature flag: preferences/aliases/structured summary
+// Server reads from process.env; default OFF for safety
+const PREFS_SUMMARY_ENABLED = (process.env.PREFS_SUMMARY_ENABLED === 'true');
 const NON_RESEARCH_TERMS = new Set([
     'hi', 'hello', 'hey', 'thanks', 'thank you', 'agenda', 'notes', 'help', 'update', 'updates',
     'plan', 'planning', 'what', 'who', 'why', 'how', 'where', 'when', 'test'
 ]);
+const SUMMARY_JSON_SCHEMA = {
+    name: 'summary_schema',
+    schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+            company_overview: { type: 'string' },
+            value_drivers: { type: 'array', items: { type: 'string' } },
+            risks: { type: 'array', items: { type: 'string' } },
+            eco_profile: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['initiatives'],
+                properties: {
+                    initiatives: { type: 'array', items: { type: 'string' } },
+                    certifications: { type: 'array', items: { type: 'string' } },
+                },
+            },
+            tech_stack: { type: 'array', items: { type: 'string' } },
+            buying_centers: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['title', 'relevance'],
+                    properties: {
+                        title: { type: 'string' },
+                        relevance: { type: 'string' },
+                    },
+                },
+            },
+            next_actions: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['company_overview', 'value_drivers', 'risks', 'tech_stack', 'buying_centers', 'next_actions'],
+    },
+};
 // Helper function to estimate tokens
 function estimateTokens(text = '') {
     return Math.ceil((text || '').length / 4);
@@ -94,6 +137,9 @@ async function fetchUserContext(client, userId) {
         throw error;
     }
     const ctx = (data || {});
+    const preferences = Array.isArray(ctx?.preferences) ? ctx.preferences : [];
+    const resolvedPrefs = buildResolvedPreferences(ctx?.prompt_config || null, preferences);
+    const openQuestions = Array.isArray(ctx?.open_questions) ? ctx.open_questions : [];
     return {
         profile: ctx?.profile || null,
         customCriteria: ctx?.custom_criteria || [],
@@ -101,6 +147,9 @@ async function fetchUserContext(client, userId) {
         disqualifiers: ctx?.disqualifiers || [],
         promptConfig: ctx?.prompt_config || null,
         reportPreferences: ctx?.report_preferences || [],
+        preferences,
+        resolvedPrefs,
+        openQuestions,
     };
 }
 function classifyResearchIntent(raw) {
@@ -145,6 +194,11 @@ function summarizeContextForPlan(userContext) {
             .map((c) => `${c.field_name}${c.importance ? ` (${c.importance})` : ''}`)
             .join(', ');
         bits.push(`Custom criteria: ${criteria}`);
+    }
+    if (userContext.resolvedPrefs?.focus) {
+        const focusKeys = Object.keys(userContext.resolvedPrefs.focus).slice(0, 3);
+        if (focusKeys.length)
+            bits.push(`Focus prefs: ${focusKeys.join(', ')}`);
     }
     if (Array.isArray(userContext.signals) && userContext.signals.length) {
         const signals = userContext.signals
@@ -196,6 +250,239 @@ function extractCompanyName(raw) {
         return '';
     return formatted;
 }
+function buildRecentDialog(messages, limit = 6) {
+    return (messages || [])
+        .slice(-limit)
+        .map((m) => {
+        const role = m.role === 'assistant' ? 'Assistant' : m.role === 'user' ? 'User' : 'System';
+        const content = String(m.content || '').replace(/\s+/g, ' ').trim();
+        return `${role}: ${content}`;
+    })
+        .filter(Boolean)
+        .join('\n');
+}
+function shouldAttemptPreferenceExtraction(message) {
+    if (!message || message.length < 6)
+        return false;
+    const lowered = message.toLowerCase();
+    if (/\b(skip|hi|hello|thanks|thank you|bye)\b/.test(lowered) && message.length < 40)
+        return false;
+    return (/\b(prefer|preference|focus|more about|less about|always|never|stop|include|exclude|priority|care about|need more|look for)\b/i.test(message)
+        || /[A-Z]{2,}/.test(message)
+        || /!\s*$/.test(message)
+        || message.length > 40);
+}
+function parseSummaryJson(raw) {
+    try {
+        const parsed = JSON.parse(raw);
+        const result = SummarySchemaZ.safeParse(parsed);
+        if (!result.success) {
+            return { summary: null, error: result.error }; // zod error extends Error
+        }
+        return { summary: result.data, error: undefined };
+    }
+    catch (err) {
+        return { summary: null, error: err instanceof Error ? err : new Error(String(err)) };
+    }
+}
+async function extractPreferenceCandidates(openai, userId, lastUserMessage, messages, resolvedPrefs) {
+    const text = String(lastUserMessage?.content || '').trim();
+    if (!text || !shouldAttemptPreferenceExtraction(text))
+        return [];
+    try {
+        const recentDialog = buildRecentDialog(messages);
+        const payload = {
+            latest_message: text,
+            recent_dialog: recentDialog,
+            resolved_preferences: resolvedPrefs || {},
+        };
+        const instructions = [
+            'You extract persistent research preferences from the user\'s latest message.',
+            'Return STRICT JSON with shape: {"preferences":[{"key":string,"value":any,"confidence":number,"source":"followup"}]}',
+            'Only emit preferences if the user states or confirms a durable preference.',
+            'Use lowercase dot-notation keys (e.g., "focus.eco", "coverage.depth").',
+            'Values must be valid JSON (objects for complex preferences).',
+            'Confidence must be between 0 and 1. Default source is "followup".',
+            'Return {"preferences":[]} when there is nothing to save.',
+        ].join('\n');
+        const stream = await openai.responses.stream({
+            model: 'gpt-5-mini',
+            instructions,
+            input: JSON.stringify(payload, null, 2),
+            text: { format: { type: 'text' }, verbosity: 'low', max_output_tokens: 200 },
+            store: false,
+            metadata: { agent: 'preference_extractor', user_id: userId },
+        });
+        let buffer = '';
+        for await (const event of stream) {
+            if (event.type === 'response.output_text.delta' && event.delta) {
+                buffer += event.delta;
+            }
+        }
+        try {
+            await stream.finalResponse();
+        }
+        catch { }
+        let parsed = null;
+        try {
+            const trimmed = buffer.trim();
+            if (!trimmed)
+                return [];
+            parsed = JSON.parse(trimmed);
+        }
+        catch (parseError) {
+            console.warn('[preferences] extractor returned non-JSON payload', parseError);
+            return [];
+        }
+        const preferences = Array.isArray(parsed?.preferences) ? parsed.preferences : [];
+        return preferences
+            .filter((pref) => pref && typeof pref.key === 'string')
+            .map((pref) => ({
+            key: pref.key,
+            value: pref.value ?? null,
+            confidence: typeof pref.confidence === 'number' ? pref.confidence : undefined,
+            source: pref.source === 'setup' ? 'setup' : pref.source === 'implicit' ? 'implicit' : 'followup',
+        }));
+    }
+    catch (error) {
+        console.error('[preferences] extraction failed', error);
+        return [];
+    }
+}
+function mergePreferenceRows(existing, upserts, userId) {
+    if (!upserts.length)
+        return existing;
+    const map = new Map();
+    for (const row of existing || []) {
+        if (row && typeof row.key === 'string') {
+            map.set(row.key, row);
+        }
+    }
+    const now = new Date().toISOString();
+    for (const pref of upserts) {
+        const key = pref.key;
+        const current = map.get(key);
+        if (current) {
+            map.set(key, {
+                ...current,
+                value: pref.value,
+                confidence: pref.confidence ?? current.confidence,
+                source: pref.source || current.source || 'followup',
+                updated_at: now,
+            });
+        }
+        else {
+            map.set(key, {
+                id: `local-${key}-${now}`,
+                user_id: userId,
+                key,
+                value: pref.value,
+                confidence: pref.confidence ?? 0.8,
+                source: pref.source || 'followup',
+                created_at: now,
+                updated_at: now,
+            });
+        }
+    }
+    return Array.from(map.values());
+}
+function extractAliasCandidates(text) {
+    if (!text)
+        return [];
+    const tokens = new Set();
+    const regex = /\b[0-9A-Za-z][0-9A-Za-z\-\+\._/]{1,}\b/g;
+    let match;
+    while ((match = regex.exec(text))) {
+        const term = match[0];
+        if (!term)
+            continue;
+        if (term.length < 3 || term.length > 48)
+            continue;
+        const hasDigit = /\d/.test(term);
+        const hasUpper = /[A-Z]/.test(term);
+        if (!hasDigit && !hasUpper)
+            continue;
+        tokens.add(term);
+    }
+    return Array.from(tokens).slice(0, 12);
+}
+async function resolveCanonicalEntities(text, additionalTerms = []) {
+    const candidates = [...new Set([...extractAliasCandidates(text), ...additionalTerms.filter(Boolean)])];
+    if (!candidates.length)
+        return [];
+    const results = [];
+    for (const term of candidates) {
+        try {
+            const resolved = await resolveEntity(term);
+            if (resolved) {
+                const exists = results.find(r => r.canonical.toLowerCase() === resolved.canonical.toLowerCase());
+                if (!exists) {
+                    results.push({
+                        canonical: resolved.canonical,
+                        type: resolved.type,
+                        confidence: resolved.confidence,
+                        matched: term,
+                    });
+                }
+            }
+        }
+        catch (error) {
+            console.warn('[aliasResolver] resolve failed for term', term, error);
+        }
+    }
+    return results;
+}
+function selectRelevantOpenQuestions(openQuestions, request, limit = 2) {
+    if (!Array.isArray(openQuestions) || openQuestions.length === 0)
+        return [];
+    const loweredRequest = (request || '').toLowerCase();
+    const tokens = loweredRequest ? loweredRequest.split(/[^a-z0-9]+/i).filter(tok => tok.length >= 3) : [];
+    const scored = openQuestions.map((question) => {
+        const text = String(question?.question || '').toLowerCase();
+        let score = 0;
+        for (const token of tokens) {
+            if (text.includes(token))
+                score += 2;
+        }
+        const topic = String(question?.context?.topic || '').toLowerCase();
+        if (topic && loweredRequest.includes(topic))
+            score += 3;
+        const askedAt = question?.asked_at ? Date.parse(question.asked_at) : 0;
+        return { question, score, askedAt };
+    });
+    const filtered = scored
+        .filter(item => item.score > 0)
+        .sort((a, b) => {
+        if (b.score !== a.score)
+            return b.score - a.score;
+        return a.askedAt - b.askedAt;
+    })
+        .slice(0, Math.max(1, limit))
+        .map(item => item.question);
+    return filtered;
+}
+function detectAliasAffirmations(message) {
+    const results = [];
+    if (!message)
+        return results;
+    const pattern = /"?([A-Za-z0-9][A-Za-z0-9\s\-\+\/&]{1,})"?\s*(?:=|is|equals|means)\s*"?([A-Za-z0-9][A-Za-z0-9\s\-\+\/&]{1,})"?/gi;
+    let match;
+    while ((match = pattern.exec(message))) {
+        const left = match[1].trim();
+        const right = match[2].trim();
+        if (!left || !right || left.toLowerCase() === right.toLowerCase())
+            continue;
+        const leftScore = left.split(/\s+/).length + (/[0-9]/.test(left) ? 1.5 : 0);
+        const rightScore = right.split(/\s+/).length + (/[0-9]/.test(right) ? 1.5 : 0);
+        // Prefer the phrase with more words as canonical to capture full product names
+        const canonical = rightScore >= leftScore ? right : left;
+        const alias = canonical === right ? left : right;
+        if (alias.length <= 40 && canonical.length <= 80) {
+            results.push({ canonical, alias });
+        }
+    }
+    return results;
+}
 export const config = {
     runtime: 'nodejs',
     // Allow up to 600s if plan supports it; we still self‑abort earlier.
@@ -222,6 +509,10 @@ export default async function handler(req, res) {
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !OPENAI_API_KEY) {
         return res.status(500).json({ error: 'Missing environment variables' });
     }
+    const openai = new OpenAI({
+        apiKey: OPENAI_API_KEY,
+        project: process.env.OPENAI_PROJECT,
+    });
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const body = (req.body || {});
     // Get auth header
@@ -274,23 +565,21 @@ export default async function handler(req, res) {
         catch (e) {
             return res.status(e.statusCode || 403).json({ error: e.message });
         }
-        // Check user credits (skip for non-billable settings agent)
-        const _agentTypeForCredits = String((req.body || {}).agentType || '').trim();
-        if (_agentTypeForCredits !== 'settings_agent') {
-            const creditCheck = await checkUserCredits(supabase, user.id);
-            if (!creditCheck.hasCredits) {
-                return res.status(403).json({
-                    error: creditCheck.message,
-                    needsApproval: creditCheck.needsApproval,
-                    remaining: creditCheck.remaining
-                });
-            }
+        // Check user credits
+        const creditCheck = await checkUserCredits(supabase, user.id);
+        if (!creditCheck.hasCredits) {
+            return res.status(403).json({
+                error: creditCheck.message,
+                needsApproval: creditCheck.needsApproval,
+                remaining: creditCheck.remaining
+            });
         }
         const authAndCreditMs = Date.now() - processStart;
         // Parse request body
         const { messages, systemPrompt, chatId, chat_id, agentType = 'company_research', config: userConfig = {}, research_type, active_subject } = body;
         const fastMode = false;
         const activeContextCompany = typeof active_subject === 'string' ? active_subject.trim() : '';
+        const runId = `${chatId || chat_id || 'chat'}:${Date.now()}`;
         const contextFetchStart = Date.now();
         const userContext = await fetchUserContext(supabase, user.id);
         const contextFetchMs = Date.now() - contextFetchStart;
@@ -312,64 +601,11 @@ export default async function handler(req, res) {
             }
         }
         catch { }
-        // Always build the canonical server-side prompt.
-        // Ignore client-provided systemPrompt unless explicitly allowed via flag.
-        let instructions = buildSystemPrompt(userContext, agentType, body.research_type);
-        try {
-            const allowClientPrompt = Boolean((userConfig || {}).allow_client_prompt === true);
-            if (allowClientPrompt && typeof systemPrompt === 'string' && systemPrompt.trim().length > 0) {
-                // Append the client prompt as a non-authoritative addendum for debugging.
-                instructions += `\n\n<client_addendum>(Non-authoritative) Additional client instructions:\n${systemPrompt.trim()}\n</client_addendum>`;
-            }
-        }
-        catch { }
-        try {
-            const memoryBlock = await buildMemoryBlock(user.id, agentType);
-            if (memoryBlock) {
-                instructions = `${memoryBlock}\n\n${instructions}`;
-            }
-        }
-        catch (memoryError) {
-            console.error('[memory] failed to load memory block', memoryError);
-        }
-        // Remove legacy prefix that leaked into logs/UI
-        // (it provided no functional value and was confusing to users)
-        if (subjectSnapshot)
-            instructions += subjectSnapshot;
-        // Apply clarifier lock and facet budget hints
-        // Lock clarifiers when an explicit research_type is provided or when the client requests it.
-        const lockClarifiers = Boolean(userConfig?.clarifiers_locked || research_type);
-        if (lockClarifiers) {
-            instructions += `\n\n<clarifiers_policy>Clarifiers are locked for this request. Do not ask setup questions or present checklists. Proceed with standard coverage using sensible defaults.</clarifiers_policy>`;
-        }
-        if (typeof userConfig?.facet_budget === 'number') {
-            instructions += `\n\n<facet_budget>${userConfig.facet_budget}</facet_budget>`;
-        }
-        if (typeof userConfig?.summary_brevity === 'string') {
-            instructions += `\n\n<summary_brevity>${userConfig.summary_brevity}</summary_brevity>`;
-        }
-        // Fast mode retired: always prompt for full contextual outputs
-        // Append guardrail hint if present in prompt config
-        try {
-            const guard = userContext.promptConfig?.guardrail_profile;
-            if (guard)
-                instructions += `\n\n<guardrails>Use guardrail profile: ${guard}. Respect source allowlists and safety constraints.</guardrails>`;
-        }
-        catch { }
-        // If a client-selected template is provided, request the exact section order
-        try {
-            const tpl = userConfig?.template;
-            if (tpl && Array.isArray(tpl.sections) && tpl.sections.length > 0) {
-                const sectionList = tpl.sections.map((s) => `## ${s.label || s.id}`).join(`\n`);
-                const tplBlock = `\n\n<output_sections>Use the following sections in this exact order. Do not add placeholders and do not invent extra headings.\n${sectionList}\n</output_sections>`;
-                instructions += tplBlock;
-            }
-        }
-        catch { }
         // Avoid encouraging verbose internal narration; let the model decide when brief progress helps.
         let input;
         let lastUserMessage = null;
         let effectiveRequest = '';
+        let fallbackInstructions = null;
         // If we have messages array, convert it to the Responses API format
         if (messages && messages.length > 0) {
             // For Responses API, we need to convert messages to a string format
@@ -420,7 +656,8 @@ export default async function handler(req, res) {
                 }
                 else {
                     // Generic small talk / non-research: short helpful reply only (no web_search)
-                    instructions = 'You are a concise assistant for a company research tool. Respond briefly and help the user formulate a research request. Do not perform web_search unless explicitly asked for research.';
+                    // Defer assignment to declared instructions later in the flow
+                    fallbackInstructions = 'You are a concise assistant for a company research tool. Respond briefly and help the user formulate a research request. Do not perform web_search unless explicitly asked for research.';
                     input = lastUserMessage.content;
                 }
             }
@@ -445,13 +682,151 @@ export default async function handler(req, res) {
         else {
             return res.status(400).json({ error: 'No messages provided' });
         }
+        // Extract follow-up preferences and canonical entities before building prompt
+        if (lastUserMessage) {
+            try {
+                if (PREFS_SUMMARY_ENABLED) {
+                    const extracted = await extractPreferenceCandidates(openai, user.id, lastUserMessage, messages, userContext.resolvedPrefs);
+                    if (extracted.length) {
+                        await upsertPreferences(user.id, extracted, supabase);
+                        userContext.preferences = mergePreferenceRows(userContext.preferences || [], extracted, user.id);
+                        userContext.resolvedPrefs = buildResolvedPreferences(userContext.promptConfig, userContext.preferences);
+                        try {
+                            await logUsage(supabase, user.id, 'preference.upsert', 0, {
+                                keys: extracted.map(pref => pref.key),
+                                source: extracted.map(pref => pref.source || 'followup'),
+                                run_id: runId,
+                            });
+                        }
+                        catch (logErr) {
+                            console.warn('[telemetry] preference.upsert log failed', logErr);
+                        }
+                        const remainingQuestions = [];
+                        for (const question of userContext.openQuestions || []) {
+                            const prefMatch = extracted.find(pref => question?.context?.preference_key && pref.key === question.context.preference_key);
+                            if (prefMatch && question?.id) {
+                                try {
+                                    await resolveOpenQuestion(question.id, { resolution: `Preference ${prefMatch.key} captured.` }, supabase);
+                                    try {
+                                        await logUsage(supabase, user.id, 'followup.resolved', 0, { question_id: question.id, preference_key: prefMatch.key, run_id: runId });
+                                    }
+                                    catch (logErr) {
+                                        console.warn('[telemetry] followup.resolved log failed', logErr);
+                                    }
+                                }
+                                catch (resolveErr) {
+                                    console.error('[openQuestions] failed to resolve question', resolveErr);
+                                    remainingQuestions.push(question);
+                                }
+                            }
+                            else {
+                                remainingQuestions.push(question);
+                            }
+                        }
+                        userContext.openQuestions = remainingQuestions;
+                    }
+                }
+            }
+            catch (prefErr) {
+                console.error('[preferences] failed to process extracted preferences', prefErr);
+            }
+            try {
+                const aliasTerms = [];
+                if (activeContextCompany)
+                    aliasTerms.push(activeContextCompany);
+                const resolved = await resolveCanonicalEntities(String(lastUserMessage.content || ''), aliasTerms);
+                if (resolved.length) {
+                    userContext.canonicalEntities = resolved;
+                    const canonicalSummary = resolved
+                        .map(item => `${item.canonical}${item.matched ? ` (from “${item.matched}”)` : ''}`)
+                        .join(', ');
+                    effectiveRequest = `${effectiveRequest}\n\nCanonical entities resolved: ${canonicalSummary}.`;
+                    if (typeof input === 'string' && input) {
+                        input = `${input}\n\nCanonical entities resolved for context: ${canonicalSummary}`;
+                    }
+                }
+            }
+            catch (aliasErr) {
+                console.error('[aliasResolver] canonical resolution failed', aliasErr);
+            }
+            try {
+                if (PREFS_SUMMARY_ENABLED) {
+                    const aliasPairs = detectAliasAffirmations(String(lastUserMessage.content || ''));
+                    for (const pair of aliasPairs) {
+                        await learnAlias(pair.canonical, pair.alias, { source: 'followup' });
+                        try {
+                            await logUsage(supabase, user.id, 'alias.learned', 0, {
+                                canonical: pair.canonical,
+                                alias: pair.alias,
+                                run_id: runId,
+                            });
+                        }
+                        catch (logErr) {
+                            console.warn('[telemetry] alias.learned log failed', logErr);
+                        }
+                    }
+                }
+            }
+            catch (aliasLearnErr) {
+                console.error('[aliasResolver] learn alias failed', aliasLearnErr);
+            }
+        }
+        if (lastUserMessage) {
+            userContext.openQuestions = selectRelevantOpenQuestions(userContext.openQuestions, String(lastUserMessage.content || ''), 2);
+        }
+        else {
+            userContext.openQuestions = [];
+        }
         // Estimate tokens for usage tracking
         const totalEstimatedTokens = estimateTokens(JSON.stringify(messages));
-        // Initialize OpenAI
-        const openai = new OpenAI({
-            apiKey: OPENAI_API_KEY,
-            project: process.env.OPENAI_PROJECT,
-        });
+        // Build canonical system instructions with updated preferences/context
+        let instructions = buildSystemPrompt(userContext, agentType, body.research_type);
+        if (fallbackInstructions) {
+            instructions = fallbackInstructions;
+        }
+        try {
+            const allowClientPrompt = Boolean((userConfig || {}).allow_client_prompt === true);
+            if (allowClientPrompt && typeof systemPrompt === 'string' && systemPrompt.trim().length > 0) {
+                instructions += `\n\n<client_addendum>(Non-authoritative) Additional client instructions:\n${systemPrompt.trim()}\n</client_addendum>`;
+            }
+        }
+        catch { }
+        try {
+            const memoryBlock = await buildMemoryBlock(user.id, agentType);
+            if (memoryBlock) {
+                instructions = `${memoryBlock}\n\n${instructions}`;
+            }
+        }
+        catch (memoryError) {
+            console.error('[memory] failed to load memory block', memoryError);
+        }
+        if (subjectSnapshot)
+            instructions += subjectSnapshot;
+        const lockClarifiers = Boolean(userConfig?.clarifiers_locked || research_type);
+        if (lockClarifiers) {
+            instructions += `\n\n<clarifiers_policy>Clarifiers are locked for this request. Do not ask setup questions or present checklists. Proceed with standard coverage using sensible defaults.</clarifiers_policy>`;
+        }
+        if (typeof userConfig?.facet_budget === 'number') {
+            instructions += `\n\n<facet_budget>${userConfig.facet_budget}</facet_budget>`;
+        }
+        if (typeof userConfig?.summary_brevity === 'string') {
+            instructions += `\n\n<summary_brevity>${userConfig.summary_brevity}</summary_brevity>`;
+        }
+        try {
+            const guard = userContext.promptConfig?.guardrail_profile;
+            if (guard)
+                instructions += `\n\n<guardrails>Use guardrail profile: ${guard}. Respect source allowlists and safety constraints.</guardrails>`;
+        }
+        catch { }
+        try {
+            const tpl = userConfig?.template;
+            if (tpl && Array.isArray(tpl.sections) && tpl.sections.length > 0) {
+                const sectionList = tpl.sections.map((s) => `## ${s.label || s.id}`).join(`\n`);
+                const tplBlock = `\n\n<output_sections>Use the following sections in this exact order. Do not add placeholders and do not invent extra headings.\n${sectionList}\n</output_sections>`;
+                instructions += tplBlock;
+            }
+        }
+        catch { }
         // Set up streaming response headers
         res.writeHead(200, {
             'Content-Type': 'text/event-stream; charset=utf-8',
@@ -521,45 +896,121 @@ export default async function handler(req, res) {
             // Summarization mode: if the client passed summarize_source, bypass research flow
             const summarizeSource = userConfig?.summarize_source;
             if (summarizeSource && typeof summarizeSource === 'string' && summarizeSource.trim().length > 0) {
-                const sumInstructions = [
-                    'You write crisp executive summaries for sales research.',
-                    `Output format strictly:
-## Executive Summary
-<2 short sentences with headline>
-
-## Key Takeaways
-- 5–8 bullets, each ≤18 words, decision-focused, grounded in the source`,
-                    'Do not add extra sections. Do not use web_search. No boilerplate.',
+                if (!PREFS_SUMMARY_ENABLED) {
+                    // Flag disabled: do not run summary JSON flow; notify client gracefully
+                    try {
+                        await logUsage(supabase, user.id, 'summary_error', 0, { parse_reason: 'feature_flag_disabled', model: 'gpt-5-mini', run_id: runId });
+                    }
+                    catch { }
+                    safeWrite(`data: ${JSON.stringify({ type: 'summary_error', message: 'Structured summary is disabled.' })}\n\n`);
+                    safeWrite('data: [DONE]\n\n');
+                    responseClosed = true;
+                    return;
+                }
+                const baseInstructions = [
+                    'Summarize the research for an enterprise Account Executive as structured JSON.',
+                    'Return exactly the SummarySchema fields: company_overview (string), value_drivers[], risks[], optional eco_profile{initiatives[], certifications[]}, tech_stack[], buying_centers[{title,relevance}], next_actions[].',
+                    'Each array should contain 3-5 concise, evidence-backed items when information exists; use descriptive fallbacks like "Unknown" inside the array when data is missing.',
+                    'Buying centers must explain why each role matters. Highlight risks that could stall a deal. Keep company_overview to 2 sentences.',
+                    'Do not include markdown, prose, or commentary outside JSON. Do not call web_search.',
                 ].join('\n');
-                const sumInput = `SOURCE\n---\n${summarizeSource}\n---\nSummarize for an Account Executive.`;
-                const stream = await openai.responses.stream({
-                    model: 'gpt-5-mini',
-                    instructions: sumInstructions,
-                    input: sumInput,
-                    text: { format: { type: 'text' }, verbosity: 'low' },
-                    store: false,
-                    metadata: {
-                        agent: 'company_research',
-                        stage: 'user_summarize',
-                        chat_id: chatId || null,
-                        user_id: user.id,
-                    },
-                }, { signal: abortController.signal });
-                for await (const chunk of stream) {
-                    if (responseClosed)
-                        break;
-                    if (chunk.type === 'response.output_text.delta' && chunk.delta) {
-                        safeWrite(`data: ${JSON.stringify({ type: 'content', content: chunk.delta })}\n\n`);
+                const baseInput = `SOURCE\n---\n${summarizeSource}\n---\nGenerate SummarySchema JSON only.`;
+                const attemptSummary = async (attempt) => {
+                    const tighten = attempt > 1;
+                    const instructions = tighten
+                        ? `${baseInstructions}\nReturn strict JSON that matches SummarySchema exactly. No markdown, no commentary.`
+                        : baseInstructions;
+                    const stream = await openai.responses.stream({
+                        model: 'gpt-5-mini',
+                        instructions,
+                        input: baseInput,
+                        response_format: { type: 'json_schema', json_schema: SUMMARY_JSON_SCHEMA },
+                        store: false,
+                        metadata: {
+                            agent: 'company_research',
+                            stage: tighten ? 'user_summarize_retry' : 'user_summarize',
+                            chat_id: chatId || null,
+                            user_id: user.id,
+                        },
+                    }, { signal: abortController.signal });
+                    let jsonBuffer = '';
+                    try {
+                        for await (const chunk of stream) {
+                            if (responseClosed)
+                                break;
+                            if (chunk.type === 'response.output_json.delta' && typeof chunk.delta === 'string') {
+                                jsonBuffer += chunk.delta;
+                            }
+                            else if (chunk.type === 'response.output_text.delta' && typeof chunk.delta === 'string') {
+                                jsonBuffer += chunk.delta;
+                            }
+                        }
+                        if (!jsonBuffer) {
+                            const final = await stream.finalResponse();
+                            const directJson = final?.output_json || final?.output_text;
+                            if (typeof directJson === 'string') {
+                                jsonBuffer = directJson;
+                            }
+                            else if (Array.isArray(final?.output)) {
+                                const flattened = final.output
+                                    .flatMap((item) => Array.isArray(item?.content) ? item.content : [])
+                                    .find((entry) => typeof entry?.json === 'string' || typeof entry?.text === 'string');
+                                if (flattened?.json)
+                                    jsonBuffer = flattened.json;
+                                else if (flattened?.text)
+                                    jsonBuffer = flattened.text;
+                            }
+                        }
+                        else {
+                            await stream.finalResponse();
+                        }
+                    }
+                    catch (err) {
+                        if (err?.name === 'AbortError') {
+                            throw err;
+                        }
+                        console.error('[summary] streaming error', err);
+                        return { summary: null, error: err instanceof Error ? err : new Error(String(err)) };
+                    }
+                    if (!jsonBuffer.trim()) {
+                        return { summary: null, error: new Error('Empty summary payload') };
+                    }
+                    return parseSummaryJson(jsonBuffer.trim());
+                };
+                let summaryPayload = null;
+                let attempt = 0;
+                let lastError;
+                while (attempt < 2 && !summaryPayload) {
+                    attempt += 1;
+                    try {
+                        const { summary, error } = await attemptSummary(attempt);
+                        summaryPayload = summary;
+                        lastError = error;
+                    }
+                    catch (err) {
+                        if (err?.name === 'AbortError') {
+                            safeWrite(`data: ${JSON.stringify({ type: 'timeout', message: 'Stream aborted (deadline).' })}\n\n`);
+                            safeWrite('data: [DONE]\n\n');
+                            responseClosed = true;
+                            return;
+                        }
+                        lastError = err instanceof Error ? err : new Error(String(err));
                     }
                 }
-                try {
-                    await stream.finalResponse();
-                }
-                catch (e) {
-                    if (e?.name === 'AbortError') {
-                        safeWrite(`data: ${JSON.stringify({ type: 'timeout', message: 'Stream aborted (deadline).' })}\n\n`);
+                if (!summaryPayload) {
+                    if (lastError) {
+                        console.error('[summary] unable to parse structured summary', lastError);
                     }
+                    try {
+                        await logUsage(supabase, user.id, 'summary_error', 0, { parse_reason: String(lastError?.message || 'unknown'), model: 'gpt-5-mini', run_id: runId });
+                    }
+                    catch { }
+                    safeWrite(`data: ${JSON.stringify({ type: 'summary_error', message: 'Unable to generate structured summary.' })}\n\n`);
+                    safeWrite('data: [DONE]\n\n');
+                    responseClosed = true;
+                    return;
                 }
+                safeWrite(`data: ${JSON.stringify({ type: 'summary_json', content: summaryPayload })}\n\n`);
                 safeWrite('data: [DONE]\n\n');
                 responseClosed = true;
                 return;
@@ -1100,23 +1551,18 @@ export default async function handler(req, res) {
                 clearTimeout(overallTimeout);
             }
             catch { }
-            // Log usage and deduct credits (skip billing for settings_agent)
-            try {
-                await logUsage(supabase, user.id, 'chat_completion', totalEstimatedTokens, {
-                    chat_id: chatId,
-                    agent_type: agentType,
-                    model: selectedModel,
-                    api: 'responses',
-                    chunks: chunkCount,
-                    prompt_head: (instructions || '').slice(0, 1000),
-                    input_head: (input || '').slice(0, 400),
-                    final_response_id: finalResponseData?.id || finalResponseData?.response?.id || null,
-                    billable: agentType !== 'settings_agent'
-                });
-            } catch {}
-            if (agentType !== 'settings_agent') {
-                await deductCredits(supabase, user.id, totalEstimatedTokens);
-            }
+            // Log usage and deduct credits
+            await logUsage(supabase, user.id, 'chat_completion', totalEstimatedTokens, {
+                chat_id: chatId,
+                agent_type: agentType,
+                model: selectedModel,
+                api: 'responses', // Note that we're using Responses API
+                chunks: chunkCount,
+                prompt_head: (instructions || '').slice(0, 1000),
+                input_head: (input || '').slice(0, 400),
+                final_response_id: finalResponseData?.id || finalResponseData?.response?.id || null
+            });
+            await deductCredits(supabase, user.id, totalEstimatedTokens);
             // Background: rolling summary
             ;
             (async () => {
