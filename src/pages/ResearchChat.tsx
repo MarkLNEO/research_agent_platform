@@ -397,6 +397,12 @@ export function ResearchChat() {
   const PREFS_SUMMARY_ENABLED = import.meta.env.VITE_PREFS_SUMMARY_ENABLED === 'true';
   const [resolvedPrefs, setResolvedPrefs] = useState<ResolvedPrefs | null>(null);
   const [resolvedLoading, setResolvedLoading] = useState(false);
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
   const [csvUploadOpen, setCSVUploadOpen] = useState(false);
   const [bulkResearchOpen, setBulkResearchOpen] = useState(false);
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
@@ -653,38 +659,38 @@ export function ResearchChat() {
       signals,
     };
   }, [userProfile, customCriteria, signalPreferences]);
-  useEffect(() => {
-    let canceled = false;
-    const loadResolvedPreferences = async () => {
-      try {
-        setResolvedLoading(true);
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
-        const response = await fetch('/api/preferences', {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-        if (!response.ok) throw new Error(`Failed to load preferences (${response.status})`);
-        const payload = await response.json();
-        if (!canceled) {
-          setResolvedPrefs(payload?.resolved ?? null);
-        }
-      } catch (error) {
-        if (!canceled) {
-          console.error('Failed to load resolved preferences', error);
-          setResolvedPrefs(null);
-        }
-      } finally {
-        if (!canceled) setResolvedLoading(false);
+  const refreshResolvedPreferences = useCallback(async () => {
+    setResolvedLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        if (isMountedRef.current) setResolvedPrefs(null);
+        return;
       }
-    };
-    void loadResolvedPreferences();
-    return () => {
-      canceled = true;
-    };
-  }, []);
+      const response = await fetch('/api/preferences', {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      if (!response.ok) throw new Error(`Failed to load preferences (${response.status})`);
+      const payload = await response.json();
+      if (isMountedRef.current) {
+        setResolvedPrefs(payload?.resolved ?? null);
+      }
+    } catch (error) {
+      if (isMountedRef.current) {
+        console.error('Failed to load resolved preferences', error);
+        setResolvedPrefs(null);
+      }
+    } finally {
+      if (isMountedRef.current) setResolvedLoading(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    void refreshResolvedPreferences();
+  }, [refreshResolvedPreferences]);
   const focusHighlights = useMemo(() => {
     if (!resolvedPrefs) return [] as Array<{ key: string; weight: number | null }>;
     const entries = Object.entries(resolvedPrefs.focus || {});
@@ -1725,6 +1731,8 @@ useEffect(() => {
     const looksLikeResearch = !isGenericHelp && isResearchPrompt(normalized);
     const continuationMatch = normalized.match(/^(?:continue|resume)\s+(?:research(?:\s+on)?\s+)?(.+)/i);
     const continuationTarget = continuationMatch?.[1]?.trim() || null;
+    const normalizedLower = normalized.toLowerCase();
+    const isExistingAccountsIntent = /^research\s+(my\s+)?existing\s+accounts?\b/.test(normalizedLower);
 
     let detectedCompany = extractCompanyNameFromQuery(normalized);
     if (!detectedCompany && continuationTarget) {
@@ -1735,9 +1743,54 @@ useEffect(() => {
     // open suggestions dialog instead of spending credits AND do not set activeSubject.
     const isWHQuestion = /^(who|what|when|where|which|why|how)\b/i.test(normalized);
     const endsWithQuestion = /\?\s*$/.test(normalized);
+    if (isExistingAccountsIntent) {
+      try {
+        const { data: savedUser } = await supabase
+          .from('messages')
+          .insert({ chat_id: chatId, role: 'user', content: normalized })
+          .select()
+          .single();
+
+        const helper =
+          `I can absolutely help with existing accounts once I know which companies to track.\n\n` +
+          `Try one of these next:\n` +
+          `• Type a specific company (e.g., "Research Okta")\n` +
+          `• Paste a short list of account names\n` +
+          `• Open the Accounts panel to upload a CSV for tracking`;
+        const { data: savedAssistant } = await supabase
+          .from('messages')
+          .insert({ chat_id: chatId, role: 'assistant', content: helper })
+          .select()
+          .single();
+
+        setMessages(prev => {
+          const filtered = prev.filter(m => m.id !== tempUser.id);
+          const next: Message[] = [...filtered];
+          if (savedUser) next.push(savedUser);
+          if (savedAssistant) next.push(savedAssistant);
+          return next;
+        });
+      } catch (error) {
+        console.error('Failed to handle generic existing accounts prompt', error);
+        addToast({
+          type: 'error',
+          title: 'Need specific accounts',
+          description: 'Name a company to research or upload your account list.',
+        });
+        setMessages(prev => prev.filter(m => m.id !== tempUser.id));
+      } finally {
+        setLoading(false);
+        setStreamingMessage('');
+        setThinkingEvents([]);
+      }
+      return;
+    }
+
     if (looksLikeResearch) {
       const candidate = sanitizeCandidate(detectedCompany || normalized);
-      if (isGibberish(candidate) || !isLikelySubject(detectedCompany || candidate)) {
+      const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+      const treatAsFollowUp = isWHQuestion || endsWithQuestion || normalized.length >= 60 || wordCount >= 6 || Boolean(activeSubject);
+      if (!treatAsFollowUp && (isGibberish(candidate) || !isLikelySubject(detectedCompany || candidate))) {
         setAssumedDialogName(candidate);
         setAssumedDialogIndustry(null);
         setAssumedDialogOpen(true);
@@ -1751,10 +1804,20 @@ useEffect(() => {
     }
 
     // Only set active subject if value looks like a proper entity
-    if (!isWHQuestion && !endsWithQuestion && (looksLikeResearch || continuationTarget) && isLikelySubject(detectedCompany)) {
+    const questionCandidateLooksLikeEntity =
+      isWHQuestion &&
+      isLikelySubject(detectedCompany) &&
+      Boolean(detectedCompany) &&
+      !/^(the|a|an)\b/i.test((detectedCompany || '').toLowerCase()) &&
+      (detectedCompany || '').split(/\s+/).length <= 4;
+    const shouldAssignSubject =
+      (looksLikeResearch || continuationTarget || questionCandidateLooksLikeEntity) &&
+      isLikelySubject(detectedCompany);
+
+    if (shouldAssignSubject) {
       setActiveSubject(detectedCompany);
     }
-    if (!isWHQuestion && !endsWithQuestion && (looksLikeResearch || continuationTarget) && isLikelySubject(detectedCompany) && detectedCompany && detectedCompany !== activeSubject) {
+    if (shouldAssignSubject && detectedCompany && detectedCompany !== activeSubject) {
       lastResearchSummaryRef.current = '';
     }
 
@@ -2424,6 +2487,44 @@ useEffect(() => {
                   });
                   // Trigger sidebar refresh by dispatching custom event
                   window.dispatchEvent(new CustomEvent('accounts-updated'));
+                }
+                else if (parsed.type === 'preference_saved') {
+                  if (Array.isArray(parsed.preferences) && parsed.preferences.length) {
+                    const labels = parsed.preferences
+                      .map((pref: any) => (typeof pref?.label === 'string' && pref.label.trim())
+                        ? pref.label.trim()
+                        : typeof pref?.key === 'string'
+                          ? pref.key.split('.').pop()?.replace(/_/g, ' ') ?? pref.key
+                          : null)
+                      .filter((label: string | null): label is string => Boolean(label));
+                    if (labels.length) {
+                      addToast({
+                        type: 'success',
+                        title: 'Preference saved',
+                        description: `I’ll keep highlighting ${labels.join(', ')}.`,
+                      });
+                    }
+                    void refreshResolvedPreferences();
+                    invalidateUserProfileCache(user?.id);
+                  }
+                }
+                else if (parsed.type === 'alias_learned') {
+                  if (Array.isArray(parsed.aliases) && parsed.aliases.length) {
+                    const summaries = parsed.aliases
+                      .map((entry: any) => {
+                        if (!entry?.alias || !entry?.canonical) return null;
+                        return `${entry.alias} → ${entry.canonical}`;
+                      })
+                      .filter((item: string | null): item is string => Boolean(item));
+                    if (summaries.length) {
+                      addToast({
+                        type: 'info',
+                        title: summaries.length === 1 ? 'Alias remembered' : 'Aliases remembered',
+                        description: summaries.join(', '),
+                      });
+                    }
+                    invalidateUserProfileCache(user?.id);
+                  }
                 }
                 // Handle output text deltas (supports both Edge Function and Vercel API formats)
                 else if (parsed.type === 'response.output_text.delta' || parsed.type === 'content') {

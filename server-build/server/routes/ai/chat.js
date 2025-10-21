@@ -5,7 +5,7 @@ import { buildMemoryBlock } from '../_lib/memory.js';
 import { assertEmailAllowed } from '../_lib/access.js';
 import { buildResolvedPreferences, upsertPreferences, } from '../../../lib/preferences/store.js';
 import { resolveEntity, learnAlias } from '../../../lib/entities/aliasResolver.js';
-import { resolveOpenQuestion } from '../../../lib/followups/openQuestions.js';
+import { addOpenQuestion, resolveOpenQuestion } from '../../../lib/followups/openQuestions.js';
 import { SummarySchemaZ } from '../../../shared/summarySchema.js';
 // Feature flag: preferences/aliases/structured summary
 // Server reads from process.env; default OFF for safety
@@ -699,6 +699,8 @@ export default async function handler(req, res) {
             ? [...userContext.openQuestions]
             : [];
         const contextFetchMs = Date.now() - contextFetchStart;
+        const pendingPreferenceEvents = [];
+        const pendingAliasEvents = [];
         // Subject recall: tiny snapshot of last saved research for active_subject
         let subjectSnapshot = '';
         try {
@@ -845,6 +847,9 @@ export default async function handler(req, res) {
                                     label: labelMap.get(pref.key) || labelFromPreferenceKey(pref.key),
                                 }));
                                 userContext.recentPreferenceConfirmations = savedConfirmations;
+                                if (savedConfirmations.length) {
+                                    pendingPreferenceEvents.push(...savedConfirmations);
+                                }
                                 try {
                                     await logUsage(supabase, user.id, 'preference.upsert', 0, {
                                         keys: savedEntries.map(pref => pref.key),
@@ -904,50 +909,116 @@ export default async function handler(req, res) {
                 }
                 if (unresolved.length) {
                     userContext.unresolvedEntities = unresolved;
+                    try {
+                        const existingAliasQuestions = new Set();
+                        if (Array.isArray(userContext.openQuestions)) {
+                            for (const question of userContext.openQuestions || []) {
+                                const aliasTerm = typeof question?.context?.alias_term === 'string'
+                                    ? String(question.context.alias_term).toLowerCase()
+                                    : '';
+                                if (aliasTerm)
+                                    existingAliasQuestions.add(aliasTerm);
+                            }
+                        }
+                        for (const term of unresolved) {
+                            const lowered = term.toLowerCase();
+                            if (!lowered || existingAliasQuestions.has(lowered))
+                                continue;
+                            const created = await addOpenQuestion(user.id, {
+                                question: `Quick clarification: what does "${term}" stand for so I can remember it for future research?`,
+                                context: {
+                                    topic: 'alias',
+                                    alias_term: term,
+                                },
+                            }, supabase);
+                            if (created) {
+                                existingAliasQuestions.add(lowered);
+                                userContext.openQuestions = [...(userContext.openQuestions || []), created];
+                            }
+                        }
+                    }
+                    catch (aliasFollowErr) {
+                        console.error('[aliasResolver] failed to queue alias follow-up', aliasFollowErr);
+                    }
                 }
             }
             catch (aliasErr) {
                 console.error('[aliasResolver] canonical resolution failed', aliasErr);
             }
             try {
-                if (PREFS_SUMMARY_ENABLED) {
-                    const aliasPairs = detectAliasAffirmations(String(lastUserMessage.content || ''));
-                    if (aliasPairs.length) {
-                        const aliasConfirmations = Array.isArray(userContext.recentAliasConfirmations)
-                            ? [...userContext.recentAliasConfirmations]
-                            : [];
-                        for (const pair of aliasPairs) {
-                            let alreadyKnown = false;
-                            try {
-                                const existing = await resolveEntity(pair.alias);
-                                if (existing && existing.canonical.toLowerCase() === pair.canonical.toLowerCase() && existing.confidence >= 0.95) {
-                                    alreadyKnown = true;
-                                }
-                            }
-                            catch (resolveErr) {
-                                console.warn('[aliasResolver] failed to check existing alias', resolveErr);
-                            }
-                            await learnAlias(pair.canonical, pair.alias, { source: 'followup' });
-                            try {
-                                await logUsage(supabase, user.id, 'alias.learned', 0, {
-                                    canonical: pair.canonical,
-                                    alias: pair.alias,
-                                    run_id: runId,
-                                });
-                            }
-                            catch (logErr) {
-                                console.warn('[telemetry] alias.learned log failed', logErr);
-                            }
-                            if (!alreadyKnown) {
-                                aliasConfirmations.push({ alias: pair.alias, canonical: pair.canonical });
+                const aliasPairs = detectAliasAffirmations(String(lastUserMessage.content || ''));
+                if (aliasPairs.length) {
+                    const aliasConfirmations = Array.isArray(userContext.recentAliasConfirmations)
+                        ? [...userContext.recentAliasConfirmations]
+                        : [];
+                    for (const pair of aliasPairs) {
+                        let alreadyKnown = false;
+                        try {
+                            const existing = await resolveEntity(pair.alias);
+                            if (existing && existing.canonical.toLowerCase() === pair.canonical.toLowerCase() && existing.confidence >= 0.95) {
+                                alreadyKnown = true;
                             }
                         }
-                        if (aliasConfirmations.length) {
-                            userContext.recentAliasConfirmations = aliasConfirmations;
-                            if (Array.isArray(userContext.unresolvedEntities) && userContext.unresolvedEntities.length) {
-                                const lowered = aliasConfirmations.map(entry => entry.alias.toLowerCase());
-                                userContext.unresolvedEntities = userContext.unresolvedEntities.filter((term) => !lowered.includes(term.toLowerCase()));
+                        catch (resolveErr) {
+                            console.warn('[aliasResolver] failed to check existing alias', resolveErr);
+                        }
+                        await learnAlias(pair.canonical, pair.alias, { source: 'followup' });
+                        try {
+                            await logUsage(supabase, user.id, 'alias.learned', 0, {
+                                canonical: pair.canonical,
+                                alias: pair.alias,
+                                run_id: runId,
+                            });
+                        }
+                        catch (logErr) {
+                            console.warn('[telemetry] alias.learned log failed', logErr);
+                        }
+                        if (!alreadyKnown) {
+                            aliasConfirmations.push({ alias: pair.alias, canonical: pair.canonical });
+                        }
+                    }
+                    if (aliasConfirmations.length) {
+                        userContext.recentAliasConfirmations = aliasConfirmations;
+                        pendingAliasEvents.push(...aliasConfirmations);
+                        if (Array.isArray(userContext.unresolvedEntities) && userContext.unresolvedEntities.length) {
+                            const lowered = aliasConfirmations.map(entry => entry.alias.toLowerCase());
+                            userContext.unresolvedEntities = userContext.unresolvedEntities.filter((term) => !lowered.includes(term.toLowerCase()));
+                        }
+                        if (Array.isArray(userContext.openQuestions) && userContext.openQuestions.length) {
+                            const aliasLookup = new Map();
+                            for (const entry of aliasConfirmations) {
+                                aliasLookup.set(entry.alias.toLowerCase(), entry.canonical);
                             }
+                            const remainingAliasQuestions = [];
+                            for (const question of userContext.openQuestions || []) {
+                                const aliasTerm = typeof question?.context?.alias_term === 'string'
+                                    ? String(question.context.alias_term).toLowerCase()
+                                    : '';
+                                if (aliasTerm && aliasLookup.has(aliasTerm) && question?.id) {
+                                    try {
+                                        await resolveOpenQuestion(question.id, { resolution: `Alias "${aliasTerm}" learned as ${aliasLookup.get(aliasTerm)}.` }, supabase);
+                                        try {
+                                            await logUsage(supabase, user.id, 'followup.resolved', 0, {
+                                                question_id: question.id,
+                                                alias_term: aliasTerm,
+                                                canonical: aliasLookup.get(aliasTerm),
+                                                run_id: runId,
+                                            });
+                                        }
+                                        catch (logErr) {
+                                            console.warn('[telemetry] followup.resolved log failed', logErr);
+                                        }
+                                    }
+                                    catch (resolveErr) {
+                                        console.error('[openQuestions] failed to resolve alias question', resolveErr);
+                                        remainingAliasQuestions.push(question);
+                                    }
+                                }
+                                else {
+                                    remainingAliasQuestions.push(question);
+                                }
+                            }
+                            userContext.openQuestions = remainingAliasQuestions;
                         }
                     }
                 }
@@ -1057,6 +1128,12 @@ export default async function handler(req, res) {
             }
             catch { }
         });
+        if (pendingPreferenceEvents.length) {
+            safeWrite(`data: ${JSON.stringify({ type: 'preference_saved', preferences: pendingPreferenceEvents })}\n\n`);
+        }
+        if (pendingAliasEvents.length) {
+            safeWrite(`data: ${JSON.stringify({ type: 'alias_learned', aliases: pendingAliasEvents })}\n\n`);
+        }
         try {
             // Add more detailed debugging
             console.log('[DEBUG] System instructions length:', instructions?.length || 0);
