@@ -124,6 +124,10 @@ const SPECIFIC_FOLLOW_UP_GUIDANCE = `Follow-up wrap-up (specific mode):
 const FOLLOW_UP_MEMORY_GUIDANCE = `Preference memory:
 - When a follow-up highlights a recurring focus (e.g., "tell me more about leadership"), end with a conversational offer to remember that theme in future research. Make the invitation explicit ("Want me to track leadership moves going forward?").`;
 
+const FOLLOW_UP_CONFIRMATION_RULE = `Follow-up persistence rule:
+- Whenever you answer a follow-up question about a specific detail inside the current company context (e.g., a specific leader, signal, product, or risk), wrap up with a direct yes/no offer to remember that focus in future briefs (e.g., "Want me to keep spotlighting Eugene Hall next time?").
+- Skip repeating this offer for focuses the user already confirmed in this conversation or that are already saved in their preferences; instead, thank them and highlight one or two new areas they could opt into.`;
+
 const CLOSING_CUSTOMIZATION_GUIDANCE = `Preference check-out:
 - Close every response with a short question inviting the user to tailor future briefs. Mention 2–3 relevant options (e.g., focus on leadership moves, supply-chain risks, tech stack) and remind them you can remember their choice.
 - If the user just confirmed a preference in this turn, thank them warmly, confirm it has been saved, and only offer additional options that are new (do not re-ask for the item they just confirmed).`;
@@ -497,6 +501,7 @@ export function buildSystemPrompt(
     } else {
       extras.push(PROACTIVE_FOLLOW_UP_GUIDANCE);
     }
+    extras.push(FOLLOW_UP_CONFIRMATION_RULE);
     extras.push(CLOSING_CUSTOMIZATION_GUIDANCE);
   }
   if (isResearchAgent && followups.length) {
