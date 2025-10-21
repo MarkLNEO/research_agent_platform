@@ -148,11 +148,16 @@ function getConfig() {
     };
 }
 async function tableExists(table, config) {
-    const response = await fetch(`${config.supabaseUrl}/rest/v1/meta/tables?name=eq.${table}&schema=eq.public`, {
-        headers: config.headers,
+    const url = `${config.supabaseUrl}/rest/v1/meta/tables?select=name,schema&name=eq.${table}&schema=eq.public`;
+    const response = await fetch(url, {
+        headers: {
+            ...config.headers,
+            Accept: 'application/json',
+        },
     });
     if (!response.ok) {
-        throw new Error(`[ensureTables] Failed to inspect table ${table}: ${response.status} ${await response.text()}`);
+        const body = await response.text();
+        throw new Error(`[ensureTables] Failed to inspect table ${table}: ${response.status} ${body}`);
     }
     const json = await response.json();
     return Array.isArray(json) && json.length > 0;
@@ -160,11 +165,15 @@ async function tableExists(table, config) {
 async function runSql(sql, config) {
     const response = await fetch(`${config.supabaseUrl}/rest/v1/meta/sql`, {
         method: 'POST',
-        headers: config.headers,
+        headers: {
+            ...config.headers,
+            Accept: 'application/json',
+        },
         body: JSON.stringify({ query: sql }),
     });
     if (!response.ok) {
-        throw new Error(`[ensureTables] Failed to execute DDL: ${response.status} ${await response.text()}`);
+        const body = await response.text();
+        throw new Error(`[ensureTables] Failed to execute DDL: ${response.status} ${body}`);
     }
 }
 export async function ensureTable(table) {
