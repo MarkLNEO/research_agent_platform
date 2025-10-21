@@ -485,6 +485,7 @@ export function ResearchChat() {
   const [signalPreferences, setSignalPreferences] = useState<any[]>([]);
   const [creatingNewChat, setCreatingNewChat] = useState(false);
   const [showContextTooltip, setShowContextTooltip] = useState(false);
+  const contextTooltipRef = useRef<HTMLDivElement | null>(null);
   const suggestions = useMemo(
     () => generateSuggestions(userProfile, customCriteria, signalPreferences),
     [userProfile, customCriteria, signalPreferences]
@@ -1077,21 +1078,41 @@ useEffect(() => {
     };
   }, []);
 
+useEffect(() => {
+  if (typeof window === 'undefined') return;
+  if (localStorage.getItem('contextTooltipSeen') === 'true') return;
+  let hideTimer: number | undefined;
+  const showTimer = window.setTimeout(() => {
+    setShowContextTooltip(true);
+    hideTimer = window.setTimeout(() => {
+      dismissContextTooltip();
+    }, 6000);
+  }, 1500);
+  return () => {
+    window.clearTimeout(showTimer);
+    if (hideTimer) window.clearTimeout(hideTimer);
+  };
+}, [dismissContextTooltip]);
+
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (localStorage.getItem('contextTooltipSeen') === 'true') return;
-    let hideTimer: number | undefined;
-    const showTimer = window.setTimeout(() => {
-      setShowContextTooltip(true);
-      hideTimer = window.setTimeout(() => {
+    if (!showContextTooltip) return;
+
+    const handleOutsideClick = (event: MouseEvent) => {
+      const tooltipEl = contextTooltipRef.current;
+      if (!tooltipEl) {
         dismissContextTooltip();
-      }, 6000);
-    }, 1500);
-    return () => {
-      window.clearTimeout(showTimer);
-      if (hideTimer) window.clearTimeout(hideTimer);
+        return;
+      }
+      if (!tooltipEl.contains(event.target as Node)) {
+        dismissContextTooltip();
+      }
     };
-  }, [dismissContextTooltip]);
+
+    document.addEventListener('mousedown', handleOutsideClick, true);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick, true);
+    };
+  }, [showContextTooltip, dismissContextTooltip]);
 
   useEffect(() => {
     if (showRefine && refineFacets.length === 0) {
@@ -3764,7 +3785,10 @@ Limit to 5 bullets total, cite sources inline, and end with one proactive next s
             <div className="text-xs text-gray-700 inline-flex items-center gap-2">
               <div className="relative inline-flex">
                 {showContextTooltip && (
-                  <div className="absolute -top-2 left-1/2 -translate-x-1/2 -translate-y-full bg-gray-900 text-white text-[10px] px-3 py-1.5 rounded-lg shadow-lg">
+                  <div
+                    ref={contextTooltipRef}
+                    className="absolute -top-2 left-1/2 -translate-x-1/2 -translate-y-full bg-gray-900 text-white text-[10px] px-3 py-1.5 rounded-lg shadow-lg"
+                  >
                     Tip: Save contexts to jump between research threads.
                   </div>
                 )}
