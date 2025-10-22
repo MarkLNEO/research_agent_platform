@@ -579,7 +579,14 @@ async function resolveCanonicalEntities(
       .map(term => term.trim().toLowerCase())
   );
 
-  const { aliasMap: userAliasMap } = await getUserAliasMaps(userId, client);
+  let userAliasMap: Map<string, any> = new Map();
+  try {
+    const maps = await getUserAliasMaps(userId, client);
+    userAliasMap = maps.aliasMap || new Map();
+  } catch (e) {
+    console.warn('[aliasResolver] getUserAliasMaps failed; proceeding without user aliases');
+    userAliasMap = new Map();
+  }
 
   const results: Array<{
     canonical: string;
