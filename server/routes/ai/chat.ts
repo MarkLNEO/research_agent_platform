@@ -1334,6 +1334,9 @@ export default async function handler(req: any, res: any) {
       }
     } catch {}
 
+    // Minimal safe-stream mode: bypass extras when env flag is set
+    const MINIMAL_STREAM = process.env.MINIMAL_STREAM === 'true';
+
     // Set up streaming response headers
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -1372,7 +1375,7 @@ export default async function handler(req: any, res: any) {
       try { clearTimeout(overallTimeout); } catch {}
     });
 
-    if (pendingAliasClarifications.length) {
+    if (!MINIMAL_STREAM && pendingAliasClarifications.length) {
       for (const clarification of pendingAliasClarifications) {
         safeWrite(`data: ${JSON.stringify({
           type: 'alias_clarification',
@@ -1382,10 +1385,10 @@ export default async function handler(req: any, res: any) {
         })}\n\n`);
       }
     }
-    if (pendingPreferenceEvents.length) {
+    if (!MINIMAL_STREAM && pendingPreferenceEvents.length) {
       safeWrite(`data: ${JSON.stringify({ type: 'preference_saved', preferences: pendingPreferenceEvents })}\n\n`);
     }
-    if (pendingAliasEvents.length) {
+    if (!MINIMAL_STREAM && pendingAliasEvents.length) {
       safeWrite(`data: ${JSON.stringify({ type: 'alias_learned', aliases: pendingAliasEvents })}\n\n`);
     }
 
@@ -1747,9 +1750,40 @@ export default async function handler(req: any, res: any) {
         })();
       }
 
-      // Create streaming response using GPT-5 Responses API
-      const openAIConnectStart = Date.now();
-      const stream = await openai.responses.stream({
+    // Create streaming response using GPT-5 Responses API
+    const openAIConnectStart = Date.now();
+    if (MINIMAL_STREAM) {
+      // Strict, minimal adapter: only text delta + completion
+      try {
+        const stream = await openai.responses.stream({
+          model: selectedModel,
+          instructions,
+          input,
+          text: { format: { type: 'text' }, verbosity: 'high' },
+          reasoning: { effort: reasoningEffort },
+          store: storeRun
+        }, { signal: abortController.signal });
+
+        for await (const ev of stream as any) {
+          if (ev.type === 'response.output_text.delta' && ev.delta) {
+            try { res.write(`data: ${JSON.stringify({ type: 'content', content: ev.delta })}\n\n`); } catch {}
+          } else if (ev.type === 'response.completed') {
+            try { res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`); } catch {}
+            break;
+          }
+        }
+        try { await stream.finalResponse(); } catch {}
+      } catch (e) {
+        console.error('[minimal] stream error', e);
+        try { res.write(`data: ${JSON.stringify({ type: 'error', message: 'Streaming failed' })}\n\n`); } catch {}
+      } finally {
+        try { res.write('data: [DONE]\n\n'); } catch {}
+        try { res.end(); } catch {}
+      }
+      return;
+    }
+
+    const stream = await openai.responses.stream({
         model: selectedModel,
         instructions,
         input,
