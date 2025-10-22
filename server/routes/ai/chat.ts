@@ -19,6 +19,8 @@ import type { Database } from '../../../supabase/types.js';
 // Feature flag: preferences/aliases/structured summary
 // Server reads from process.env; default OFF for safety
 const PREFS_SUMMARY_ENABLED = (process.env.PREFS_SUMMARY_ENABLED === 'true');
+// Allow quick kill-switch in prod if alias resolution causes issues
+const ALIAS_RESOLUTION_ENABLED = process.env.ALIAS_RESOLUTION_ENABLED !== 'false';
 
 const NON_RESEARCH_TERMS = new Set([
   'hi', 'hello', 'hey', 'thanks', 'thank you', 'agenda', 'notes', 'help', 'update', 'updates',
@@ -699,6 +701,8 @@ export const config = {
 };
 
 export default async function handler(req: any, res: any) {
+  // Log commit to correlate runtime with deployed version
+  try { console.log('[chat] commit', process.env.VERCEL_GIT_COMMIT_SHA || process.env.GIT_COMMIT || 'unknown'); } catch {}
   // Handle CORS
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -1082,15 +1086,18 @@ export default async function handler(req: any, res: any) {
       try {
         const aliasTerms: string[] = [];
         if (activeContextCompany) aliasTerms.push(activeContextCompany);
-        const {
-          resolved: resolvedEntities,
-          unresolved: unresolvedAliases,
-        } = await resolveCanonicalEntities(
-          user.id,
-          String(lastUserMessage.content || ''),
-          aliasTerms,
-          supabase
-        );
+        const resolvedEntities: Array<{ canonical: string; type: string; confidence: number; matched: string }> = [];
+        let unresolvedAliases: Array<{ term: string; suggestion?: string }> = [];
+        if (ALIAS_RESOLUTION_ENABLED) {
+          const out = await resolveCanonicalEntities(
+            user.id,
+            String(lastUserMessage.content || ''),
+            aliasTerms,
+            supabase
+          );
+          resolvedEntities.push(...out.resolved);
+          unresolvedAliases = out.unresolved;
+        }
         if (resolvedEntities.length) {
           (userContext as any).canonicalEntities = resolvedEntities;
           const canonicalSummary = resolvedEntities
