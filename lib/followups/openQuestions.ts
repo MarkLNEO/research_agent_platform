@@ -1,6 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database, Json } from '../../supabase/types.js';
-import { ensureTable } from '../db/ensureTables.js';
 
 type ServiceClient = SupabaseClient<Database>;
 export type OpenQuestionRow = Database['public']['Tables']['open_questions']['Row'];
@@ -31,7 +30,6 @@ export async function listOpenQuestions(
   client?: SupabaseClient<Database>
 ): Promise<OpenQuestionRow[]> {
   if (!userId) return [];
-  await ensureTable('open_questions');
   const supabase = resolveClient(client);
   const limit = Math.max(1, options.limit ?? 10);
   const { data, error } = await supabase
@@ -60,7 +58,6 @@ export async function addOpenQuestion(
   client?: SupabaseClient<Database>
 ): Promise<OpenQuestionRow | null> {
   if (!userId || !input?.question?.trim()) return null;
-  await ensureTable('open_questions');
   const supabase = resolveClient(client);
   const payload = {
     user_id: userId,
@@ -91,7 +88,6 @@ export async function resolveOpenQuestion(
   client?: SupabaseClient<Database>
 ): Promise<OpenQuestionRow | null> {
   if (!id) return null;
-  await ensureTable('open_questions');
   const supabase = resolveClient(client);
   const payload: Partial<OpenQuestionRow> = {
     resolved_at: new Date().toISOString(),

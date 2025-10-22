@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import { ensureTable } from '../db/ensureTables.js';
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 let cachedServiceClient = null;
@@ -35,7 +34,6 @@ function resolveClient(client) {
 export async function upsertPreferences(userId, preferences, client) {
     if (!userId || !Array.isArray(preferences) || preferences.length === 0)
         return [];
-    await ensureTable('user_preferences');
     const supabase = resolveClient(client);
     const sanitized = preferences
         .filter(pref => pref && typeof pref.key === 'string' && pref.key.trim().length > 0)
@@ -166,7 +164,6 @@ export async function getResolvedPreferences(userId, client) {
     if (!userId) {
         throw new Error('[preferences] userId is required');
     }
-    await ensureTable('user_preferences');
     const supabase = resolveClient(client);
     const [{ data: preferenceRows, error: prefError }, { data: promptConfig, error: configError }] = await Promise.all([
         supabase

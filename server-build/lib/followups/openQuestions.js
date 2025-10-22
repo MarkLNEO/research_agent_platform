@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import { ensureTable } from '../db/ensureTables.js';
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 let cachedClient = null;
@@ -17,7 +16,6 @@ function resolveClient(client) {
 export async function listOpenQuestions(userId, options = {}, client) {
     if (!userId)
         return [];
-    await ensureTable('open_questions');
     const supabase = resolveClient(client);
     const limit = Math.max(1, options.limit ?? 10);
     const { data, error } = await supabase
@@ -36,7 +34,6 @@ export async function listOpenQuestions(userId, options = {}, client) {
 export async function addOpenQuestion(userId, input, client) {
     if (!userId || !input?.question?.trim())
         return null;
-    await ensureTable('open_questions');
     const supabase = resolveClient(client);
     const payload = {
         user_id: userId,
@@ -58,7 +55,6 @@ export async function addOpenQuestion(userId, input, client) {
 export async function resolveOpenQuestion(id, input = {}, client) {
     if (!id)
         return null;
-    await ensureTable('open_questions');
     const supabase = resolveClient(client);
     const payload = {
         resolved_at: new Date().toISOString(),

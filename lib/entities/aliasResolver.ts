@@ -1,6 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database, Json } from '../../supabase/types.js';
-import { ensureTable } from '../db/ensureTables.js';
 
 type ServiceClient = SupabaseClient<Database>;
 type AliasRow = Database['public']['Tables']['entity_aliases']['Row'];
@@ -68,8 +67,6 @@ function populateCache(rows: AliasRow[]) {
 
 async function loadCache(client?: SupabaseClient<Database>): Promise<void> {
   if (loadPromise) return loadPromise;
-  await ensureTable('entity_aliases');
-  await ensureTable('user_entity_aliases');
   loadPromise = (async () => {
     const supabase = resolveClient(client);
     const { data, error } = await supabase
@@ -230,8 +227,6 @@ async function ensureUserAliasCache(
   if (cached && Date.now() - cached.loadedAt < USER_CACHE_TTL_MS) {
     return cached;
   }
-  await ensureTable('entity_aliases');
-  await ensureTable('user_entity_aliases');
   const supabase = resolveClient(client);
   const { data, error } = await supabase
     .from('user_entity_aliases')
@@ -272,8 +267,6 @@ export async function learnUserAlias(
   options: LearnUserAliasOptions = {}
 ): Promise<void> {
   if (!userId || !canonical || !alias) return;
-  await ensureTable('entity_aliases');
-  await ensureTable('user_entity_aliases');
   const supabase = resolveClient(options.client);
   const trimmedCanonical = canonical.trim();
   const trimmedAlias = alias.trim();
@@ -348,7 +341,6 @@ export async function learnAlias(
   options: LearnAliasOptions = {}
 ): Promise<void> {
   if (!canonical || !alias) return;
-  await ensureTable('entity_aliases');
   const supabase = resolveClient(options.client);
   const trimmedCanonical = canonical.trim();
   const trimmedAlias = alias.trim();

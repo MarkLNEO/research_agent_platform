@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import { ensureTable } from '../db/ensureTables.js';
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 let cachedClient = null;
@@ -50,8 +49,6 @@ function populateCache(rows) {
 async function loadCache(client) {
     if (loadPromise)
         return loadPromise;
-    await ensureTable('entity_aliases');
-    await ensureTable('user_entity_aliases');
     loadPromise = (async () => {
         const supabase = resolveClient(client);
         const { data, error } = await supabase
@@ -192,8 +189,6 @@ async function ensureUserAliasCache(userId, client) {
     if (cached && Date.now() - cached.loadedAt < USER_CACHE_TTL_MS) {
         return cached;
     }
-    await ensureTable('entity_aliases');
-    await ensureTable('user_entity_aliases');
     const supabase = resolveClient(client);
     const { data, error } = await supabase
         .from('user_entity_aliases')
@@ -221,8 +216,6 @@ export async function getUserAliasMaps(userId, client) {
 export async function learnUserAlias(userId, canonical, alias, options = {}) {
     if (!userId || !canonical || !alias)
         return;
-    await ensureTable('entity_aliases');
-    await ensureTable('user_entity_aliases');
     const supabase = resolveClient(options.client);
     const trimmedCanonical = canonical.trim();
     const trimmedAlias = alias.trim();
@@ -285,7 +278,6 @@ export function invalidateUserAliasCache(userId) {
 export async function learnAlias(canonical, alias, options = {}) {
     if (!canonical || !alias)
         return;
-    await ensureTable('entity_aliases');
     const supabase = resolveClient(options.client);
     const trimmedCanonical = canonical.trim();
     const trimmedAlias = alias.trim();

@@ -1,7 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database, Json } from '../../supabase/types.js';
 import type { ResolvedPrefs } from '../../shared/preferences.js';
-import { ensureTable } from '../db/ensureTables.js';
 
 export type { ResolvedPrefs } from '../../shared/preferences.js';
 
@@ -58,7 +57,6 @@ export async function upsertPreferences(
   client?: SupabaseClient<Database>
 ): Promise<string[]> {
   if (!userId || !Array.isArray(preferences) || preferences.length === 0) return [];
-  await ensureTable('user_preferences');
   const supabase = resolveClient(client);
 
   const sanitized = preferences
@@ -209,7 +207,6 @@ export async function getResolvedPreferences(
   if (!userId) {
     throw new Error('[preferences] userId is required');
   }
-  await ensureTable('user_preferences');
   const supabase = resolveClient(client);
 
   const [{ data: preferenceRows, error: prefError }, { data: promptConfig, error: configError }] = await Promise.all([
