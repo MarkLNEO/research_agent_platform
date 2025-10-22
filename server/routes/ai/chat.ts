@@ -1932,6 +1932,17 @@ export default async function handler(req: any, res: any) {
           }
         } else if (chunk.type === 'response.output_item.added') {
           const item = (chunk as any).output_item || (chunk as any).item;
+          try {
+            console.log(
+              '[DEBUG] output_item.added payload',
+              JSON.stringify({
+                id: item?.id ?? null,
+                status: item?.status ?? null,
+                content: item?.content ?? null,
+                text: item?.text ?? item?.output_text ?? null
+              }, null, 2)
+            );
+          } catch {}
           if (item) {
             if (item.id && emittedOutputItemIds.has(item.id)) {
               // Already processed this item (possible duplication when final response arrives)
