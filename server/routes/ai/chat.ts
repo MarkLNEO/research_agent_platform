@@ -1800,7 +1800,8 @@ export default async function handler(req: any, res: any) {
       let firstContentAt: number | null = null;
       let reasoningStartedAt: number | null = null;
       let contentLatencyEmitted = false;
-      let doneSent = false;
+      let completionSeen = false;
+      let anyTextEmitted = false;
 
       let keepAliveDelay = 2000;
       const scheduleKeepAlive = () => {
@@ -1878,6 +1879,7 @@ export default async function handler(req: any, res: any) {
               type: 'content',
               content: chunk.delta
             })}\n\n`);
+            anyTextEmitted = true;
             if (!firstContentSent) {
               firstContentSent = true;
               firstContentAt = Date.now();
@@ -1924,12 +1926,8 @@ export default async function handler(req: any, res: any) {
             }
             quickReasoningBuffer = '';
           }
-          // Response is complete
-          safeWrite(`data: ${JSON.stringify({
-            type: 'done',
-            response_id: (chunk as any)?.response?.id || (chunk as any)?.id || null
-          })}\n\n`);
-          doneSent = true;
+          // Mark completion; we'll emit final done after we try to surface any final text
+          completionSeen = true;
           break;
         }
 
@@ -1987,10 +1985,41 @@ export default async function handler(req: any, res: any) {
       console.log('[DEBUG] Stream processing complete. Total chunks:', chunkCount);
       console.log('[DEBUG] Total content length:', accumulatedContent.length);
 
-      // Always signal end-of-stream to the client for stability, even if finalResponse errored
+      // If no deltas came through, try to surface the final text from finalResponse
+      try {
+        if (!anyTextEmitted && finalResponseData) {
+          let finalText = '';
+          if (typeof (finalResponseData as any)?.output_text === 'string') {
+            finalText = (finalResponseData as any).output_text;
+          } else if (Array.isArray((finalResponseData as any)?.output)) {
+            const items = (finalResponseData as any).output as any[];
+            finalText = items
+              .flatMap((it: any) => Array.isArray(it?.content) ? it.content : [])
+              .filter((c: any) => c?.type === 'output_text')
+              .map((c: any) => String(c?.text || ''))
+              .join('');
+          }
+          if (finalText) {
+            accumulatedContent += finalText;
+            safeWrite(`data: ${JSON.stringify({ type: 'content', content: finalText })}\n\n`);
+            anyTextEmitted = true;
+            if (!firstContentSent) {
+              firstContentSent = true;
+              firstContentAt = Date.now();
+              safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'primary', event: 'first_delta', ttfb_ms: firstContentAt - processStart })}\n\n`);
+            }
+          }
+        }
+      } catch (surfaceErr) {
+        console.warn('Failed to surface final response text', surfaceErr);
+      }
+
+      // Signal end-of-stream after attempting to deliver any final text
       try {
         if (!responseClosed) {
-          if (!doneSent) {
+          if (completionSeen) {
+            safeWrite(`data: ${JSON.stringify({ type: 'done', response_id: finalResponseData?.id || null })}\n\n`);
+          } else {
             safeWrite(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
           }
           safeWrite('data: [DONE]\n\n');
