@@ -1835,6 +1835,60 @@ export default async function handler(req: any, res: any) {
       let quickReasoningBuffer = '';
       let quickReasoningLastEmit = 0;
 
+      const emitTextChunk = (text: string) => {
+        if (!text) return;
+        accumulatedContent += text;
+        safeWrite(`data: ${JSON.stringify({ type: 'content', content: text })}\n\n`);
+        anyTextEmitted = true;
+        if (!firstContentSent) {
+          firstContentSent = true;
+          firstContentAt = Date.now();
+          safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'primary', event: 'first_delta', ttfb_ms: firstContentAt - processStart })}\n\n`);
+          if (!contentLatencyEmitted && reasoningStartedAt != null) {
+            contentLatencyEmitted = true;
+            safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'content_latency', reasoning_to_content_ms: firstContentAt - reasoningStartedAt })}\n\n`);
+          }
+          if (keepAlive) {
+            clearTimeout(keepAlive);
+            keepAlive = null;
+          }
+        }
+      };
+
+      const extractTextsFromItem = (item: any): string[] => {
+        if (!item) return [];
+        const texts: string[] = [];
+        const tryPush = (val: any) => {
+          const candidate = typeof val === 'string' ? val : (typeof val?.text === 'string' ? val.text : null);
+          if (candidate && candidate.trim()) {
+            texts.push(candidate);
+          }
+        };
+
+        if (Array.isArray(item?.content)) {
+          for (const piece of item.content) {
+            if (!piece) continue;
+            if (typeof piece === 'string') {
+              tryPush(piece);
+            } else if (piece.type === 'output_text' || piece.type === 'text') {
+              tryPush(piece.text);
+            } else if (piece.type === 'output_text.delta' && piece.delta) {
+              tryPush(piece.delta);
+            } else if (piece.text) {
+              tryPush(piece.text);
+            }
+          }
+        }
+
+        tryPush(item?.text);
+        if (typeof item?.output_text === 'string') tryPush(item.output_text);
+        if (typeof item?.output_text?.text === 'string') tryPush(item.output_text.text);
+
+        return texts;
+      };
+
+      const emittedOutputItemIds = new Set<string>();
+
       // Process the stream
       for await (const chunk of stream as any) {
         chunkCount++;
@@ -1874,23 +1928,21 @@ export default async function handler(req: any, res: any) {
         } else if (chunk.type === 'response.output_text.delta') {
           // This is a text delta event - send the content
           if (chunk.delta) {
-            accumulatedContent += chunk.delta;
-            safeWrite(`data: ${JSON.stringify({
-              type: 'content',
-              content: chunk.delta
-            })}\n\n`);
-            anyTextEmitted = true;
-            if (!firstContentSent) {
-              firstContentSent = true;
-              firstContentAt = Date.now();
-              safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'primary', event: 'first_delta', ttfb_ms: firstContentAt - processStart })}\n\n`);
-              if (!contentLatencyEmitted && reasoningStartedAt != null) {
-                contentLatencyEmitted = true;
-                safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'content_latency', reasoning_to_content_ms: firstContentAt - reasoningStartedAt })}\n\n`);
+            emitTextChunk(chunk.delta);
+          }
+        } else if (chunk.type === 'response.output_item.added') {
+          const item = (chunk as any).output_item || (chunk as any).item;
+          if (item) {
+            if (item.id && emittedOutputItemIds.has(item.id)) {
+              // Already processed this item (possible duplication when final response arrives)
+            } else {
+              const texts = extractTextsFromItem(item);
+              for (const text of texts) {
+                emitTextChunk(text);
               }
-              if (keepAlive) {
-                clearTimeout(keepAlive);
-                keepAlive = null;
+              if (item.id) emittedOutputItemIds.add(item.id);
+              if (item.status === 'completed' || item.status === 'succeeded') {
+                completionSeen = true;
               }
             }
           }
@@ -2000,14 +2052,7 @@ export default async function handler(req: any, res: any) {
               .join('');
           }
           if (finalText) {
-            accumulatedContent += finalText;
-            safeWrite(`data: ${JSON.stringify({ type: 'content', content: finalText })}\n\n`);
-            anyTextEmitted = true;
-            if (!firstContentSent) {
-              firstContentSent = true;
-              firstContentAt = Date.now();
-              safeWrite(`data: ${JSON.stringify({ type: 'meta', stage: 'primary', event: 'first_delta', ttfb_ms: firstContentAt - processStart })}\n\n`);
-            }
+            emitTextChunk(finalText);
           }
         }
       } catch (surfaceErr) {
