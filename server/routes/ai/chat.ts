@@ -1802,6 +1802,7 @@ export default async function handler(req: any, res: any) {
       let contentLatencyEmitted = false;
       let completionSeen = false;
       let anyTextEmitted = false;
+      let capturedResponseId: string | null = null;
 
       let keepAliveDelay = 2000;
       const scheduleKeepAlive = () => {
@@ -1898,6 +1899,9 @@ export default async function handler(req: any, res: any) {
           try { console.log('[OPENAI] response.id:', chunk.response.id); } catch {}
           safeWrite(`data: ${JSON.stringify({ type: 'meta', response_id: chunk.response.id, model: selectedModel })}\n\n`);
           metaSent = true;
+        }
+        if (chunk?.response?.id && !capturedResponseId) {
+          capturedResponseId = chunk.response.id;
         }
         if ((chunk.type === 'response.reasoning_summary_text.delta' || chunk.type === 'response.reasoning.delta')) {
           const delta = chunk.delta || '';
@@ -2068,6 +2072,44 @@ export default async function handler(req: any, res: any) {
         }
       } catch (surfaceErr) {
         console.warn('Failed to surface final response text', surfaceErr);
+      }
+
+      // Fallback: retrieve response from API if needed
+      let authoritativeId = finalResponseData?.id || capturedResponseId;
+      if ((!anyTextEmitted || !completionSeen) && authoritativeId) {
+        const delays = [200, 400, 800, 1600, 2600];
+        let retrieved: any = null;
+        for (const delay of delays) {
+          try {
+            retrieved = await openai.responses.retrieve(authoritativeId);
+            if (retrieved?.status && retrieved.status !== 'in_progress' && retrieved.status !== 'queued') {
+              break;
+            }
+          } catch (retrieveErr) {
+            console.warn('retrieve response failed', retrieveErr);
+          }
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+        if (retrieved) {
+          try {
+            const outputs: any[] = Array.isArray(retrieved?.output) ? retrieved.output : [];
+            for (const item of outputs) {
+              const texts = extractTextsFromItem(item);
+              for (const text of texts) {
+                emitTextChunk(text);
+              }
+            }
+            if (!anyTextEmitted && typeof retrieved?.output_text === 'string') {
+              emitTextChunk(retrieved.output_text);
+            }
+            if (outputs.length > 0 || anyTextEmitted) {
+              completionSeen = true;
+              finalResponseData = finalResponseData || retrieved;
+            }
+          } catch (retrieveProcessErr) {
+            console.warn('Failed to process retrieved response output', retrieveProcessErr);
+          }
+        }
       }
 
       // Signal end-of-stream after attempting to deliver any final text
