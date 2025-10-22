@@ -1753,7 +1753,8 @@ export default async function handler(req: any, res: any) {
         model: selectedModel,
         instructions,
         input,
-        text: { format: { type: 'text' }, verbosity: 'low' },
+        // Request verbose text streaming so OpenAI emits output_text.delta events
+        text: { format: { type: 'text' }, verbosity: 'verbose' },
         reasoning: { effort: reasoningEffort },
         tools: useTools ? [{ type: 'web_search' }] : [],
         parallel_tool_calls: useTools,
