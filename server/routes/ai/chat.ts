@@ -1800,6 +1800,7 @@ export default async function handler(req: any, res: any) {
       let firstContentAt: number | null = null;
       let reasoningStartedAt: number | null = null;
       let contentLatencyEmitted = false;
+      let doneSent = false;
 
       let keepAliveDelay = 2000;
       const scheduleKeepAlive = () => {
@@ -1912,7 +1913,7 @@ export default async function handler(req: any, res: any) {
           if (String(name).includes('web_search')) {
             safeWrite(`data: ${JSON.stringify({ type: 'web_search', query, sources })}\n\n`);
           }
-        } else if (chunk.type === 'response.completed') {
+        } else if (chunk.type === 'response.completed' || chunk.type === 'response.output_item.done') {
           // Flush any remaining compacted quick-mode reasoning
           if (quickReasoningBuffer.trim()) {
             const lines = quickReasoningBuffer.split(/\n+/).filter(Boolean);
@@ -1926,8 +1927,9 @@ export default async function handler(req: any, res: any) {
           // Response is complete
           safeWrite(`data: ${JSON.stringify({
             type: 'done',
-            response_id: chunk.response?.id || chunk.id
+            response_id: (chunk as any)?.response?.id || (chunk as any)?.id || null
           })}\n\n`);
+          doneSent = true;
           break;
         }
 
@@ -1985,7 +1987,20 @@ export default async function handler(req: any, res: any) {
       console.log('[DEBUG] Stream processing complete. Total chunks:', chunkCount);
       console.log('[DEBUG] Total content length:', accumulatedContent.length);
 
-      const shouldGenerateTldr = false; // Generate summaries only on demand (no live TL;DR streaming)
+      // Always signal end-of-stream to the client for stability, even if finalResponse errored
+      try {
+        if (!responseClosed) {
+          if (!doneSent) {
+            safeWrite(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+          }
+          safeWrite('data: [DONE]\n\n');
+          responseClosed = true;
+        }
+      } catch (tailErr) {
+        console.warn('Failed to emit final [DONE]', tailErr);
+      }
+
+      const shouldGenerateTldr = false; // Summaries disabled by default; keep logic intact for opt-in
       if (shouldGenerateTldr) {
         try {
           safeWrite(`data: ${JSON.stringify({ type: 'tldr_status', content: 'Preparing high level summary…' })}\n\n`);
