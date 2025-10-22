@@ -41,13 +41,23 @@ export const SetupSummaryModal: FC<SetupSummaryModalProps> = ({ open, loading, d
     </span>
   );
 
+  const prettyFocus = (s: string): string => {
+    const map: Record<string, string> = {
+      customers: 'Customer base',
+      competitors: 'Competitors',
+      partners: 'Partner ecosystem',
+      titles: 'Target roles',
+    };
+    return map[s as keyof typeof map] || (s?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || '');
+  };
+
   const renderList = (items?: string[], emptyText?: string) => {
     if (!items || items.length === 0) {
       return emptyText ? <p className="text-sm text-gray-500">{emptyText}</p> : null;
     }
     return (
       <div className="flex flex-wrap gap-2">
-        {items.map(item => badge(item))}
+        {items.map(item => badge(prettyFocus(item)))}
       </div>
     );
   };
@@ -223,4 +233,3 @@ export const SetupSummaryModal: FC<SetupSummaryModalProps> = ({ open, loading, d
     </div>
   );
 };
-

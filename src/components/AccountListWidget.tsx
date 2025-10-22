@@ -189,7 +189,20 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
                 if (typeof onViewSetup === 'function') {
                   onViewSetup();
                 } else {
-                  try { window.dispatchEvent(new Event('setup-summary:open')); } catch {}
+                  // Try event for in-page listeners
+                  let handled = false;
+                  try {
+                    const evt = new Event('setup-summary:open');
+                    window.dispatchEvent(evt);
+                    handled = true;
+                  } catch {}
+                  // Fallback: navigate to research route with query that triggers the modal
+                  if (!handled) {
+                    try {
+                      const url = '/research?q=' + encodeURIComponent('View my setup');
+                      window.location.assign(url);
+                    } catch {}
+                  }
                 }
               }}
               className="px-2 py-1 text-xs font-semibold text-blue-700 hover:text-blue-800 hover:underline transition-colors"
@@ -287,6 +300,13 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
             {accounts.map(account => {
               const isStale = isAccountStale(account);
               const latestResearch = account.research_history?.[0];
+              const signalCount = typeof account.signal_count === 'number'
+                ? account.signal_count
+                : Array.isArray((account as any)?.recent_signals)
+                  ? ((account as any).recent_signals as Array<any>).length
+                  : 0;
+              const hasSignals = signalCount > 0;
+              const hasUnviewedSignals = (account.unviewed_signal_count || 0) > 0;
 
               return (
                 <button
@@ -310,7 +330,7 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
                           {getPriorityIcon(account.priority)}
                           <span className="uppercase tracking-wide">{priorityLabel[account.priority] ?? account.priority}</span>
                         </span>
-                        {(account.unviewed_signal_count || 0) > 0 && (
+                        {hasUnviewedSignals && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700 rounded-full animate-pulse">
                             <AlertCircle className="w-3 h-3" />
                             {account.unviewed_signal_count} new
@@ -326,7 +346,7 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
                       )}
 
                       <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-gray-600">
-                        {account.latest_signal_summary && (
+                        {hasSignals && account.latest_signal_summary && (
                           <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-50 text-red-700 rounded-full border border-red-100">
                             <AlertCircle className="w-3 h-3" />
                             <span>{account.latest_signal_summary}</span>
@@ -349,7 +369,7 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
                       </div>
 
                       <div className="mt-2 text-xs text-gray-500 space-y-1">
-                        {account.latest_signal_relative && (
+                        {hasSignals && account.latest_signal_relative && (
                           <div>Latest signal {formatRelative(account.latest_signal_relative)}</div>
                         )}
                         {account.last_researched_relative && (
@@ -380,9 +400,13 @@ export function AccountListWidget({ onAccountClick, onAddAccount, onResearchAcco
                             event.stopPropagation();
                             onAccountClick(account);
                           }}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 border border-red-100 rounded-full hover:bg-red-100"
+                          className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-full border transition-colors ${
+                            hasSignals
+                              ? 'text-red-700 bg-red-50 border-red-100 hover:bg-red-100'
+                              : 'text-gray-600 bg-gray-100 border-gray-200 hover:bg-gray-200'
+                          }`}
                         >
-                          Review signals
+                          {hasSignals ? 'Review signals' : 'Signals (0)'}
                         </button>
                         {onResearchAccount && (
                           <button
@@ -517,6 +541,14 @@ function TrackedAccountsModal({
             <div className="divide-y divide-gray-100">
               {accounts.map(account => {
                 const isStale = isAccountStale(account);
+                const signalCount = typeof account.signal_count === 'number'
+                  ? account.signal_count
+                  : Array.isArray((account as any)?.recent_signals)
+                    ? ((account as any).recent_signals as Array<any>).length
+                    : 0;
+                const hasSignals = signalCount > 0;
+                const hasUnviewedSignals = (account.unviewed_signal_count || 0) > 0;
+
                 return (
                   <div key={`modal-${account.id}`} className="px-6 py-4">
                     <div className="flex items-start justify-between gap-3">
@@ -531,7 +563,7 @@ function TrackedAccountsModal({
                           }`}>
                             {account.priority.toUpperCase()}
                           </span>
-                          {(account.unviewed_signal_count || 0) > 0 && (
+                          {hasUnviewedSignals && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold bg-red-100 text-red-700 rounded-full">
                               <AlertCircle className="w-3 h-3" />
                               {account.unviewed_signal_count} new
@@ -541,7 +573,7 @@ function TrackedAccountsModal({
                         <h4 className="text-sm font-semibold text-gray-900" title={account.company_name}>{account.company_name}</h4>
                         {account.industry && <p className="text-xs text-gray-600">{account.industry}</p>}
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-600">
-                          {account.latest_signal_summary && (
+                          {hasSignals && account.latest_signal_summary && (
                             <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-50 text-red-700 rounded-full border border-red-100">
                               <AlertCircle className="w-3 h-3" />
                               {account.latest_signal_summary}
@@ -554,7 +586,7 @@ function TrackedAccountsModal({
                           )}
                         </div>
                         <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
-                          {account.latest_signal_relative && (
+                          {hasSignals && account.latest_signal_relative && (
                             <span>Latest signal {account.latest_signal_relative}</span>
                           )}
                           {account.last_researched_relative && (
@@ -565,9 +597,13 @@ function TrackedAccountsModal({
                           <button
                             type="button"
                             onClick={() => { onAccountClick(account); onClose(); }}
-                            className="px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 border border-red-100 rounded-full hover:bg-red-100"
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-full border transition-colors ${
+                              hasSignals
+                                ? 'text-red-700 bg-red-50 border-red-100 hover:bg-red-100'
+                                : 'text-gray-600 bg-gray-100 border-gray-200 hover:bg-gray-200'
+                            }`}
                           >
-                            Review signals
+                            {hasSignals ? 'Review signals' : 'Signals (0)'}
                           </button>
                           {onResearchAccount && (
                             <button

@@ -106,6 +106,13 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
     return preferred || candidates[0] || '';
   };
 
+  const normalizeName = (name: string): string =>
+    (name || '')
+      .toLowerCase()
+      .replace(/[^a-z\s]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
   const runEnrichment = async (manual = false, isCanceled?: () => boolean) => {
     try {
       const names = (Array.isArray(research?.leadership_team) ? research.leadership_team : []).slice(0, 6).map((l: any) => ({ name: l?.name || '', title: l?.title || l?.role || '' })).filter(x => x.name);
@@ -126,7 +133,9 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
       if (isCanceled && isCanceled()) return;
       const map: Record<string, { email?: string; linkedin_url?: string | null }> = {};
       for (const c of (data?.contacts || [])) {
-        map[(c.name || '').toLowerCase()] = { email: c.email || undefined, linkedin_url: c.linkedin_url || null };
+        const key = normalizeName(c?.name || '');
+        if (!key) continue;
+        map[key] = { email: c.email || undefined, linkedin_url: c.linkedin_url || null };
       }
       setEnriched(map);
       const count = Object.values(map).filter(x => x.email).length;
@@ -329,13 +338,17 @@ export function ResearchOutput({ research, onExportPDF, onExportCSV }: ResearchO
                 <div className="flex-1">
                   <div className="font-semibold text-gray-900">{leader.name}</div>
                   <div className="text-sm text-gray-600">{leader.title || leader.role}</div>
-                  {enriched[String(leader.name || '').toLowerCase()]?.email && (
-                    <div className="text-sm text-gray-700">
-                      <a href={`mailto:${enriched[String(leader.name || '').toLowerCase()].email}`} className="text-blue-700 hover:underline">
-                        {enriched[String(leader.name || '').toLowerCase()].email}
-                      </a>
-                    </div>
-                  )}
+                  {(() => {
+                    const key = normalizeName(String(leader.name || ''));
+                    const rec = key ? enriched[key] : undefined;
+                    return rec?.email ? (
+                      <div className="text-sm text-gray-700">
+                        <a href={`mailto:${rec.email}`} className="text-blue-700 hover:underline">
+                          {rec.email}
+                        </a>
+                      </div>
+                    ) : null;
+                  })()}
                   {leader.linkedin && (
                     <a
                       href={leader.linkedin}

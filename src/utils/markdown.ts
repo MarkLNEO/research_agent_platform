@@ -207,5 +207,17 @@ export function normalizeMarkdown(raw: string, opts?: { enforceResearchSections?
     text += `\n\n## Sources\n` + Array.from(new Set(Array.from(text.matchAll(/https?:[^\s)\]]+/g)).map(m => m[0]))).slice(0, 8).map(u => `- ${u}`).join('\n');
   }
 
+  // Humanize internal field names that may leak into assistant text
+  // Keep replacements conservative and outside of code fences (already stripped/normalized above)
+  const HUMANIZE_MAP: Array<{ pattern: RegExp; to: string }> = [
+    { pattern: /\btarget_titles\b/gi, to: 'target titles' },
+    { pattern: /\bsignal_preferences\b/gi, to: 'signal alerts' },
+    { pattern: /\bindicator_choices\b/gi, to: 'watch-list items' },
+    { pattern: /\bpreferred_terms\.indicators_label\b/gi, to: 'your preferred term for signals' },
+  ];
+  for (const { pattern, to } of HUMANIZE_MAP) {
+    text = text.replace(pattern, to);
+  }
+
   return text;
 }
